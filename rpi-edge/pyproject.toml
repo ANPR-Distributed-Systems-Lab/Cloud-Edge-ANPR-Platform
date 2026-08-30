@@ -2,4 +2,9 @@
 name = "rpi-edge"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "gpiozero>=2.0.1.post3",
+    "lgpio>=0.2.2.0 ; sys_platform == 'linux'",
+    "rplcd>=1.4.0",
+    "smbus2>=0.6.1 ; sys_platform == 'linux'",
+]

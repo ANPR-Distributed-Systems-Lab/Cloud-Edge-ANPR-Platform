@@ -307,6 +307,128 @@ default overwrites the last line with a status message):
 docker compose logs -f
 ```
 
+## 11. GPIO and I2C peripherals (e.g. an LCD display)
+
+Physical GPIO/I2C access needs setup on two separate layers: the Pi's host
+OS (kernel-level, one-time) and the container (device access, one-time
+compose config). This applies to any GPIO peripheral (LEDs, buttons,
+buzzers) and any I2C peripheral (LCDs, sensors, RTC modules, etc.).
+
+### GPIO — high-level library
+
+Use **`gpiozero`** for GPIO, not the classic `RPi.GPIO`:
+
+```bash
+uv add gpiozero
+```
+
+> **Pi 5 note:** `RPi.GPIO` does not support Pi 5's GPIO chip (RP1) at all.
+> `gpiozero` is the Raspberry Pi Foundation's own high-level library and
+> picks the correct low-level backend automatically.
+
+`gpiozero` itself is only the high-level API — it still needs a low-level
+"pin factory" backend to actually talk to hardware. On Pi 5 that's
+**`lgpio`**. Without it, any GPIO object (`LED(17)`, etc.) raises
+`gpiozero.exc.BadPinFactory: Unable to load any default pin factory!` at
+runtime.
+
+```bash
+uv add "lgpio; sys_platform == 'linux'"
+```
+
+The `sys_platform == 'linux'` marker keeps this out of the local Windows
+`.venv` (it needs a Linux GPIO character device and a C compiler to build —
+neither applies on Windows, and it isn't imported directly in application
+code anyway, so skipping it locally causes no IDE issues).
+
+`lgpio` is a C extension and may not have a prebuilt wheel for every
+platform, so the Dockerfile needs build tools available before `uv sync`:
+
+```dockerfile
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential \
+    && rm -rf /var/lib/apt/lists/*
+```
+
+### I2C — enabling the bus on the host
+
+I2C is disabled by default on Raspberry Pi OS. This is a host-level kernel
+setting — it cannot be done from inside a container. Over SSH, on the Pi:
+
+```bash
+sudo raspi-config nonint do_i2c 0
+```
+
+```bash
+sudo reboot
+```
+
+Verify the device node exists:
+
+```bash
+ls /dev/i2c*
+```
+
+Should list `/dev/i2c-1`. Install `i2c-tools` and scan the bus to find a
+connected device's address (e.g. an LCD's PCF8574 I2C backpack — typically
+`0x27` or `0x3f`):
+
+```bash
+sudo apt install -y i2c-tools
+```
+
+```bash
+i2cdetect -y 1
+```
+
+### Container device access
+
+Both GPIO and I2C device nodes under `/dev` need to be reachable from
+inside the container. The simplest approach for local development is
+running the container in privileged mode, which grants access to the
+host's entire `/dev` (exact device-node numbering, e.g. which `gpiochipN`
+maps to the header pins, varies with kernel/OS version on Pi 5, so this
+avoids having to pin one down):
+
+```yaml
+services:
+  rpi-edge:
+    build: .
+    privileged: true
+```
+
+### I2C peripheral libraries (example: an HD44780 LCD via PCF8574)
+
+```bash
+uv add rplcd
+```
+
+```bash
+uv add "smbus2; sys_platform == 'linux'"
+```
+
+`smbus2` is the low-level library `RPLCD`'s I2C mode is built on; it relies
+on the Linux-only `fcntl` module, so it's marked Linux-only the same way as
+`lgpio`. `RPLCD` itself is pure Python with no compiled extensions, so
+unlike `lgpio`/`smbus2` it's left **without** a platform marker — installing
+it locally on Windows too is harmless (it will never actually be run there)
+and keeps the IDE able to resolve `from RPLCD.i2c import CharLCD` instead of
+underlining it as an unresolved import.
+
+```python
+from RPLCD.i2c import CharLCD
+
+lcd = CharLCD(
+    i2c_expander='PCF8574',
+    address=0x27,       # from i2cdetect
+    port=1,              # /dev/i2c-1
+    cols=20, rows=4,      # match your display's actual size
+    dotsize=8,
+    charmap='A02',
+    auto_linebreaks=True,
+)
+lcd.write_string('Hello RPi!')
+```
+
 ## Troubleshooting
 
 **`permission denied` on `docker run` despite being added to the `docker`
@@ -338,3 +460,16 @@ docker exec <container> python3 -c "import socket; print(socket.gethostbyname('p
 
 If that fails, the issue is in routing/NAT on the Pi side (e.g. missing
 `ip_forward`), not in the project itself.
+
+**`gpiozero.exc.BadPinFactory: Unable to load any default pin factory!`**
+No low-level GPIO backend is installed (`lgpio`, `RPi.GPIO`, `pigpio`) — see
+section 11. On Pi 5, install `lgpio`. Also make sure the container has
+device access (`privileged: true`).
+
+**LCD backlight is on but no text is visible (and no exception was
+raised).** Almost always the contrast potentiometer on the back of the
+PCF8574 I2C backpack, not a code issue — a successful `CharLCD(...)` call
+with no error already confirms I2C communication is working. Turn the
+small trimmer potentiometer slowly through its full range with a
+screwdriver while the script is running; the readable range is often
+narrow.

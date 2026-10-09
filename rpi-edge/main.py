@@ -1,30 +1,43 @@
-from gpiozero import LED, Buzzer, Button
-from signal import pause
-from RPLCD.i2c import CharLCD
+"""Data collection tool: tune the camera from a browser, take test shots, record frames to a USB stick.
 
-lcd = CharLCD(
-    i2c_expander='PCF8574',
-    address=0x27,
-    port=1,
-    cols=20,
-    rows=4,
-    dotsize=8,
-    charmap='A02',
-    auto_linebreaks=True,
-)
+Open http://<pi-address>:8000/ . See DATA_COLLECTION.md.
+"""
+import os
+import signal
+import threading
 
-led = LED(17)
-buzzer = Buzzer(27)
-button = Button(22)
+from camera_service import CameraService
+from hardware import Hardware
+from jsonlog import log
+from settings import SettingsStore
+from storage import Storage
+from web import App, make_server
 
-def pressed():
-    led.blink(0.03, 0.03, 10)
-    buzzer.blink(0.03, 0.03, 10)
-    lcd.write_string("Test! ")
-
-lcd.clear()
-button.when_pressed = pressed
+PORT = int(os.environ.get("PORT", 8000))
 
 
+def main() -> None:
+    store = SettingsStore()
+    storage = Storage()
+    camera = CameraService(store, storage)
+    stop = threading.Event()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(sig, lambda *_: stop.set())
 
-pause()
+    camera.start()
+    http = make_server(App(store, storage, camera), PORT)
+    threading.Thread(target=http.serve_forever, name="http", daemon=True).start()
+    hardware = Hardware(camera)
+    log("started", port=PORT)
+
+    stop.wait()
+
+    log("shutting_down")
+    hardware.close()
+    camera.close()  # stops recording first, so the last frames are flushed
+    storage.eject()
+    http.shutdown()
+
+
+if __name__ == "__main__":
+    main()

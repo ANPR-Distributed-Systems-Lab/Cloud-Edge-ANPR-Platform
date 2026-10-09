@@ -1,15 +1,33 @@
 services:
-  test1:
+  rpi-edge:
     build: .
-    privileged: true
+    privileged: true          # camera, GPIO, I2C and mounting the USB stick
+    network_mode: host        # serves port 8000 on the Pi itself and lets the app show its own IP on the LCD
+    restart: unless-stopped   # comes back by itself after power-up in the car
+    stop_grace_period: 40s    # time to flush the last frames and unmount the USB stick on `docker stop`
+    volumes:
+      - /dev:/dev                # camera, USB hot-plug, and picamera2 uses system RAM for buffers when it sees the host's /dev
+      - /run/udev:/run/udev:ro   # libcamera finds the camera through the udev database
+      - rpi-edge-config:/config  # saved settings survive rebuilds
     develop:
       watch:
-        - action: sync
+        - action: sync+restart
           path: .
           target: /app
           ignore:
             - .venv/
+            - .git/
+            - .idea/
+            - Dockerfile
+            - docker-compose.yaml
+            - pyproject.toml
+            - uv.lock
         - action: rebuild
           path: pyproject.toml
         - action: rebuild
           path: uv.lock
+        - action: rebuild
+          path: Dockerfile
+
+volumes:
+  rpi-edge-config:

@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rpi-edge: data collection</title>
+<style>
+  :root { --bg:#0f1115; --panel:#181b22; --line:#2a2f3a; --text:#e6e8ec; --dim:#8b93a3; --acc:#4da3ff; --ok:#3ecf8e; --warn:#f5b942; --bad:#ff5d5d; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui, sans-serif; }
+  header { position:sticky; top:0; z-index:5; display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:8px 12px; background:#0b0d11; border-bottom:1px solid var(--line); }
+  header h1 { font-size:15px; margin:0 8px 0 0; }
+  .chip { padding:2px 9px; border-radius:99px; background:var(--panel); border:1px solid var(--line); white-space:nowrap; }
+  .chip.ok { border-color:var(--ok); color:var(--ok); } .chip.warn { border-color:var(--warn); color:var(--warn); } .chip.bad { border-color:var(--bad); color:var(--bad); }
+  main { display:grid; grid-template-columns:minmax(0,1.1fr) minmax(0,1fr); gap:12px; padding:12px; max-width:1500px; margin:0 auto; }
+  @media (max-width: 900px) { main { grid-template-columns:1fr; } }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px; margin-bottom:12px; }
+  section h2 { font-size:14px; margin:0 0 10px; color:var(--acc); text-transform:uppercase; letter-spacing:.04em; }
+  .col { min-width:0; }
+  .row { display:flex; align-items:center; gap:8px; margin:6px 0; flex-wrap:wrap; }
+  .row > label { min-width:150px; color:var(--dim); }
+  input[type=range] { flex:1; min-width:140px; accent-color:var(--acc); }
+  input[type=number], select { background:#0f1115; color:var(--text); border:1px solid var(--line); border-radius:6px; padding:5px 7px; }
+  input[type=number] { width:110px; }
+  .num { white-space:nowrap; color:var(--dim); } .num input[type=number] { width:92px; }
+  .val { min-width:150px; font-variant-numeric: tabular-nums; }
+  button { background:#232834; color:var(--text); border:1px solid var(--line); border-radius:8px; padding:9px 14px; font-size:14px; cursor:pointer; }
+  button:hover { border-color:var(--acc); } button:disabled { opacity:.45; cursor:default; }
+  button.primary { background:var(--acc); color:#04121f; border-color:var(--acc); font-weight:600; }
+  button.rec { background:var(--bad); border-color:var(--bad); color:#fff; font-weight:600; }
+  .modes label { display:flex; gap:8px; align-items:flex-start; margin:3px 0; color:var(--text); min-width:0; }
+  .modes small { color:var(--dim); display:block; }
+  .hint, .dim { color:var(--dim); }
+  .hint { font-size:12px; margin:4px 0; }
+  #previewWrap { position:relative; background:#000; border-radius:8px; overflow:hidden; cursor:crosshair; }
+  #preview { display:block; width:100%; height:auto; }
+  #roi { position:absolute; border:2px solid var(--warn); box-shadow:0 0 0 1px #000; pointer-events:none; display:none; }
+  #focusBox img { image-rendering:pixelated; width:100%; max-width:960px; background:#000; border-radius:6px; }
+  .big { font-size:26px; font-variant-numeric: tabular-nums; }
+  #snapWrap { max-height:420px; overflow:auto; background:#000; border-radius:6px; margin-top:8px; }
+  #snapWrap img { display:block; width:100%; } #snapWrap.full img { width:auto; max-width:none; }
+  .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; margin:10px 0; }
+  .stat { background:#0f1115; border:1px solid var(--line); border-radius:8px; padding:8px; }
+  .stat b { display:block; font-size:18px; font-variant-numeric: tabular-nums; } .stat span { color:var(--dim); font-size:12px; }
+  #toast { position:fixed; left:50%; bottom:16px; transform:translateX(-50%); background:#2a1416; color:#ffb3b3; border:1px solid var(--bad); padding:10px 16px; border-radius:8px; display:none; max-width:90vw; z-index:10; }
+  .hidden { display:none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>rpi-edge</h1>
+  <span class="chip" id="chipCam">camera…</span>
+  <span class="chip" id="chipFps">–</span>
+  <span class="chip" id="chipUsb">USB…</span>
+  <span class="chip" id="chipRec">not recording</span>
+  <span class="chip" id="chipSys">–</span>
+</header>
+
+<main>
+  <div class="col">
+    <section>
+      <h2>Live preview</h2>
+      <div id="previewWrap"><img id="preview" alt="live preview"><div id="roi"></div></div>
+      <div class="hint">Click the preview to choose the point to focus on (the yellow frame is the area shown in the 1:1 view).</div>
+      <div class="row dim" id="live">–</div>
+    </section>
+
+    <section>
+      <h2>2. Photo and focus</h2>
+      <div class="row">
+        <button class="primary" id="btnSnap">Take photo (full resolution)</button>
+        <button id="btnFocus">1:1 focus view: off</button>
+      </div>
+      <div id="focusBox" class="hidden">
+        <div class="row"><span>Sharpness:</span> <span class="big" id="sharp">–</span> <span class="dim">max: <b id="sharpMax">–</b></span> <button id="btnSharpReset">Reset max</button></div>
+        <img id="focusImg" alt="1:1 focus view">
+        <div class="hint">This is a part of the sensor shown at 1:1 scale (not downscaled). Turn the focus ring on the lens until the sharpness number is as high as possible. Compare readings only for the same scene and the same light.</div>
+      </div>
+      <div id="snapBox" class="hidden">
+        <div class="row dim" id="snapInfo"></div>
+        <div class="row">
+          <button id="btnSnapZoom">Show at 1:1 scale</button>
+          <a href="/snapshot.jpg" target="_blank" style="color:var(--acc)">open in a new tab</a>
+        </div>
+        <div id="snapWrap"><img id="snapImg" alt="photo"></div>
+      </div>
+    </section>
+  </div>
+
+  <div class="col">
+    <section>
+      <h2>1. Image settings</h2>
+      <div class="modes" id="modes">
+        <label><input type="radio" name="mode" value="manual"><span>Manual<small>fixed exposure time and fixed gain</small></span></label>
+        <label><input type="radio" name="mode" value="auto"><span>Auto: exposure time first, then gain<small>brightness is balanced by exposure time (never longer than its limit) and only then by gain (up to its limit)</small></span></label>
+        <label><input type="radio" name="mode" value="auto_gain"><span>Auto gain, fixed exposure time<small>exposure time stays fixed, gain is adjusted automatically</small></span></label>
+        <label><input type="radio" name="mode" value="auto_exposure"><span>Auto exposure time, fixed gain<small>gain stays fixed, exposure time is adjusted automatically up to its limit</small></span></label>
+      </div>
+
+      <div class="row" data-for="manual auto_gain"><label>Exposure time</label><input type="range" id="exposure_us" min="0" max="1000">
+        <span class="num"><input type="number" id="exposure_us_n" min="30" max="1000000" step="10"> µs</span>
+        <span class="num">1/<input type="number" id="exposure_us_d" min="1" step="1"> s</span></div>
+      <div class="row" data-for="manual auto_exposure"><label>Gain (ISO)</label><input type="range" id="gain" min="0" max="1000">
+        <span class="num"><input type="number" id="gain_n" min="1" max="22" step="0.1"> ×</span>
+        <span class="num">ISO <input type="number" id="gain_iso" min="100" max="2200" step="10"></span></div>
+      <div class="row" data-for="auto auto_exposure"><label>Exposure time limit</label><input type="range" id="max_exposure_us" min="0" max="1000">
+        <span class="num"><input type="number" id="max_exposure_us_n" min="30" max="1000000" step="10"> µs</span>
+        <span class="num">1/<input type="number" id="max_exposure_us_d" min="1" step="1"> s</span></div>
+      <div class="row" data-for="auto auto_gain"><label>Gain limit</label><input type="range" id="max_gain" min="0" max="1000">
+        <span class="num"><input type="number" id="max_gain_n" min="1" max="22" step="0.1"> ×</span>
+        <span class="num">ISO <input type="number" id="max_gain_iso" min="100" max="2200" step="10"></span></div>
+      <div class="row" data-for="auto auto_gain auto_exposure"><label>Target brightness</label><input type="range" id="target_brightness" min="10" max="80">
+        <span class="num"><input type="number" id="target_brightness_n" min="10" max="80" step="1"> %</span></div>
+      <div class="hint">You can type exact values in the fields next to the sliders (confirm with Enter or by leaving the field). Gain 1.0 is about ISO 100, gain 4.0 about ISO 400. A short exposure (for example 1/1000 s) freezes moving cars, and gain makes up for the missing light. The exposure cannot be longer than one sensor frame. The camera rounds the exposure time and the gain to its own steps (for example 1000 µs may become 992 µs). The real values are shown in the "Current" line and in <code>frames.csv</code>.</div>
+
+      <div class="row"><label>White balance</label>
+        <select id="wb_mode">
+          <option value="auto">auto</option><option value="daylight">daylight</option><option value="cloudy">cloudy</option>
+          <option value="tungsten">tungsten</option><option value="fluorescent">fluorescent</option><option value="indoor">indoor</option><option value="manual">manual (red/blue gains)</option>
+        </select>
+        <button id="btnLockWb">Lock current</button>
+      </div>
+      <div class="row" data-wb="manual"><label>Red gain</label><input type="range" id="red_gain" min="50" max="600"><span class="num"><input type="number" id="red_gain_n" min="0.5" max="8" step="0.05"></span></div>
+      <div class="row" data-wb="manual"><label>Blue gain</label><input type="range" id="blue_gain" min="50" max="600"><span class="num"><input type="number" id="blue_gain_n" min="0.5" max="8" step="0.05"></span></div>
+      <div class="hint">For a data set, a fixed white balance (daylight, or "Lock current") is better than automatic, because automatic changes the colours between frames.</div>
+
+      <hr style="border-color:var(--line)">
+      <div class="row"><label>Frames per second (recording)</label><input type="number" id="fps" min="0.1" step="0.1"><span class="dim" id="fpsInfo"></span></div>
+      <div class="row"><label>Recording resolution</label><select id="resolution"></select></div>
+      <div class="row"><label>JPEG quality</label><input type="number" id="jpeg_quality" min="50" max="100" step="1"></div>
+      <div class="row"><label>Stop when free space is below</label><input type="number" id="min_free_mb" min="50" step="50"> MB</div>
+      <div class="row"><label>Image orientation</label>
+        <label style="min-width:0"><input type="checkbox" id="hflip"> flip horizontally</label>
+        <label style="min-width:0"><input type="checkbox" id="vflip"> flip vertically</label>
+        <span class="dim">both = rotate 180°. Rotating by 90° is not supported by the hardware, so mount the camera in landscape</span></div>
+      <div class="row"><label>Autostart after power-up</label><input type="checkbox" id="autostart"><span class="dim">starts recording by itself as soon as the USB stick is ready</span></div>
+      <div class="hint" id="recLock"></div>
+    </section>
+
+    <section>
+      <h2>3. Recording</h2>
+      <div class="row">
+        <button class="rec" id="btnStart">● Start recording</button>
+        <button id="btnStop" disabled>■ Stop</button>
+        <button id="btnMount">Mount USB stick</button>
+        <button id="btnEject">Safely eject USB stick</button>
+      </div>
+      <div class="hint" id="usbMsg"></div>
+      <div class="stats" id="stats"></div>
+    </section>
+  </div>
+</main>
+<div id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let state = null, pending = {}, sendTimer = null, focusOn = false, sharpMax = 0, focusUrl = null, snapZoom = false;
+
+// --- slider <-> value mappings (exposure and gain are logarithmic) -----------------------------------------
+const T_MIN = 30, T_MAX = 100000, G_MAX = 22;
+const posToUs = (p) => Math.round(T_MIN * Math.pow(T_MAX / T_MIN, p / 1000));
+const usToPos = (us) => Math.log(us / T_MIN) / Math.log(T_MAX / T_MIN) * 1000;
+const posToGain = (p) => Math.pow(G_MAX, p / 1000);
+const gainToPos = (g) => Math.log(g) / Math.log(G_MAX) * 1000;
+const shutter = (us) => us >= 100000 ? (us / 1e6).toFixed(2) + " s" : "1/" + Math.round(1e6 / us) + " s";
+const fmtBytes = (b) => b >= 1e9 ? (b / 1e9).toFixed(1) + " GB" : b >= 1e6 ? (b / 1e6).toFixed(1) + " MB" : Math.round(b / 1e3) + " KB";
+const fmtTime = (s) => { const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60); return (h ? h + " h " : "") + m + " min " + (s % 60) + " s"; };
+
+function toast(msg) { const t = $("toast"); t.textContent = msg; t.style.display = "block"; clearTimeout(toast.h); toast.h = setTimeout(() => t.style.display = "none", 6000); }
+
+async function api(path, body) {
+  try {
+    const r = await fetch(path, body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const j = await r.json();
+    if (!j.ok) { toast(j.error || "Error"); }
+    return j;
+  } catch (e) { toast("No connection to the device"); return { ok: false }; }
+}
+
+function patchSettings(section, values) {
+  pending[section] = Object.assign(pending[section] || {}, values);
+  clearTimeout(sendTimer);
+  sendTimer = setTimeout(async () => {
+    const body = pending; pending = {};
+    const j = await api("/api/settings", body);
+    if (j.ok) { state = j; render(); } else { refresh(); }
+  }, 250);
+}
+
+// --- rendering --------------------------------------------------------------------------------------------
+// A control being edited is not overwritten by the periodic refresh, except right after the user committed a value
+// (Enter / leaving the field), so the server's rounded or clamped value shows up.
+const idle = (el) => document.activeElement !== el || el._committed === true;
+function setIdle(id, value) { const el = $(id); if (idle(el)) el.value = value; }
+const denominator = (us) => Math.max(1, Math.round(1e6 / us));
+
+function render() {
+  if (!state) return;
+  const s = state.settings, st = state.status, ex = s.exposure, wb = s.white_balance, rec = s.recording;
+  const cam = st.camera, usb = st.storage, r = st.recording, sys = st.system;
+
+  // header chips
+  const chip = (id, text, cls) => { const e = $(id); e.textContent = text; e.className = "chip " + (cls || ""); };
+  chip("chipCam", cam.error ? "camera: error" : cam.running ? "camera OK" : "camera starting…", cam.error ? "bad" : cam.running ? "ok" : "warn");
+  chip("chipFps", cam.measured_fps + " fps from sensor", "");
+  if (usb.usage) chip("chipUsb", "USB " + fmtBytes(usb.usage.free) + " free", usb.usage.free < 2e9 ? "warn" : "ok");
+  else chip("chipUsb", usb.error ? "USB: error" : usb.device ? "USB not mounted" : "no USB", usb.error ? "bad" : "warn");
+  chip("chipRec", r ? "● RECORDING " + r.saved : "not recording", r ? "bad" : "");
+  const pw = sys.power || {};
+  const sysTxt = (sys.temp_c != null ? sys.temp_c.toFixed(0) + " °C" : "– °C") + (pw.undervoltage_now ? " · LOW VOLTAGE!" : pw.throttled_now ? " · throttled" : pw.undervoltage_occurred ? " · voltage drops occurred" : "");
+  chip("chipSys", sysTxt, pw.undervoltage_now || pw.throttled_now ? "bad" : pw.undervoltage_occurred ? "warn" : "");
+
+  // live readout
+  const a = cam.actual;
+  $("live").textContent = a.exposure_us ? "Current: " + shutter(a.exposure_us) + " · gain " + a.gain + " (ISO ≈ " + Math.round(a.gain * 100) + ") · WB R " + a.red_gain + " / B " + a.blue_gain + " · brightness " + a.brightness + " · " + a.lux + " lux" : (cam.error || "waiting for frames…");
+
+  // exposure controls
+  document.querySelectorAll('input[name=mode]').forEach((e) => e.checked = e.value === ex.mode);
+  document.querySelectorAll("[data-for]").forEach((row) => row.classList.toggle("hidden", !row.dataset.for.split(" ").includes(ex.mode)));
+  setIdle("exposure_us", usToPos(ex.exposure_us)); setIdle("exposure_us_n", ex.exposure_us); setIdle("exposure_us_d", denominator(ex.exposure_us));
+  setIdle("gain", gainToPos(ex.gain)); setIdle("gain_n", +ex.gain.toFixed(3)); setIdle("gain_iso", Math.round(ex.gain * 100));
+  setIdle("max_exposure_us", usToPos(ex.max_exposure_us)); setIdle("max_exposure_us_n", ex.max_exposure_us); setIdle("max_exposure_us_d", denominator(ex.max_exposure_us));
+  setIdle("max_gain", gainToPos(ex.max_gain)); setIdle("max_gain_n", +ex.max_gain.toFixed(3)); setIdle("max_gain_iso", Math.round(ex.max_gain * 100));
+  setIdle("target_brightness", Math.round(ex.target_brightness * 100)); setIdle("target_brightness_n", Math.round(ex.target_brightness * 100));
+
+  setIdle("wb_mode", wb.mode);
+  document.querySelectorAll("[data-wb]").forEach((row) => row.classList.toggle("hidden", wb.mode !== "manual"));
+  setIdle("red_gain", Math.round(wb.red_gain * 100)); setIdle("red_gain_n", +wb.red_gain.toFixed(3));
+  setIdle("blue_gain", Math.round(wb.blue_gain * 100)); setIdle("blue_gain_n", +wb.blue_gain.toFixed(3));
+
+  // recording parameters
+  const resSel = $("resolution");
+  if (!resSel.options.length) state.resolutions.forEach((n) => resSel.add(new Option(n.replace("x", " × "), n)));
+  setIdle("resolution", rec.resolution); setIdle("fps", rec.fps); setIdle("jpeg_quality", rec.jpeg_quality); setIdle("min_free_mb", rec.min_free_mb);
+  if (idle($("autostart"))) $("autostart").checked = rec.autostart;
+  if (idle($("hflip"))) $("hflip").checked = s.camera.hflip;
+  if (idle($("vflip"))) $("vflip").checked = s.camera.vflip;
+  $("fps").max = state.max_fps[rec.resolution];
+  $("fpsInfo").textContent = "max " + state.max_fps[rec.resolution] + " for this resolution · the sensor runs at " + cam.sensor_fps + " fps, " + (cam.decimation === 1 ? "every frame is saved" : "1 of every " + cam.decimation + " frames is saved");
+  const locked = !!r;
+  ["fps", "resolution", "jpeg_quality", "hflip", "vflip"].forEach((id) => $(id).disabled = locked);
+  $("recLock").textContent = locked ? "While recording you cannot change frames per second, resolution, JPEG quality or image orientation. Exposure and white balance can be changed." : "";
+
+  // preview aspect + ROI marker
+  const [rw, rh] = (cam.resolution || "4056x3040").split("x").map(Number);
+  $("preview").style.aspectRatio = rw + " / " + rh;
+  const f = st.focus;
+  const roiEl = $("roi");
+  if (f && f.size && focusOn) {
+    roiEl.style.display = "block";
+    roiEl.style.left = (f.origin[0] / rw * 100) + "%"; roiEl.style.top = (f.origin[1] / rh * 100) + "%";
+    roiEl.style.width = (f.size[0] / rw * 100) + "%"; roiEl.style.height = (f.size[1] / rh * 100) + "%";
+  } else { roiEl.style.display = "none"; }
+
+  // snapshot info
+  if (st.snapshot) {
+    $("snapBox").classList.remove("hidden");
+    const n = st.snapshot;
+    $("snapInfo").textContent = n.width + "×" + n.height + " · " + fmtBytes(n.bytes) + " · " + shutter(n.exposure_us) + " · gain " + n.gain + " · sharpness " + n.sharpness + (n.path ? " · saved: " + n.path : " · not saved to disk");
+  }
+
+  // recording section
+  $("btnStart").disabled = locked; $("btnStop").disabled = !locked;
+  $("btnEject").disabled = locked || !usb.mounted; $("btnMount").disabled = usb.mounted || !usb.device;
+  $("usbMsg").textContent = usb.error || (usb.usage ? "USB stick: " + usb.device + " · " + fmtBytes(usb.usage.free) + " free of " + fmtBytes(usb.usage.total) : usb.device ? "Detected " + usb.device + ", not mounted" : "No USB stick detected");
+  const stats = [];
+  if (r) {
+    const rate = r.write_bytes_per_s;
+    const eta = rate > 0 && usb.usage ? Math.max(0, (usb.usage.free - rec.min_free_mb * 1e6) / rate) : null;
+    stats.push(["Frames saved", r.saved], ["Frames dropped (writing too slow)", r.dropped], ["Queued", r.queued], ["Recording time", fmtTime(r.seconds)],
+      ["Written", fmtBytes(r.bytes)], ["Write speed", (rate / 1e6).toFixed(1) + " MB/s"], ["JPEG encoding", r.encode_ms + " ms per frame"],
+      ["Time until full", eta == null ? "–" : fmtTime(Math.round(eta))], ["Session", r.directory]);
+    if (r.error) toast("Write error: " + r.error);
+  }
+  $("stats").innerHTML = stats.map(([k, v]) => '<div class="stat"><b>' + v + "</b><span>" + k + "</span></div>").join("");
+}
+
+async function refresh() {
+  try { const r = await fetch("/api/state"); const j = await r.json(); if (j.ok) { state = j; render(); } } catch (e) { /* device unreachable, keep last state */ }
+}
+
+// --- wiring -----------------------------------------------------------------------------------------------
+document.querySelectorAll("input[name=mode]").forEach((e) => e.addEventListener("change", () => patchSettings("exposure", { mode: e.value })));
+// Sliders are for quick, coarse changes: they produce "nice" rounded values. Exact values go through the number fields.
+const niceUs = (us) => Number(us.toPrecision(2));
+const niceGain = (g) => Math.round(g * 10) / 10;
+function exposureSlider(id, key) {
+  $(id).addEventListener("input", (e) => {
+    const v = niceUs(posToUs(+e.target.value));
+    $(id + "_n").value = v; $(id + "_d").value = denominator(v);
+    patchSettings("exposure", { [key]: v });
+  });
+}
+function gainSlider(id, key) {
+  $(id).addEventListener("input", (e) => {
+    const v = niceGain(posToGain(+e.target.value));
+    $(id + "_n").value = v; $(id + "_iso").value = Math.round(v * 100);
+    patchSettings("exposure", { [key]: v });
+  });
+}
+exposureSlider("exposure_us", "exposure_us"); exposureSlider("max_exposure_us", "max_exposure_us");
+gainSlider("gain", "gain"); gainSlider("max_gain", "max_gain");
+$("target_brightness").addEventListener("input", (e) => { $("target_brightness_n").value = e.target.value; patchSettings("exposure", { target_brightness: e.target.value / 100 }); });
+
+// Number fields: commit on change (Enter, leaving the field, spinner click), not on every keystroke.
+function bindNumber(id, section, key, toSetting) {
+  const el = $(id);
+  el.addEventListener("input", () => { el._committed = false; });
+  el.addEventListener("change", () => {
+    const raw = parseFloat(el.value);
+    if (!isFinite(raw) || raw <= 0) { el._committed = true; refresh(); return; }
+    el._committed = true;
+    patchSettings(section, { [key]: toSetting(raw) });
+  });
+}
+for (const [prefix, key] of [["exposure_us", "exposure_us"], ["max_exposure_us", "max_exposure_us"]]) {
+  bindNumber(prefix + "_n", "exposure", key, (v) => Math.round(v));
+  bindNumber(prefix + "_d", "exposure", key, (d) => Math.round(1e6 / d));
+}
+for (const key of ["gain", "max_gain"]) {
+  const prefix = key;
+  bindNumber(prefix + "_n", "exposure", key, (v) => v);
+  bindNumber(prefix + "_iso", "exposure", key, (iso) => iso / 100);
+}
+bindNumber("target_brightness_n", "exposure", "target_brightness", (v) => v / 100);
+bindNumber("red_gain_n", "white_balance", "red_gain", (v) => v);
+bindNumber("blue_gain_n", "white_balance", "blue_gain", (v) => v);
+$("wb_mode").addEventListener("change", (e) => patchSettings("white_balance", { mode: e.target.value }));
+$("red_gain").addEventListener("input", (e) => { $("red_gain_n").value = (e.target.value / 100).toFixed(2); patchSettings("white_balance", { red_gain: e.target.value / 100 }); });
+$("blue_gain").addEventListener("input", (e) => { $("blue_gain_n").value = (e.target.value / 100).toFixed(2); patchSettings("white_balance", { blue_gain: e.target.value / 100 }); });
+$("btnLockWb").addEventListener("click", async () => { const j = await api("/api/white_balance/lock", {}); if (j.ok) { state = j; render(); } });
+["fps", "jpeg_quality", "min_free_mb"].forEach((id) => $(id).addEventListener("change", (e) => patchSettings("recording", { [id]: +e.target.value })));
+$("resolution").addEventListener("change", (e) => patchSettings("recording", { resolution: e.target.value }));
+$("autostart").addEventListener("change", (e) => patchSettings("recording", { autostart: e.target.checked }));
+$("hflip").addEventListener("change", (e) => patchSettings("camera", { hflip: e.target.checked }));
+$("vflip").addEventListener("change", (e) => patchSettings("camera", { vflip: e.target.checked }));
+
+$("previewWrap").addEventListener("click", (e) => {
+  const b = $("preview").getBoundingClientRect();
+  patchSettings("focus_roi", { x: Math.min(1, Math.max(0, (e.clientX - b.left) / b.width)), y: Math.min(1, Math.max(0, (e.clientY - b.top) / b.height)) });
+});
+
+$("btnSnap").addEventListener("click", async () => {
+  const btn = $("btnSnap"); btn.disabled = true; btn.textContent = "Taking photo…";
+  const j = await api("/api/snapshot", {});
+  btn.disabled = false; btn.textContent = "Take photo (full resolution)";
+  if (j.ok) { $("snapImg").src = "/snapshot.jpg?t=" + Date.now(); refresh(); }
+});
+$("btnSnapZoom").addEventListener("click", () => { snapZoom = !snapZoom; $("snapWrap").classList.toggle("full", snapZoom); $("btnSnapZoom").textContent = snapZoom ? "Fit to width" : "Show at 1:1 scale"; });
+
+$("btnFocus").addEventListener("click", () => {
+  focusOn = !focusOn;
+  $("btnFocus").textContent = "1:1 focus view: " + (focusOn ? "on" : "off");
+  $("focusBox").classList.toggle("hidden", !focusOn);
+  if (focusOn) pollFocus();
+});
+$("btnSharpReset").addEventListener("click", () => { sharpMax = 0; $("sharpMax").textContent = "–"; });
+async function pollFocus() {
+  while (focusOn) {
+    try {
+      const r = await fetch("/focus.jpg?t=" + Date.now());
+      if (r.status === 200) {
+        const sharp = parseFloat(r.headers.get("X-Sharpness"));
+        const url = URL.createObjectURL(await r.blob());
+        $("focusImg").src = url; if (focusUrl) URL.revokeObjectURL(focusUrl); focusUrl = url;
+        $("sharp").textContent = sharp.toFixed(1); sharpMax = Math.max(sharpMax, sharp); $("sharpMax").textContent = sharpMax.toFixed(1);
+      }
+    } catch (e) { /* retry */ }
+    await new Promise((res) => setTimeout(res, 300));
+  }
+}
+
+$("btnStart").addEventListener("click", async () => { const j = await api("/api/record", { action: "start" }); if (j.ok) { state = j; render(); } });
+$("btnStop").addEventListener("click", async () => { $("btnStop").disabled = true; const j = await api("/api/record", { action: "stop" }); if (j.ok) { state = j; render(); } });
+$("btnMount").addEventListener("click", async () => { const j = await api("/api/storage", { action: "mount" }); if (j.ok) { state = j; render(); } });
+$("btnEject").addEventListener("click", async () => { const j = await api("/api/storage", { action: "eject" }); if (j.ok) { state = j; render(); } });
+
+$("preview").src = "/preview.mjpg";
+refresh(); setInterval(refresh, 1000);
+</script>
+</body>
+</html>

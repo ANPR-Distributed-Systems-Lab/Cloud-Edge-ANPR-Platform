@@ -11,5 +11,5 @@ public final class ErrorCodes {
     public static final String INTERNAL_ERROR = "INTERNAL_ERROR";
     public static final String UNAUTHENTICATED = "UNAUTHENTICATED";
     public static final String ALERT_NOT_FOUND = "ALERT_NOT_FOUND";
+    public static final String INVALID_REQUEST = "INVALID_REQUEST";
 }
-

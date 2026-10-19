@@ -1,0 +1,35 @@
+[project]
+name = "anpr-ml"
+version = "0.1.0"
+description = "Dataset preparation, labeling tooling and model training for the ANPR edge node"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "pillow>=10.3",
+]
+
+[project.scripts]
+anpr-index = "anpr_ml.frame_index:main"
+anpr-splits = "anpr_ml.make_splits:main"
+anpr-select = "anpr_ml.select_frames:main"
+anpr-validate = "anpr_ml.validate_export:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/anpr_ml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+src = ["src", "tests"]

@@ -1,0 +1,22 @@
+# Raw recordings (tens of GB, stored locally only)
+data/
+
+# Model weights (distributed through S3, see CLAUDE.md)
+models/
+
+# Labeling infrastructure: generated or downloaded locally
+labeling/cvat/
+labeling/batches/
+labeling/exports/
+labeling/frame_index.csv
+
+# Working notebooks (the jupytext .py files are committed; finished reports are kept with outputs)
+*.ipynb
+!notebooks/reports/*.ipynb
+.ipynb_checkpoints/
+
+# Experiment tracking
+wandb/
+runs/
+
+.venv/

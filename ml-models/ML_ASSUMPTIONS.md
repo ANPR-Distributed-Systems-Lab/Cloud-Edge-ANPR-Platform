@@ -74,14 +74,14 @@ ml-models/
 - If the browser becomes too slow with 12 MP images, fall back to 2028x1520 copies. Normalized labels map exactly back to the originals (error about 1 px).
 
 ### Annotation scheme
-Each plate is a polygon with exactly **4 points** (CVAT point limit = 4).
+Each plate is a polygon with exactly **4 points** (set as "Number of points = 4" when drawing in CVAT; `anpr-validate` enforces it on export). The operational rules are in [labeling/README.md](labeling/README.md).
 
 - **Corner order:** TL, TR, BR, BL, clockwise, relative to the plate itself, not the image. Start at the plate's own top-left corner.
 - **Corner position:** the intersection of the plate's outer edges, not the rounded corner.
 - **Attributes:**
   - `text`: the plate number, uppercase, no spaces.
   - `readable`: yes / no. Unreadable plates stay in detection data but are excluded from OCR.
-  - `occluded`: none / partial.
+  - `occlusion`: none / partial (named so it does not clash with CVAT's built-in `occluded` flag).
   - `type`: standard / two-line / motorcycle / other (values fixed in the labeling guide).
 - **Small plates:** plates narrower than about **80 px on the original** are not labeled as regular plates. They get a separate label (`plate_ignore`, 4 points, no text) so the detector is not trained on noise. The threshold is confirmed with a histogram of plate widths after the first ~100 labels.
 
@@ -117,7 +117,7 @@ Much of the best data is expected to be oncoming cars passing on the left side o
 - Plates are huge there (about 400 px on the original at 5 m, 670 px at 3 m by the same formula), far above what OCR needs, so resolution is not a concern. The OCR crop (about 256x56) is a downscale of the original crop.
 - The horizontal field of view is about 55 degrees (half-angle 27.6 degrees). An oncoming car in the adjacent lane is roughly 3 m to the side, so its plate leaves the frame at a forward distance of about 3 m / tan(27.6 degrees) = **~6 m**. Distances of 3-5 m are only reachable with a smaller lateral offset (e.g. the camera aimed slightly to the left, or a very close pass).
 - The plate is seen at an angle: at 3 m lateral and 5 m forward the line of sight is ~31 degrees off the plate normal, so the apparent width is about 0.86 of the table value and the perspective distortion is strong. These frames are exactly what the 4-corner labels and the perspective transform are for. Make sure the dataset has many of them.
-- Plates near the left edge are partially cut off. Label them only if all 4 corners are visible; otherwise mark them as `occluded` or `plate_ignore` (decide in the labeling guide).
+- Plates near the left edge are partially cut off. Label them only if all 4 corners are visible; otherwise draw them as `plate_ignore` (see the labeling guide).
 - Capture rate: with a closing speed of about 28 m/s (two cars at ~50 km/h) the cars move ~14 m between frames at 2 fps, so only a few frames per pass fall into this range. Consider a higher recording fps for dedicated passes, within the exposure and storage limits of the collection app.
 
 ### Two resolutions in one pipeline

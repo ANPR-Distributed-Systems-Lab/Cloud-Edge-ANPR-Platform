@@ -41,7 +41,8 @@
             <td>{{ alert.alertText ?? '—' }}</td>
             <td>{{ alert.createdAt | date: 'short' }}</td>
             <td>{{ alert.lastDetectedAt ? (alert.lastDetectedAt | date: 'short') : 'Not detected yet' }}</td>
-            <td><button type="button" (click)="store.delete(alert.alertId)">Delete</button></td>
+            <td><button type="button" (click)="remove(alert.alertId)">Remove</button></td>
+            
           </tr>
         } @empty {
           <tr><td colspan="5">No alerts</td></tr>
@@ -49,5 +50,4 @@
       </tbody>
     </table>
   }
-</main>
 </main>

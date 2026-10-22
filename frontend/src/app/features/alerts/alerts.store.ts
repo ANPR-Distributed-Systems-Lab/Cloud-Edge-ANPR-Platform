@@ -20,6 +20,10 @@ export class AlertsStore {
     create(plate: string, alertText?: string): void {
         this.api.createAlert({ plate, alertText }).subscribe(() => this.load());
     }
+
+    delete(alertId: string): void {
+        this.api.deleteAlert(alertId).subscribe(() => this.load());
+    }
     
 
 }

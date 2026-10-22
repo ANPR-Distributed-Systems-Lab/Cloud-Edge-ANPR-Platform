@@ -64,7 +64,8 @@
               "buildTarget": "anpr-frontend:build:production"
             },
             "development": {
-              "buildTarget": "anpr-frontend:build:development"
+              "buildTarget": "anpr-frontend:build:development",
+              "proxyConfig": "proxy.conf.json"
             }
           },
           "defaultConfiguration": "development"

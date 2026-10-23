@@ -1,4 +1,5 @@
-# Environment "dev": composes the modules into one working environment.
+# Environment "dev": the root module. Configures Terraform and the AWS provider,
+# then composes reusable modules into one working environment.
 
 terraform {
   required_version = ">= 1.10"
@@ -10,6 +11,8 @@ terraform {
     }
   }
 
+  # State lives in the bootstrap bucket. A separate key per environment keeps
+  # dev and any future environment from touching each other's state.
   backend "s3" {
     bucket       = "anpr-tfstate-695313591790"
     key          = "envs/dev/terraform.tfstate"
@@ -22,6 +25,7 @@ terraform {
 provider "aws" {
   region = var.region
 
+  # Tags applied to every resource: ownership and cost allocation per environment.
   default_tags {
     tags = {
       Project     = "cloud-edge-anpr-platform"
@@ -42,7 +46,7 @@ variable "environment" {
 }
 
 locals {
-  name = "anpr-${var.environment}"
+  name = "anpr-${var.environment}" # prefix of all resource names, e.g. anpr-dev-vpc
 }
 
 module "network" {

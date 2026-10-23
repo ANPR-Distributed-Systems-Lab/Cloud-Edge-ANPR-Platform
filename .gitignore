@@ -24,3 +24,10 @@ Thumbs.db
 .env
 .env.local
 *.local
+
+# Terraform (lock file .terraform.lock.hcl IS committed)
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+*.tfplan

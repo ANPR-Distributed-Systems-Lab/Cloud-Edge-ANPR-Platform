@@ -3,7 +3,8 @@ output "vpc_id" {
 }
 
 output "vpc_cidr" {
-  value = aws_vpc.this.cidr_block
+  description = "Used by security groups to allow traffic from inside the VPC only."
+  value       = aws_vpc.this.cidr_block
 }
 
 output "public_subnet_ids" {

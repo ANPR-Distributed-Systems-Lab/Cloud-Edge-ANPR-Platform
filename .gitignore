@@ -31,3 +31,5 @@ Thumbs.db
 *.tfstate.*
 crash.log
 *.tfplan
+terraform.tfvars
+*.auto.tfvars

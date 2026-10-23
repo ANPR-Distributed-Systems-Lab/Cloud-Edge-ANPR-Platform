@@ -1,8 +1,8 @@
-# Bootstrap: the S3 bucket that holds Terraform state for every other stack.
+# Bootstrap stack: the S3 bucket that stores Terraform state for every other stack.
 #
-# Chicken-and-egg: Terraform needs a place to store state before it can manage
-# anything, so this stack is applied once with LOCAL state, then migrated into
-# the bucket it created (see backend.tf and the README).
+# Chicken-and-egg: Terraform needs a state backend before it can manage anything.
+# This stack is therefore applied once with local state and then migrated into
+# the bucket it created (see backend.tf). It is rarely changed after that.
 
 terraform {
   required_version = ">= 1.10" # S3 native state locking (use_lockfile) needs 1.10+
@@ -18,7 +18,7 @@ terraform {
 provider "aws" {
   region = var.region
 
-  # Every resource gets these tags automatically (cost allocation, ownership).
+  # Applied to every resource automatically; used for cost allocation and ownership.
   default_tags {
     tags = {
       Project   = "cloud-edge-anpr-platform"
@@ -33,25 +33,26 @@ variable "region" {
   default = "eu-central-1"
 }
 
+# Reads the id of the account Terraform is currently authenticated against.
 data "aws_caller_identity" "current" {}
 
 locals {
-  # S3 bucket names are global across all AWS accounts, so the account id
-  # makes the name unique without inventing random suffixes.
+  # Bucket names are unique across ALL AWS accounts. The account id makes the
+  # name globally unique without random suffixes.
   state_bucket_name = "anpr-tfstate-${data.aws_caller_identity.current.account_id}"
 }
 
 resource "aws_s3_bucket" "tfstate" {
   bucket = local.state_bucket_name
 
-  # State files are the only record of what Terraform built. Losing the bucket
-  # means losing control of the infrastructure, so refuse to destroy it.
+  # State is the only record of what Terraform built. Losing it means losing
+  # control of the infrastructure, so `terraform destroy` must fail here.
   lifecycle {
     prevent_destroy = true
   }
 }
 
-# Versioning keeps every previous state file, so a bad apply can be rolled back.
+# Keeps every previous state file, so a bad apply can be rolled back.
 resource "aws_s3_bucket_versioning" "tfstate" {
   bucket = aws_s3_bucket.tfstate.id
 
@@ -60,7 +61,7 @@ resource "aws_s3_bucket_versioning" "tfstate" {
   }
 }
 
-# State can contain sensitive values, so encrypt at rest.
+# State may contain sensitive values (e.g. generated passwords): encrypt at rest.
 resource "aws_s3_bucket_server_side_encryption_configuration" "tfstate" {
   bucket = aws_s3_bucket.tfstate.id
 
@@ -71,7 +72,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "tfstate" {
   }
 }
 
-# Block every form of public access, whatever policies get attached later.
+# Blocks every form of public access, regardless of policies attached later.
 resource "aws_s3_bucket_public_access_block" "tfstate" {
   bucket = aws_s3_bucket.tfstate.id
 
@@ -81,7 +82,7 @@ resource "aws_s3_bucket_public_access_block" "tfstate" {
   restrict_public_buckets = true
 }
 
-# Old state versions pile up with every apply; drop them after 90 days.
+# Every apply creates a new state version; expire old ones to keep storage costs flat.
 resource "aws_s3_bucket_lifecycle_configuration" "tfstate" {
   bucket = aws_s3_bucket.tfstate.id
 
@@ -97,7 +98,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "tfstate" {
   }
 }
 
-# Refuse any request that is not made over TLS.
+# Rejects any request that is not made over TLS.
 data "aws_iam_policy_document" "tfstate" {
   statement {
     sid       = "DenyInsecureTransport"
@@ -122,8 +123,8 @@ resource "aws_s3_bucket_policy" "tfstate" {
   bucket = aws_s3_bucket.tfstate.id
   policy = data.aws_iam_policy_document.tfstate.json
 
-  # The public access block and the policy are both updated through the bucket's
-  # policy API, so apply them one after another to avoid a race.
+  # The public access block and the policy both modify the bucket's policy
+  # settings; applying them sequentially avoids a race condition.
   depends_on = [aws_s3_bucket_public_access_block.tfstate]
 }
 

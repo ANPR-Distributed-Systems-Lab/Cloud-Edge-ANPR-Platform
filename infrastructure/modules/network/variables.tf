@@ -10,13 +10,13 @@ variable "vpc_cidr" {
 }
 
 variable "az_count" {
-  description = "How many availability zones to spread public subnets over. An ALB needs at least 2."
+  description = "Number of Availability Zones to spread subnets over. At least 2: RDS subnet groups require it and it keeps services available if one zone fails."
   type        = number
   default     = 2
 
   validation {
     condition     = var.az_count >= 2
-    error_message = "az_count must be at least 2 (an Application Load Balancer requires two zones)."
+    error_message = "az_count must be at least 2 (RDS subnet groups need two zones)."
   }
 }
 

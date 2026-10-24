@@ -94,8 +94,13 @@ resource "aws_service_discovery_service" "this" {
     }
   }
 
-  # ECS reports health to Cloud Map itself, based on the container health check.
-  health_check_custom_config {}
+  # ECS reports task health to Cloud Map through this setting, so a task is listed only
+  # once its container health check passes. failure_threshold is deprecated (AWS always
+  # uses 1) but it must stay: with an empty block the provider sends nothing, AWS stores
+  # no custom health check, and tasks would be listed the moment they start running.
+  health_check_custom_config {
+    failure_threshold = 1
+  }
 }
 
 # ---------------------------------------------------------------- task + service

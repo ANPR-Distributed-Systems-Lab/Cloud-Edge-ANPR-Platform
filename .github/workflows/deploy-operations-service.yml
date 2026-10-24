@@ -67,24 +67,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # TEMPORARY DEBUG (remove after the OIDC issue is fixed): prints the claims AWS
-      # evaluates against the role's trust policy. Only the decoded claims are printed,
-      # never the token itself.
-      - name: Debug OIDC claims
-        run: |
-          curl -sS -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
-            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" > /tmp/oidc.json
-          python3 - <<'PY'
-          import base64, json
-          token = json.load(open("/tmp/oidc.json"))["value"]
-          payload = token.split(".")[1]
-          payload += "=" * (-len(payload) % 4)
-          claims = json.loads(base64.urlsafe_b64decode(payload))
-          for key in ("sub", "aud", "repository", "repository_owner", "environment", "ref", "job_workflow_ref"):
-              print(f"{key}: {claims.get(key)!r}")
-          PY
-          rm -f /tmp/oidc.json
-
       - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}

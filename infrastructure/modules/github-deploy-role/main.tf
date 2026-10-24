@@ -20,6 +20,16 @@ variable "github_repository" {
   type        = string
 }
 
+variable "github_owner_id" {
+  description = "Numeric GitHub id of the owner (organization). GitHub puts it into the token's sub claim."
+  type        = string
+}
+
+variable "github_repository_id" {
+  description = "Numeric GitHub id of the repository. Unlike the name, it never changes, so a renamed or re-created repository cannot assume the role."
+  type        = string
+}
+
 variable "github_environment" {
   description = "Only jobs running in this GitHub environment may assume the role (e.g. dev). Environments can add required reviewers."
   type        = string
@@ -40,6 +50,16 @@ variable "pass_role_arns" {
 
 # ---------------------------------------------------------------- trust policy
 # WHO may assume the role. Both conditions must hold.
+
+locals {
+  github_owner = split("/", var.github_repository)[0]
+  github_name  = split("/", var.github_repository)[1]
+
+  # GitHub embeds the immutable numeric ids in the subject:
+  #   repo:<owner>@<owner_id>/<name>@<repo_id>:environment:<environment>
+  # The exact format can be checked by decoding a workflow's OIDC token.
+  oidc_subject = "repo:${local.github_owner}@${var.github_owner_id}/${local.github_name}@${var.github_repository_id}:environment:${var.github_environment}"
+}
 
 data "aws_iam_policy_document" "trust" {
   statement {
@@ -62,7 +82,7 @@ data "aws_iam_policy_document" "trust" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repository}:environment:${var.github_environment}"]
+      values   = [local.oidc_subject]
     }
   }
 }

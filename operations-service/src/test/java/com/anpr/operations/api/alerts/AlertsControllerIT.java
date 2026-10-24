@@ -22,7 +22,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 @Import(TestcontainersConfiguration.class)
-class AlertsControllerTest {
+class AlertsControllerIT {
 
     private static final String ACCOUNT_HEADER = "X-Account-Id";
 

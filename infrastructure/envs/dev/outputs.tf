@@ -21,3 +21,8 @@ output "ecs_cluster_name" {
 output "operations_service_name" {
   value = module.operations_service.service_name
 }
+
+output "operations_deploy_role_arn" {
+  description = "Set as AWS_DEPLOY_ROLE_ARN in the GitHub environment 'dev'."
+  value       = module.operations_deploy_role.role_arn
+}

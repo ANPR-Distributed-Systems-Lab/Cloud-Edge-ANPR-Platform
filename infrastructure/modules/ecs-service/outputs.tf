@@ -26,3 +26,8 @@ output "execution_role_arn" {
 output "task_role_arn" {
   value = aws_iam_role.task.arn
 }
+
+output "service_arn" {
+  description = "ARN of the ECS service (aws_ecs_service.id is the ARN)."
+  value       = aws_ecs_service.this.id
+}

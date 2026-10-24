@@ -73,7 +73,7 @@ variable "desired_count" {
 }
 
 variable "health_check_path" {
-  description = "Path the container health check calls on localhost. Liveness (not full health) so a database blip does not make ECS kill every task."
+  description = "Path the container health check calls on localhost. Liveness (not full health) so a database blip does not make ECS kill every task. The application must serve it (Spring Boot: management.endpoint.health.probes.enabled=true)."
   type        = string
   default     = "/actuator/health/liveness"
 }

@@ -157,9 +157,10 @@ resource "aws_ecs_task_definition" "this" {
 
     # Without a load balancer this is the only health check. A task is added to
     # Cloud Map once it passes and removed (and replaced) when it fails.
-    # It runs inside the container, so the image must provide wget.
+    # It runs inside the container, so the image must provide wget. 127.0.0.1 instead of
+    # "localhost": busybox wget may resolve localhost to the IPv6 address first.
     healthCheck = {
-      command     = ["CMD-SHELL", "wget -qO- http://localhost:${var.container_port}${var.health_check_path} || exit 1"]
+      command     = ["CMD-SHELL", "wget -qO- http://127.0.0.1:${var.container_port}${var.health_check_path} || exit 1"]
       interval    = 15
       timeout     = 5
       retries     = 3

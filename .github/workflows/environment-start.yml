@@ -1,0 +1,56 @@
+name: Start environment
+
+# Switches the dev environment ON: RDS first, then every ECS service with the number of
+# tasks from its "finops:start-count" tag (set by Terraform: start_count). Manual only.
+# Idempotent: running it on an already running environment changes nothing.
+# The logic lives in infrastructure/scripts/environment_power.py.
+on:
+  workflow_dispatch:
+
+# Start and stop never run at the same time.
+concurrency:
+  group: environment-power
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: eu-central-1
+  ECS_CLUSTER: anpr-dev
+  RDS_NAME_PREFIX: anpr-dev
+
+jobs:
+  start:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40 # a stopped RDS instance needs up to ~10 minutes, then the services start
+    environment: dev
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      # Only the script is needed, not the whole repository.
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: infrastructure/scripts
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: infrastructure/scripts/requirements.txt
+
+      - run: pip install -r infrastructure/scripts/requirements.txt
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_POWER_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Start databases and services
+        run: python infrastructure/scripts/environment_power.py start
+
+      # Shown on the workflow run page. Runs even when the step above failed.
+      - name: Summary
+        if: always()
+        run: python infrastructure/scripts/environment_power.py status

@@ -53,6 +53,9 @@ module "operations_service" {
 
   image_repository_url = module.operations_ecr.repository_url
 
+  # Database connection settings, injected as SPRING_DATASOURCE_* environment variables.
+  secrets = module.operations_rds.ssm_parameter_arns
+
   # Zero tasks until the first image exists in ECR; the pipeline scales it up on first deploy.
   desired_count = 0
 }

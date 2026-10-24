@@ -84,6 +84,12 @@ variable "environment" {
   default     = {}
 }
 
+variable "secrets" {
+  description = "Environment variable name -> SSM Parameter Store ARN. ECS reads the parameter at task start and injects the value; the execution role gets read access to exactly these parameters."
+  type        = map(string)
+  default     = {}
+}
+
 variable "log_retention_days" {
   type    = number
   default = 14

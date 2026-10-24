@@ -25,3 +25,9 @@ variable "subnet_newbits" {
   type        = number
   default     = 8
 }
+
+variable "private_subnet_offset" {
+  description = "Index of the first private subnet inside the VPC range: 10 gives 10.0.10.0/24, 10.0.11.0/24, ... (keeps them apart from the public ones)."
+  type        = number
+  default     = 10
+}

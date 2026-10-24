@@ -103,10 +103,14 @@ data "aws_iam_policy_document" "permissions" {
     resources = ["*"]
   }
 
-  # Push (and check for an existing tag) in this one repository only.
+  # Push (and check for an existing tag) in this one repository only. `docker push` also
+  # reads: it sends a HEAD request for the manifest, which needs BatchGetImage (without
+  # it the push fails at the very end with 403), and GetDownloadUrlForLayer.
   statement {
     sid = "EcrPush"
     actions = [
+      "ecr:BatchGetImage",
+      "ecr:GetDownloadUrlForLayer",
       "ecr:BatchCheckLayerAvailability",
       "ecr:InitiateLayerUpload",
       "ecr:UploadLayerPart",

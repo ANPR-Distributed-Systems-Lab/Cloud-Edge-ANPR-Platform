@@ -192,6 +192,12 @@ resource "aws_ecs_service" "this" {
     assign_public_ip = var.assign_public_ip
   }
 
+  # Read by the environment start workflow (scripts/env-start). Tags do not touch running
+  # tasks, so changing start_count only takes effect at the next start.
+  tags = {
+    "finops:start-count" = tostring(var.start_count)
+  }
+
   service_registries {
     registry_arn   = aws_service_discovery_service.this.arn
     container_name = var.name

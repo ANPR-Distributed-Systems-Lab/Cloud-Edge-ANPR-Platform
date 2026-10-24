@@ -42,3 +42,20 @@ module "operations_deploy_role" {
     module.operations_service.task_role_arn,
   ]
 }
+
+# Role of the "start environment" / "stop environment" workflows (FinOps): switches ECS
+# services and RDS on and off. Scoped by naming convention, so new services and databases
+# need no change here.
+module "env_power_role" {
+  source = "../../modules/github-power-role"
+
+  name                 = "${local.name}-env-power"
+  oidc_provider_arn    = aws_iam_openid_connect_provider.github.arn
+  github_repository    = var.github_repository
+  github_owner_id      = var.github_owner_id
+  github_repository_id = var.github_repository_id
+  github_environment   = var.environment
+
+  ecs_cluster_name = module.cluster.cluster_name
+  rds_name_prefix  = local.name
+}

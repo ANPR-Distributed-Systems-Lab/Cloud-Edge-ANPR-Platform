@@ -58,6 +58,9 @@ module "operations_service" {
 
   # Zero tasks until the first image exists in ECR; the pipeline scales it up on first deploy.
   desired_count = 0
+
+  # Tasks the "start environment" workflow runs for this service (0 = never started automatically).
+  start_count = 1
 }
 
 # The public entry point. Add a route here for every new path a service exposes.

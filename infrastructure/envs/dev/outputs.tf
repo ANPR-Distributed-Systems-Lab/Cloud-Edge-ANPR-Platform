@@ -26,3 +26,8 @@ output "operations_deploy_role_arn" {
   description = "Set as AWS_DEPLOY_ROLE_ARN in the GitHub environment 'dev'."
   value       = module.operations_deploy_role.role_arn
 }
+
+output "env_power_role_arn" {
+  description = "Set as AWS_POWER_ROLE_ARN in the GitHub environment 'dev'."
+  value       = module.env_power_role.role_arn
+}

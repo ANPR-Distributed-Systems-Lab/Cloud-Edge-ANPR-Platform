@@ -1,1 +1,8 @@
+@if (notifications.message(); as message) {
+  <div role="alert">
+    {{ message }}
+    <button type="button" (click)="notifications.clear()" aria-label="Close">x</button>
+  </div>
+}
+
 <router-outlet />

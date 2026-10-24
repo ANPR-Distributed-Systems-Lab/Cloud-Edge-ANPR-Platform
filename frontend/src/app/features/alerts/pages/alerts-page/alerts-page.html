@@ -21,7 +21,7 @@
     <button type="submit">Add</button>
   </form>
 
-  @if (store.loading()) {
+  @if (alerts.loading()) {
     <p>Loading…</p>
   } @else {
     <table>
@@ -35,7 +35,7 @@
         </tr>
       </thead>
       <tbody>
-        @for (alert of store.alerts(); track alert.alertId) {
+        @for (alert of alerts.alerts(); track alert.alertId) {
           <tr>
             <td>{{ alert.plate }}</td>
             <td>{{ alert.alertText ?? '—' }}</td>

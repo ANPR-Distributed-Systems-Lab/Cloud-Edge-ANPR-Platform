@@ -1,0 +1,25 @@
+<table>
+  <thead>
+    <tr>
+      <th>Plate</th>
+      <th>Description</th>
+      <th>Created</th>
+      <th>Last detected</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    @for (alert of alerts(); track alert.alertId) {
+      <tr>
+        <td>{{ alert.plate }}</td>
+        <td>{{ alert.alertText ?? '—' }}</td>
+        <td>{{ alert.createdAt | date: 'short' }}</td>
+        <td>{{ alert.lastDetectedAt ? (alert.lastDetectedAt | date: 'short') : 'Not detected yet' }}</td>
+        <!-- klik → wyślij zdarzenie "removed" z id. Tabela NIE usuwa sama – decyduje rodzic -->
+        <td><button type="button" (click)="removed.emit(alert.alertId)">Remove</button></td>
+      </tr>
+    } @empty {                                              
+      <tr><td colspan="5">No alerts</td></tr>
+    }
+  </tbody>
+</table>

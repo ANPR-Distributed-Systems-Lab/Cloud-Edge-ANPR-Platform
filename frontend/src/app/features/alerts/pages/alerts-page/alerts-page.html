@@ -1,53 +1,9 @@
 <main>
   <h1>Alerts</h1>
-
-  <form [formGroup]="form" (ngSubmit)="add()">
-    <label>
-      Plate
-      <input formControlName="plate" (blur)="normalizePlate()" placeholder="WA12345" />
-    </label>
-    @if (form.controls.plate.touched && form.controls.plate.invalid) {
-      <small>Plate: 2–10 characters, uppercase letters and digits, no spaces.</small>
-    }
-
-    <label>
-      Description
-      <input formControlName="alertText" placeholder="optional" />
-    </label>
-    @if (form.controls.alertText.hasError('maxlength')) {
-      <small>Description can have at most 500 characters.</small>
-    }
-
-    <button type="submit">Add</button>
-  </form>
-
-  @if (alerts.loading()) {
+  <app-alert-form [saving]="saving()"  (submitted)="add($event)"/>
+   @if (alerts.loading()) {
     <p>Loading…</p>
   } @else {
-    <table>
-      <thead>
-        <tr>
-          <th>Plate</th>
-          <th>Description</th>
-          <th>Created</th>
-          <th>Last detected</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        @for (alert of alerts.alerts(); track alert.alertId) {
-          <tr>
-            <td>{{ alert.plate }}</td>
-            <td>{{ alert.alertText ?? '—' }}</td>
-            <td>{{ alert.createdAt | date: 'short' }}</td>
-            <td>{{ alert.lastDetectedAt ? (alert.lastDetectedAt | date: 'short') : 'Not detected yet' }}</td>
-            <td><button type="button" (click)="remove(alert.alertId)">Remove</button></td>
-            
-          </tr>
-        } @empty {
-          <tr><td colspan="5">No alerts</td></tr>
-        }
-      </tbody>
-    </table>
+    <app-alerts-table [alerts]="alerts.alerts()" (removed)="remove($event)"/>
   }
 </main>

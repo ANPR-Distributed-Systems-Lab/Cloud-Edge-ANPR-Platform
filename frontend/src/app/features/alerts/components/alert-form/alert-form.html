@@ -1,0 +1,21 @@
+<form [formGroup]="form" (ngSubmit)="submit()">
+  <label>
+    Plate
+
+    <input formControlName="plate" (blur)="normalizePlate()" placeholder="WA12345" />
+  </label>
+
+  @if (form.controls.plate.touched && form.controls.plate.invalid) {
+    <small>Plate: 2–10 characters, uppercase letters and digits, no spaces.</small>
+  }
+
+  <label>
+    Description
+    <input formControlName="alertText" placeholder="optional" />
+  </label>
+  @if (form.controls.alertText.hasError('maxlength')) {
+    <small>Description can have at most 500 characters.</small>
+  }
+
+  <button type="submit" [disabled]="saving()" [attr.aria-busy]="saving()">Add</button>
+</form>

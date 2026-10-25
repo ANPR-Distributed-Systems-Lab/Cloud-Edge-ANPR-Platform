@@ -180,6 +180,12 @@
 					</execution>
 				</executions>
 			</plugin>
+			<!-- Runs *IT classes (Testcontainers) in `verify`; unit tests (*Test) stay in `test`.
+				Version and goals come from spring-boot-starter-parent. -->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-failsafe-plugin</artifactId>
+			</plugin>
 			<plugin>
 				<groupId>org.openapitools</groupId>
 				<artifactId>openapi-generator-maven-plugin</artifactId>

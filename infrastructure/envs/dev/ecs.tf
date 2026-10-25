@@ -53,8 +53,14 @@ module "operations_service" {
 
   image_repository_url = module.operations_ecr.repository_url
 
+  # Database connection settings, injected as SPRING_DATASOURCE_* environment variables.
+  secrets = module.operations_rds.ssm_parameter_arns
+
   # Zero tasks until the first image exists in ECR; the pipeline scales it up on first deploy.
   desired_count = 0
+
+  # Tasks the "start environment" workflow runs for this service (0 = never started automatically).
+  start_count = 1
 }
 
 # The public entry point. Add a route here for every new path a service exposes.

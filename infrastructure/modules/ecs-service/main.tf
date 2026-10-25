@@ -39,6 +39,25 @@ resource "aws_iam_role_policy_attachment" "execution" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
+# Lets ECS read the listed SSM parameters when it starts a task, so secrets never
+# appear in the task definition, the repository or the pipeline.
+data "aws_iam_policy_document" "read_secrets" {
+  count = length(var.secrets) > 0 ? 1 : 0
+
+  statement {
+    actions   = ["ssm:GetParameters"]
+    resources = values(var.secrets)
+  }
+}
+
+resource "aws_iam_role_policy" "execution_secrets" {
+  count = length(var.secrets) > 0 ? 1 : 0
+
+  name   = "read-ssm-secrets"
+  role   = aws_iam_role.execution.id
+  policy = data.aws_iam_policy_document.read_secrets[0].json
+}
+
 # Intentionally empty (least privilege). Permissions are added here once the
 # application needs SQS, SNS or SSM access.
 resource "aws_iam_role" "task" {
@@ -133,11 +152,15 @@ resource "aws_ecs_task_definition" "this" {
 
     environment = [for k, v in var.environment : { name = k, value = v }]
 
+    # Resolved by ECS from SSM when the task starts (needs the execution role policy above).
+    secrets = [for k, v in var.secrets : { name = k, valueFrom = v }]
+
     # Without a load balancer this is the only health check. A task is added to
     # Cloud Map once it passes and removed (and replaced) when it fails.
-    # It runs inside the container, so the image must provide wget.
+    # It runs inside the container, so the image must provide wget. 127.0.0.1 instead of
+    # "localhost": busybox wget may resolve localhost to the IPv6 address first.
     healthCheck = {
-      command     = ["CMD-SHELL", "wget -qO- http://localhost:${var.container_port}${var.health_check_path} || exit 1"]
+      command     = ["CMD-SHELL", "wget -qO- http://127.0.0.1:${var.container_port}${var.health_check_path} || exit 1"]
       interval    = 15
       timeout     = 5
       retries     = 3
@@ -167,6 +190,12 @@ resource "aws_ecs_service" "this" {
     subnets          = var.subnet_ids
     security_groups  = [aws_security_group.tasks.id]
     assign_public_ip = var.assign_public_ip
+  }
+
+  # Read by the environment start workflow (scripts/env-start). Tags do not touch running
+  # tasks, so changing start_count only takes effect at the next start.
+  tags = {
+    "finops:start-count" = tostring(var.start_count)
   }
 
   service_registries {

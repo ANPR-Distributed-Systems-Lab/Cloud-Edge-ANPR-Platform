@@ -72,14 +72,31 @@ variable "desired_count" {
   default     = 0
 }
 
+variable "start_count" {
+  description = "How many tasks the environment start workflow runs for this service. Published as the tag finops:start-count; 0 keeps the service out of automatic starts. Not the live desired count (that is owned by the pipelines)."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.start_count >= 0 && floor(var.start_count) == var.start_count
+    error_message = "start_count must be a whole number, 0 or more."
+  }
+}
+
 variable "health_check_path" {
-  description = "Path the container health check calls on localhost. Liveness (not full health) so a database blip does not make ECS kill every task."
+  description = "Path the container health check calls on localhost. Liveness (not full health) so a database blip does not make ECS kill every task. The application must serve it (Spring Boot: management.endpoint.health.probes.enabled=true)."
   type        = string
   default     = "/actuator/health/liveness"
 }
 
 variable "environment" {
   description = "Plain (non-secret) environment variables for the container."
+  type        = map(string)
+  default     = {}
+}
+
+variable "secrets" {
+  description = "Environment variable name -> SSM Parameter Store ARN. ECS reads the parameter at task start and injects the value; the execution role gets read access to exactly these parameters."
   type        = map(string)
   default     = {}
 }

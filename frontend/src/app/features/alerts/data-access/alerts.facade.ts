@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
-import { AlertPage, CreateAlertRequest } from '../../../api/generated';
+import { AlertPage, AlertResponse, CreateAlertRequest, UpdateAlertRequest } from '../../../api/generated';
 import { AlertsDataService } from './alerts-data.service';
 import { AlertsStore } from './alerts.store';
 
@@ -16,11 +16,19 @@ export class AlertsFacade {
     return this.data.load();
   }
 
-  create(request: CreateAlertRequest): Observable<AlertPage> {
+  get(alertId: string): Observable<AlertResponse> {
+    return this.data.get(alertId);
+  }
+
+  create(request: CreateAlertRequest): Observable<AlertResponse> {
     return this.data.create(request);
   }
 
-  delete(alertId: string): Observable<AlertPage> {
+  update(alertId: string, request: UpdateAlertRequest): Observable<AlertResponse> {
+    return this.data.update(alertId, request);
+  }
+
+  delete(alertId: string): Observable<void> {
     return this.data.delete(alertId);
   }
 }

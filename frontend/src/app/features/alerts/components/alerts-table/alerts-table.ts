@@ -11,4 +11,5 @@ import { AlertResponse } from "../../../../api/generated";
 export class AlertsTable {
     readonly alerts = input.required<AlertResponse[]>();
     readonly removed = output<string>();
+    readonly edited = output<AlertResponse>();
 }

@@ -1,6 +1,13 @@
 import { Injectable, inject } from '@angular/core';
-import { Observable, finalize, switchMap, tap } from 'rxjs';
-import { AlertPage, AlertsService, CreateAlertRequest } from '../../../api/generated';
+import { Observable, concatMap, finalize, map, tap } from 'rxjs';
+import {
+  AlertPage,
+  AlertResponse,
+  AlertsService,
+  CreateAlertRequest,
+  UpdateAlertRequest
+} from '../../../api/generated';
+import { skipGlobalError } from '../../../core/http/error-context';
 import { AlertsStore } from './alerts.store';
 
 @Injectable({ providedIn: 'root' })
@@ -16,11 +23,28 @@ export class AlertsDataService {
     );
   }
 
-  create(request: CreateAlertRequest): Observable<AlertPage> {
-    return this.api.createAlert(request).pipe(switchMap(() => this.load()));
+  get(alertId: string): Observable<AlertResponse> {
+    return this.api.getAlert(alertId);
   }
 
-  delete(alertId: string): Observable<AlertPage> {
-    return this.api.deleteAlert(alertId).pipe(switchMap(() => this.load()));
+  create(request: CreateAlertRequest): Observable<AlertResponse> {
+    return this.api.createAlert(request).pipe(
+      concatMap(created => this.load().pipe(map(() => created)))
+    );
+  }
+
+  update(alertId: string, request: UpdateAlertRequest): Observable<AlertResponse> {
+    return this.api
+      .updateAlert(alertId, request, 'body', false, { context: skipGlobalError() })
+      .pipe(
+        concatMap(updated => this.load().pipe(map(() => updated)))
+      );
+  }
+
+  delete(alertId: string): Observable<void> {
+    return this.api.deleteAlert(alertId).pipe(
+      concatMap(() => this.load()),
+      map(() => undefined)
+    );
   }
 }

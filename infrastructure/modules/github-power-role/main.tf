@@ -94,11 +94,15 @@ resource "aws_iam_role" "this" {
 # ---------------------------------------------------------------- permissions
 
 data "aws_iam_policy_document" "permissions" {
-  # Find the services of the cluster.
+  # Find the services of the cluster. IAM evaluates ListServices against the services of
+  # the cluster (service/<cluster>/*), not the cluster ARN; both are listed to be safe.
   statement {
-    sid       = "EcsListServices"
-    actions   = ["ecs:ListServices"]
-    resources = ["arn:aws:ecs:${local.region}:${local.account_id}:cluster/${var.ecs_cluster_name}"]
+    sid     = "EcsListServices"
+    actions = ["ecs:ListServices"]
+    resources = [
+      "arn:aws:ecs:${local.region}:${local.account_id}:cluster/${var.ecs_cluster_name}",
+      "arn:aws:ecs:${local.region}:${local.account_id}:service/${var.ecs_cluster_name}/*",
+    ]
   }
 
   # Read the finops:start-count tag, change the task count and wait for the rollout.

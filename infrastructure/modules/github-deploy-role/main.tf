@@ -156,6 +156,6 @@ resource "aws_iam_role_policy" "this" {
 }
 
 output "role_arn" {
-  description = "Value for the AWS_DEPLOY_ROLE_ARN variable in the GitHub environment."
+  description = "ARN of the role; store it as AWS_<SERVICE>_DEPLOY_ROLE_ARN in the GitHub environment (e.g. AWS_OPERATIONS_DEPLOY_ROLE_ARN)."
   value       = aws_iam_role.this.arn
 }

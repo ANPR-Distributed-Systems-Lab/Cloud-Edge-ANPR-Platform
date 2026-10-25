@@ -1,3 +1,5 @@
+# ---------------------------------------------------------------- platform
+
 output "vpc_id" {
   value = module.network.vpc_id
 }
@@ -6,16 +8,27 @@ output "public_subnet_ids" {
   value = module.network.public_subnet_ids
 }
 
-output "api_endpoint" {
-  value = module.api.api_endpoint
+output "ecs_cluster_name" {
+  value = module.cluster.cluster_name
 }
+
+output "api_endpoint" {
+  description = "Public base URL of the API."
+  value       = module.api.api_endpoint
+}
+
+# ---------------------------------------------------------------- GitHub workflows
+# Role ARNs to store as variables of the GitHub environment 'dev' (Settings -> Environments).
+
+output "env_power_role_arn" {
+  description = "Set as AWS_POWER_ROLE_ARN."
+  value       = module.env_power_role.role_arn
+}
+
+# ---------------------------------------------------------------- operations-service
 
 output "operations_ecr_repository_url" {
   value = module.operations_ecr.repository_url
-}
-
-output "ecs_cluster_name" {
-  value = module.cluster.cluster_name
 }
 
 output "operations_service_name" {
@@ -23,11 +36,21 @@ output "operations_service_name" {
 }
 
 output "operations_deploy_role_arn" {
-  description = "Set as AWS_DEPLOY_ROLE_ARN in the GitHub environment 'dev'."
+  description = "Set as AWS_OPERATIONS_DEPLOY_ROLE_ARN."
   value       = module.operations_deploy_role.role_arn
 }
 
-output "env_power_role_arn" {
-  description = "Set as AWS_POWER_ROLE_ARN in the GitHub environment 'dev'."
-  value       = module.env_power_role.role_arn
+# ---------------------------------------------------------------- device-management-service
+
+output "device_management_ecr_repository_url" {
+  value = module.device_management_ecr.repository_url
+}
+
+output "device_management_service_name" {
+  value = module.device_management_service.service_name
+}
+
+output "device_management_deploy_role_arn" {
+  description = "Set as AWS_DEVICE_MANAGEMENT_DEPLOY_ROLE_ARN."
+  value       = module.device_management_deploy_role.role_arn
 }

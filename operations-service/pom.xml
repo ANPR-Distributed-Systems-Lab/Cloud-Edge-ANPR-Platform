@@ -190,7 +190,7 @@
 							<goal>generate</goal>
 						</goals>
 						<configuration>
-							<inputSpec>${project.basedir}/src/main/resources/openapi/operations-api.yaml</inputSpec>
+							<inputSpec>${project.basedir}/operations-api.yaml</inputSpec>
 							<generatorName>spring</generatorName>
 							<apiPackage>com.anpr.operations.api.generated</apiPackage>
 							<modelPackage>com.anpr.operations.api.generated.model</modelPackage>

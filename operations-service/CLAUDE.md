@@ -51,7 +51,7 @@ Areas: `search` (View 1), `radial` (View 2), `livefeed` (View 3), `alerts` (View
 
 ## 2. Contract first (OpenAPI)
 
-- `src/main/resources/openapi/operations-api.yaml` is the source of truth. Controllers and DTOs are generated into `target/` (gitignored).
+- `operations-api.yaml` (service root) is the source of truth. Controllers and DTOs are generated into `target/` (gitignored).
 - Separate schemas for create, update and response (`CreateAlertRequest`, `UpdateAlertRequest`, `AlertResponse`). Never one shared object.
 - Every list endpoint is paginated with an upper bound (`size` max 100). Sort fields are enums, never free text.
 - Account identity comes from the API Gateway injected header (JWT claims), never from a path/query/body parameter.

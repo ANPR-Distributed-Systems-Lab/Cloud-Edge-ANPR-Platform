@@ -27,7 +27,9 @@ defaults:
 
 jobs:
   unit-tests:
-    name: Unit tests
+    # Job names are what branch protection lists as required checks, so they must be unique
+    # across workflows (the other service has its own "Device management / ..." names).
+    name: Operations / unit tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -52,7 +54,7 @@ jobs:
           retention-days: 7
 
   integration-tests:
-    name: Integration tests
+    name: Operations / integration tests
     needs: unit-tests # no point in starting containers when a unit test is already red
     runs-on: ubuntu-latest
     timeout-minutes: 30

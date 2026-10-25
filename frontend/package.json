@@ -7,7 +7,7 @@
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
-    "generate:api": "openapi-generator-cli generate -i ../operations-service/src/main/resources/openapi/operations-api.yaml -g typescript-angular -o src/app/api/generated --additional-properties=providedIn=root,stringEnums=true",
+    "generate:api": "openapi-generator-cli generate -i ../operations-service/operations-api.yaml -g typescript-angular -o src/app/api/generated --additional-properties=providedIn=root,stringEnums=true",
     "prestart": "npm run generate:api",
     "prebuild": "npm run generate:api",
     "pretest": "npm run generate:api"

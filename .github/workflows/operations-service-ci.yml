@@ -1,0 +1,82 @@
+name: Operations service CI
+
+# Runs the tests of operations-service on every push of a branch that changes the service
+# (or this workflow). Two jobs, cheapest first, as in CLAUDE.md section 6:
+#   1. unit tests        (*Test, Surefire)  seconds, no Docker
+#   2. integration tests (*IT, Failsafe)    Testcontainers with PostGIS; starts only if 1 passed
+# No AWS access: this workflow only checks the code. Deployment is a separate workflow.
+on:
+  push:
+    branches: ["**"] # branches only; tag pushes are ignored
+    paths:
+      - operations-service/**
+      - .github/workflows/operations-service-ci.yml
+  workflow_dispatch: # manual re-run from the Actions tab
+
+# A newer push to the same branch cancels the run that is still going.
+concurrency:
+  group: operations-service-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: operations-service
+
+jobs:
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: operations-service/pom.xml
+
+      - name: Run unit tests
+        run: ./mvnw -B test
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: unit-test-reports
+          path: operations-service/target/surefire-reports
+          retention-days: 7
+
+  integration-tests:
+    name: Integration tests
+    needs: unit-tests # no point in starting containers when a unit test is already red
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: operations-service/pom.xml
+
+      # `verify` runs the unit tests once more (a couple of seconds) and then Failsafe's *IT
+      # classes. The runner provides Docker for Testcontainers.
+      - name: Run integration tests
+        run: ./mvnw -B verify
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: integration-test-reports
+          path: |
+            operations-service/target/surefire-reports
+            operations-service/target/failsafe-reports
+          retention-days: 7

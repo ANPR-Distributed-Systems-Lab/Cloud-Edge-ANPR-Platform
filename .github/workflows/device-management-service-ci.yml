@@ -1,0 +1,86 @@
+name: Device management service CI
+
+# Runs the tests of device-management-service on every push of a branch that changes the
+# service (or this workflow). Two jobs, cheapest first, as in CLAUDE.md section 6:
+#   1. unit tests        (*Test, Surefire)  seconds, no Docker
+#   2. integration tests (*IT, Failsafe)    Testcontainers with DynamoDB Local; starts only if 1 passed
+# No AWS access: this workflow only checks the code. Deployment is a separate workflow.
+on:
+  push:
+    branches: ["**"] # branches only; tag pushes are ignored
+    paths:
+      - device-management-service/**
+      - .github/workflows/device-management-service-ci.yml
+  workflow_dispatch: # manual re-run from the Actions tab
+
+# A newer push to the same branch cancels the run that is still going.
+concurrency:
+  group: device-management-service-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: device-management-service
+
+jobs:
+  unit-tests:
+    # Job names are what branch protection lists as required checks, so they must be unique
+    # across workflows (the other service has its own "Operations: ..." names).
+    name: Device management / unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: device-management-service/pom.xml
+
+      # There are no unit tests yet: Surefire finds none and the job passes. It starts
+      # gating as soon as the first *Test class appears.
+      - name: Run unit tests
+        run: ./mvnw -B test
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: device-management-unit-test-reports
+          path: device-management-service/target/surefire-reports
+          retention-days: 7
+
+  integration-tests:
+    name: Device management / integration tests
+    needs: unit-tests # no point in starting containers when a unit test is already red
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: device-management-service/pom.xml
+
+      # `verify` runs the unit tests once more (a couple of seconds) and then Failsafe's *IT
+      # classes. The runner provides Docker for Testcontainers.
+      - name: Run integration tests
+        run: ./mvnw -B verify
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: device-management-integration-test-reports
+          path: |
+            device-management-service/target/surefire-reports
+            device-management-service/target/failsafe-reports
+          retention-days: 7

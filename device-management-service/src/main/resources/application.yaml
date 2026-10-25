@@ -1,0 +1,11 @@
+spring:
+  application:
+    name: device-management-service
+
+# Exposes /actuator/health/liveness and /readiness. The ECS container health check calls liveness
+# (outside Kubernetes Spring Boot does not enable these probes by itself).
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true

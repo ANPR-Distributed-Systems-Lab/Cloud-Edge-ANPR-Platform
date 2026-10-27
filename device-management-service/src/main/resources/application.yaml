@@ -9,3 +9,16 @@ management:
     health:
       probes:
         enabled: true
+
+# In AWS every value below comes from environment variables set by ECS: AWS_REGION and the table
+# names (infrastructure/envs/dev/device-management-service.tf).
+app:
+  aws:
+    region: ${AWS_REGION:eu-central-1}
+    dynamodb:
+      # Only for DynamoDB Local (development and tests), e.g. http://localhost:8000. Empty in AWS.
+      endpoint: ${DYNAMODB_ENDPOINT:}
+      tables:
+        # Required: startup fails when they are missing.
+        device-configurations: ${DEVICE_CONFIGURATIONS_TABLE:}
+        device-statuses: ${DEVICE_STATUSES_TABLE:}

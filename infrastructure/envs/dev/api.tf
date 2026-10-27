@@ -1,8 +1,9 @@
-# The public entry point: one HTTP API in front of all services.
+# The public entry point: one HTTP API in front of all services and functions.
 #
 #   client --> API Gateway --> VPC link --> Cloud Map --> ECS task of the matching service
+#   device --> API Gateway --> Lambda event-ingest --> SNS (events.tf)
 #
-# The routes of every service are listed here, so this file shows the whole public surface.
+# Every route is listed here, so this file shows the whole public surface.
 # Add a route for every new path a service exposes.
 
 # Security group of the API Gateway VPC link. Service tasks accept traffic from
@@ -59,6 +60,16 @@ module "api" {
         "ANY /api/v1/devices/{deviceId}/status",
         "ANY /api/v1/images/presigned-urls",
       ]
+    }
+  }
+
+  functions = {
+    event_ingest = {
+      function_name = module.event_ingest.function_name
+      invoke_arn    = module.event_ingest.invoke_arn
+
+      # POST /api/v1/ingest/detections and /device-locations (defined in events.tf).
+      routes = keys(local.ingest_routes)
     }
   }
 }

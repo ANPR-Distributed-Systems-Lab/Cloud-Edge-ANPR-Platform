@@ -54,3 +54,30 @@ output "device_management_deploy_role_arn" {
   description = "Set as AWS_DEVICE_MANAGEMENT_DEPLOY_ROLE_ARN."
   value       = module.device_management_deploy_role.role_arn
 }
+
+# ---------------------------------------------------------------- events and storage
+
+output "edge_events_topic_arn" {
+  value = aws_sns_topic.edge_events.arn
+}
+
+output "operations_events_queue_url" {
+  value = module.operations_events_queue.queue_url
+}
+
+output "operations_events_dlq_url" {
+  description = "Messages operations-service failed to process 5 times; inspect and redrive from here."
+  value       = module.operations_events_queue.dlq_url
+}
+
+output "storage_bucket_name" {
+  value = module.storage_bucket.name
+}
+
+output "device_configurations_table_name" {
+  value = module.device_configurations_table.name
+}
+
+output "device_statuses_table_name" {
+  value = module.device_statuses_table.name
+}

@@ -58,11 +58,21 @@ resource "aws_iam_role_policy" "execution_secrets" {
   policy = data.aws_iam_policy_document.read_secrets[0].json
 }
 
-# Intentionally empty (least privilege). Permissions are added here once the
-# application needs SQS, SNS or SSM access.
+# The identity of the application code. The AWS SDK in the container picks it up
+# automatically (default credentials chain), so no keys are configured anywhere.
 resource "aws_iam_role" "task" {
   name               = "${var.name}-task"
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
+}
+
+# What the application may do in AWS (queues, tables, buckets...), one inline policy
+# per entry. Nothing by default: least privilege.
+resource "aws_iam_role_policy" "task" {
+  for_each = var.task_role_policies
+
+  name   = each.key
+  role   = aws_iam_role.task.id
+  policy = each.value
 }
 
 # ---------------------------------------------------------------- network
@@ -150,7 +160,10 @@ resource "aws_ecs_task_definition" "this" {
       protocol      = "tcp"
     }]
 
-    environment = [for k, v in var.environment : { name = k, value = v }]
+    # AWS_REGION lets the AWS SDK find the region without any application configuration.
+    environment = [
+      for k, v in merge({ AWS_REGION = data.aws_region.current.region }, var.environment) : { name = k, value = v }
+    ]
 
     # Resolved by ECS from SSM when the task starts (needs the execution role policy above).
     secrets = [for k, v in var.secrets : { name = k, valueFrom = v }]
@@ -192,8 +205,8 @@ resource "aws_ecs_service" "this" {
     assign_public_ip = var.assign_public_ip
   }
 
-  # Read by the environment start workflow (scripts/env-start). Tags do not touch running
-  # tasks, so changing start_count only takes effect at the next start.
+  # Read by the "start environment" workflow (infrastructure/scripts/environment_power.py).
+  # Tags do not touch running tasks, so changing start_count only takes effect at the next start.
   tags = {
     "finops:start-count" = tostring(var.start_count)
   }

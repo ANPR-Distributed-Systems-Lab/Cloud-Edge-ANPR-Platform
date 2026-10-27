@@ -101,6 +101,12 @@ variable "secrets" {
   default     = {}
 }
 
+variable "task_role_policies" {
+  description = "Policy name -> IAM policy JSON, attached to the task role (the application's own permissions)."
+  type        = map(string)
+  default     = {}
+}
+
 variable "log_retention_days" {
   type    = number
   default = 14

@@ -13,6 +13,11 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.0"
     }
+
+    archive = {
+      source  = "hashicorp/archive" # zips Lambda sources
+      version = "~> 2.0"
+    }
   }
 
   # State lives in the bootstrap bucket. A separate key per environment keeps

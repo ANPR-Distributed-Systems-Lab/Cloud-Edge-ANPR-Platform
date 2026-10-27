@@ -1,5 +1,5 @@
 # operations-service: everything the service owns, in one place.
-# Image repository, database, ECS service and the role its deploy workflow uses.
+# Image repository, database, events queue, ECS service and the role its deploy workflow uses.
 # Its API routes are registered in api.tf.
 
 # ---------------------------------------------------------------- image repository
@@ -28,6 +28,42 @@ module "operations_rds" {
   master_username = "operations_admin"
 }
 
+# ---------------------------------------------------------------- events queue
+# Every event on the edge events topic (events.tf) lands here; for now no filter, so both
+# detections and device locations. The service consumes it with the plain AWS SDK:
+#
+#   ReceiveMessage (QueueUrl = EVENTS_QUEUE_URL, MessageAttributeNames = All) -> process -> DeleteMessage
+#
+#   body        the device's JSON, unchanged
+#   attributes  eventType (detection | device-location), traceId
+#
+# A message that is not deleted within the visibility timeout (60 s) is delivered again, and
+# after 5 deliveries it moves to the DLQ: processing must be idempotent.
+
+module "operations_events_queue" {
+  source = "../../modules/event-queue"
+
+  name      = "${local.name}-operations-events"
+  topic_arn = aws_sns_topic.edge_events.arn
+}
+
+# ---------------------------------------------------------------- permissions of the application
+# Used by the code in the container through the task role (no credentials to configure).
+
+data "aws_iam_policy_document" "operations_app" {
+  statement {
+    sid = "ConsumeEventsQueue"
+    actions = [
+      "sqs:ReceiveMessage",
+      "sqs:DeleteMessage",
+      "sqs:ChangeMessageVisibility", # extend the timeout of a message that takes longer to process
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl",
+    ]
+    resources = [module.operations_events_queue.queue_arn]
+  }
+}
+
 # ---------------------------------------------------------------- service
 
 module "operations_service" {
@@ -43,8 +79,17 @@ module "operations_service" {
 
   image_repository_url = module.operations_ecr.repository_url
 
-  # Database connection settings, injected as SPRING_DATASOURCE_* environment variables.
+  # Read from SSM by ECS and injected as environment variables:
+  # SPRING_DATASOURCE_URL / _USERNAME / _PASSWORD.
   secrets = module.operations_rds.ssm_parameter_arns
+
+  environment = {
+    EVENTS_QUEUE_URL = module.operations_events_queue.queue_url
+  }
+
+  task_role_policies = {
+    operations-app = data.aws_iam_policy_document.operations_app.json
+  }
 
   # Zero tasks until the first image exists in ECR; the pipeline scales it up on first deploy.
   desired_count = 0

@@ -35,7 +35,8 @@ module "operations_rds" {
 #   ReceiveMessage (QueueUrl = EVENTS_QUEUE_URL, MessageAttributeNames = All) -> process -> DeleteMessage
 #
 #   body        the device's JSON, unchanged
-#   attributes  eventType (detection | device-location), traceId
+#   attributes  eventType (detection | device-location), traceId, accountId, deviceId
+#               (accountId and deviceId come from the device's token, never from the body)
 #
 # A message that is not deleted within the visibility timeout (60 s) is delivered again, and
 # after 5 deliveries it moves to the DLQ: processing must be idempotent.

@@ -2,6 +2,9 @@
 #
 #   services:   internet --> HTTP API --> VPC link --> Cloud Map lookup --> task private IP:port
 #   functions:  internet --> HTTP API --> Lambda function
+#
+# Every route requires a valid Cognito access token (JWT authorizer). Services receive the
+# identity of the caller as headers, functions as claims in the request event.
 
 variable "name" {
   type = string
@@ -16,31 +19,39 @@ variable "vpc_link_security_group_id" {
   type = string
 }
 
+variable "jwt_issuer" {
+  description = "Issuer (iss) of the tokens, e.g. https://cognito-idp.eu-central-1.amazonaws.com/<user pool id>."
+  type        = string
+}
+
+variable "authorizers" {
+  description = "Authorizers by name: the app client ids whose access tokens each one accepts. Backends refer to them by name."
+  type        = map(list(string))
+}
+
 variable "services" {
   description = <<-EOT
     ECS services behind the API, keyed by a short name. Each entry names the Cloud Map
-    service to forward to and the route keys sent there, e.g. "ANY /api/v1/alerts"
-    or "ANY /api/v1/alerts/{proxy+}". When routes overlap, the most specific wins.
+    service to forward to, the authorizer protecting it and the route keys sent there,
+    e.g. "ANY /api/v1/alerts" or "ANY /api/v1/alerts/{proxy+}". When routes overlap,
+    the most specific wins.
   EOT
   type = map(object({
     discovery_service_arn = string
+    authorizer            = string
     routes                = list(string)
   }))
 }
 
 variable "functions" {
-  description = "Lambda functions behind the API, keyed by a short name: the function and the route keys it serves."
+  description = "Lambda functions behind the API, keyed by a short name: the function, its authorizer and the route keys it serves."
   type = map(object({
     function_name = string
     invoke_arn    = string
+    authorizer    = string
     routes        = list(string)
   }))
   default = {}
-}
-
-variable "account_id_header_value" {
-  description = "TEMPORARY, until Cognito: every request is forced to act as this account (header X-Account-Id). Later replaced by the JWT 'sub' claim."
-  type        = string
 }
 
 variable "cors_allowed_origins" {
@@ -70,13 +81,13 @@ locals {
   # created with for_each. The key "<backend>|<route>" is stable across applies.
   service_routes = merge([
     for svc, cfg in var.services : {
-      for route in cfg.routes : "${svc}|${route}" => { service = svc, route_key = route }
+      for route in cfg.routes : "${svc}|${route}" => { service = svc, route_key = route, authorizer = cfg.authorizer }
     }
   ]...)
 
   function_routes = merge([
     for fn, cfg in var.functions : {
-      for route in cfg.routes : "${fn}|${route}" => { function = fn, route_key = route }
+      for route in cfg.routes : "${fn}|${route}" => { function = fn, route_key = route, authorizer = cfg.authorizer }
     }
   ]...)
 }
@@ -92,6 +103,24 @@ resource "aws_apigatewayv2_api" "this" {
     allow_headers  = ["content-type", "authorization", "if-none-match", "x-trace-id"]
     expose_headers = ["etag", "x-trace-id"]
     max_age        = 3600
+  }
+}
+
+# ---------------------------------------------------------------- authorization
+
+# Accepts a token only if it is signed by the issuer, not expired and issued to one of the
+# listed app clients (access tokens carry the app client in the client_id claim).
+resource "aws_apigatewayv2_authorizer" "jwt" {
+  for_each = var.authorizers
+
+  api_id           = aws_apigatewayv2_api.this.id
+  name             = each.key
+  authorizer_type  = "JWT"
+  identity_sources = ["$request.header.Authorization"]
+
+  jwt_configuration {
+    issuer   = var.jwt_issuer
+    audience = each.value
   }
 }
 
@@ -120,10 +149,13 @@ resource "aws_apigatewayv2_integration" "service" {
 
   payload_format_version = "1.0"
 
+  # "overwrite": identity headers sent by the client are discarded, so callers cannot
+  # impersonate another account or user. The values come from the validated token:
+  # account_id is added by the pre token generation trigger, sub is the id of the Cognito
+  # user (for a device, the device).
   request_parameters = {
-    # "overwrite": a client-supplied X-Account-Id is discarded, so callers cannot
-    # impersonate another account.
-    "overwrite:header.X-Account-Id" = var.account_id_header_value
+    "overwrite:header.X-Account-Id" = "$context.authorizer.claims.account_id"
+    "overwrite:header.X-User-Id"    = "$context.authorizer.claims.sub"
   }
 }
 
@@ -131,9 +163,11 @@ resource "aws_apigatewayv2_integration" "service" {
 resource "aws_apigatewayv2_route" "service" {
   for_each = local.service_routes
 
-  api_id    = aws_apigatewayv2_api.this.id
-  route_key = each.value.route_key
-  target    = "integrations/${aws_apigatewayv2_integration.service[each.value.service].id}"
+  api_id             = aws_apigatewayv2_api.this.id
+  route_key          = each.value.route_key
+  target             = "integrations/${aws_apigatewayv2_integration.service[each.value.service].id}"
+  authorization_type = "JWT"
+  authorizer_id      = aws_apigatewayv2_authorizer.jwt[each.value.authorizer].id
 }
 
 # The service routes used to be called "this"; the rename must not recreate them.
@@ -144,8 +178,8 @@ moved {
 
 # ---------------------------------------------------------------- functions (Lambda)
 
-# Payload format 2.0: the function receives routeKey, lower-cased headers and the body,
-# and returns {statusCode, headers, body}.
+# Payload format 2.0: the function receives routeKey, lower-cased headers, the body and the
+# token claims (requestContext.authorizer.jwt.claims), and returns {statusCode, headers, body}.
 resource "aws_apigatewayv2_integration" "function" {
   for_each = var.functions
 
@@ -159,9 +193,11 @@ resource "aws_apigatewayv2_integration" "function" {
 resource "aws_apigatewayv2_route" "function" {
   for_each = local.function_routes
 
-  api_id    = aws_apigatewayv2_api.this.id
-  route_key = each.value.route_key
-  target    = "integrations/${aws_apigatewayv2_integration.function[each.value.function].id}"
+  api_id             = aws_apigatewayv2_api.this.id
+  route_key          = each.value.route_key
+  target             = "integrations/${aws_apigatewayv2_integration.function[each.value.function].id}"
+  authorization_type = "JWT"
+  authorizer_id      = aws_apigatewayv2_authorizer.jwt[each.value.authorizer].id
 }
 
 # A function may be invoked by this API only (any stage, any of its routes).

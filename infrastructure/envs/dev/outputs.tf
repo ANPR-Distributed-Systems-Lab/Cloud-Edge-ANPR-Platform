@@ -81,3 +81,13 @@ output "device_configurations_table_name" {
 output "device_statuses_table_name" {
   value = module.device_statuses_table.name
 }
+
+output "user_pool_id" {
+  description = "Cognito user pool of web users and devices (see auth.tf for how to create users)."
+  value       = module.user_pool.user_pool_id
+}
+
+output "user_pool_client_ids" {
+  description = "App client ids by name (web, device); what a client passes when it signs in."
+  value       = module.user_pool.client_ids
+}

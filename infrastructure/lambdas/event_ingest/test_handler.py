@@ -11,6 +11,9 @@ from botocore.stub import Stubber
 TOPIC_ARN = "arn:aws:sns:eu-central-1:123456789012:anpr-dev-edge-events"
 ROUTE = "POST /api/v1/ingest/detections"
 REQUEST_ID = "api-gateway-request-id"
+ACCOUNT_ID = "00000000-0000-0000-0000-000000000001"
+DEVICE_ID = "a1b2c3d4-5678-90ab-cdef-111111111111"
+DEVICE_CLAIMS = {"sub": DEVICE_ID, "account_id": ACCOUNT_ID}
 
 
 @pytest.fixture
@@ -31,14 +34,14 @@ def sns(ingest):
         stub.assert_no_pending_responses()
 
 
-def api_event(body, route=ROUTE, headers=None, base64_encoded=False):
-    """A minimal API Gateway HTTP API event (payload format 2.0)."""
+def api_event(body, route=ROUTE, headers=None, base64_encoded=False, claims=DEVICE_CLAIMS):
+    """A minimal API Gateway HTTP API event (payload format 2.0) of a device that passed the JWT authorizer."""
     return {
         "routeKey": route,
         "headers": headers or {},
         "body": body,
         "isBase64Encoded": base64_encoded,
-        "requestContext": {"requestId": REQUEST_ID},
+        "requestContext": {"requestId": REQUEST_ID, "authorizer": {"jwt": {"claims": claims}}},
     }
 
 
@@ -52,6 +55,8 @@ def expect_publish(sns, message, event_type="detection", trace_id=REQUEST_ID):
             "MessageAttributes": {
                 "eventType": {"DataType": "String", "StringValue": event_type},
                 "traceId": {"DataType": "String", "StringValue": trace_id},
+                "accountId": {"DataType": "String", "StringValue": ACCOUNT_ID},
+                "deviceId": {"DataType": "String", "StringValue": DEVICE_ID},
             },
         },
     )
@@ -61,7 +66,7 @@ def expect_publish(sns, message, event_type="detection", trace_id=REQUEST_ID):
 
 
 def test_publishes_the_body_unchanged_with_event_type_and_client_trace_id(ingest, sns):
-    body = '{"deviceId": "d-1", "detections": [{"plate": "WA12345"}]}'
+    body = '{"deviceId": "spoofed-by-the-body", "detections": [{"plate": "WA12345"}]}'
     expect_publish(sns, body, trace_id="trace-from-device")
 
     response = ingest.handler(api_event(body, headers={"x-trace-id": "trace-from-device"}), None)
@@ -91,6 +96,26 @@ def test_decodes_base64_encoded_bodies(ingest, sns):
 
 
 # ---------------------------------------------------------------- rejected requests (nothing is published)
+
+
+@pytest.mark.parametrize(
+    "claims",
+    [
+        None,  # the route has no authorizer
+        {"sub": DEVICE_ID},  # no account
+        {"account_id": ACCOUNT_ID},  # no device
+        {"sub": "", "account_id": ACCOUNT_ID},
+    ],
+)
+def test_rejects_requests_whose_token_does_not_identify_a_device_of_an_account(ingest, sns, claims):
+    event = api_event("{}", claims=claims)
+    if claims is None:
+        del event["requestContext"]["authorizer"]
+
+    response = ingest.handler(event, None)
+
+    assert response["statusCode"] == 403
+    assert json.loads(response["body"])["code"] == "MISSING_IDENTITY"
 
 
 @pytest.mark.parametrize("body", ["", "not json", '"a string"', "42", "null"])

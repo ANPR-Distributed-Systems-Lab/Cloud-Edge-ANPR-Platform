@@ -12,12 +12,6 @@ variable "environment" {
   default     = "dev"
 }
 
-variable "dev_account_id" {
-  description = "TEMPORARY until Cognito: the account every API request acts as (value of the X-Account-Id header)."
-  type        = string
-  default     = "00000000-0000-0000-0000-000000000001"
-}
-
 # ---------------------------------------------------------------- GitHub (OIDC trust)
 
 variable "github_repository" {

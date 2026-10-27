@@ -3,8 +3,8 @@
 #   client --> API Gateway --> VPC link --> Cloud Map --> ECS task of the matching service
 #   device --> API Gateway --> Lambda event-ingest --> SNS (events.tf)
 #
-# Every route is listed here, so this file shows the whole public surface.
-# Add a route for every new path a service exposes.
+# Every route is listed here, so this file shows the whole public surface, and every route
+# names the authorizer that protects it. Add a route for every new path a service exposes.
 
 # Security group of the API Gateway VPC link. Service tasks accept traffic from
 # this group only, so the VPC link is the single way in.
@@ -32,11 +32,19 @@ module "api" {
   subnet_ids                 = module.network.public_subnet_ids
   vpc_link_security_group_id = aws_security_group.vpc_link.id
 
-  account_id_header_value = var.dev_account_id
+  jwt_issuer = module.user_pool.issuer
+
+  # Who may call: tokens of the web application, of the devices, or of both.
+  authorizers = {
+    users             = [module.user_pool.client_ids["web"]]
+    devices           = [module.user_pool.client_ids["device"]]
+    users_and_devices = [module.user_pool.client_ids["web"], module.user_pool.client_ids["device"]]
+  }
 
   services = {
     operations = {
       discovery_service_arn = module.operations_service.discovery_service_arn
+      authorizer            = "users"
 
       # Mirrors the paths in operations-api.yaml; {proxy+} matches any sub-path.
       routes = [
@@ -49,6 +57,7 @@ module "api" {
 
     device_management = {
       discovery_service_arn = module.device_management_service.discovery_service_arn
+      authorizer            = "users_and_devices" # devices fetch their configuration, the web application shows it
 
       # The paths of the architecture diagram; the contract itself is still being written
       # (device-management-api.yaml), until then the service answers 404 on all of them.
@@ -67,6 +76,7 @@ module "api" {
     event_ingest = {
       function_name = module.event_ingest.function_name
       invoke_arn    = module.event_ingest.invoke_arn
+      authorizer    = "devices"
 
       # POST /api/v1/ingest/detections and /device-locations (defined in events.tf).
       routes = keys(local.ingest_routes)

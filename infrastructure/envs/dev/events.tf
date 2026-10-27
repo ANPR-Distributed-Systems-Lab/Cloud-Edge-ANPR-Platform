@@ -1,12 +1,14 @@
 # Events sent by the edge devices (Raspberry Pi) and their fan-out to the services.
 #
 #   RPi --POST /api/v1/ingest/...--> API Gateway --> Lambda event-ingest --> SNS topic --> SQS queue per
-#                                                                                         consuming service
+#   (device token, see auth.tf)       (validates the token)                                  consuming service
 #
 # Every message on the topic is:
 #   body        the JSON the device sent, unchanged
 #   attributes  eventType   detection | device-location (from the route; subscriptions can filter on it)
 #               traceId     end-to-end trace id (CLAUDE.md: passed through APIs and queues)
+#               accountId   account of the device, from its token
+#               deviceId    the device, from its token
 #
 # Consumers subscribe with the event-queue module, next to the rest of their service
 # (see operations-service.tf).

@@ -1,14 +1,17 @@
 """Ingest endpoint of the edge devices: each request becomes one message on the platform's SNS topic.
 
 API Gateway (HTTP API, payload format 2.0) invokes this function for the routes listed in
-EVENT_TYPE_BY_ROUTE. The published message is:
+EVENT_TYPE_BY_ROUTE, after its JWT authorizer has validated the device's access token. The
+published message is:
 
     body        the request body, unchanged (a JSON object or array, at most MAX_BODY_BYTES)
     attributes  eventType   derived from the route, never taken from the client
                 traceId     the client's X-Trace-Id header if valid, otherwise the API Gateway request id
+                accountId   the account of the device, from the token (never from the body)
+                deviceId    the id of the device (the token's sub), from the token
 
 Every queue subscribed to the topic receives a copy (fan-out). The response is 202 with the
-message id, or an RFC 9457 problem (400, 404, 413, 503) carrying the same traceId.
+message id, or an RFC 9457 problem (400, 403, 404, 413, 503) carrying the same traceId.
 
 Request bodies are never logged: they contain license plates and GPS positions (personal data).
 """
@@ -44,6 +47,11 @@ def handler(event, context):
     if event_type is None:
         return _rejected(404, "UNKNOWN_ROUTE", "No event type is configured for this route.", trace_id)
 
+    identity = _identity(event)
+    if identity is None:
+        return _rejected(403, "MISSING_IDENTITY", "The token does not identify a device of an account.", trace_id)
+    account_id, device_id = identity
+
     body = _raw_body(event)
     if body is None:
         return _rejected(400, "INVALID_BODY", "The body is not valid base64.", trace_id)
@@ -61,6 +69,8 @@ def handler(event, context):
             MessageAttributes={
                 "eventType": {"DataType": "String", "StringValue": event_type},
                 "traceId": {"DataType": "String", "StringValue": trace_id},
+                "accountId": {"DataType": "String", "StringValue": account_id},
+                "deviceId": {"DataType": "String", "StringValue": device_id},
             },
         )
     except (BotoCoreError, ClientError):
@@ -69,7 +79,14 @@ def handler(event, context):
 
     logger.info(
         "Event published",
-        extra={"eventType": event_type, "traceId": trace_id, "messageId": published["MessageId"], "bodyBytes": len(body)},
+        extra={
+            "eventType": event_type,
+            "traceId": trace_id,
+            "accountId": account_id,
+            "deviceId": device_id,
+            "messageId": published["MessageId"],
+            "bodyBytes": len(body),
+        },
     )
     return _response(202, {"messageId": published["MessageId"], "traceId": trace_id}, trace_id)
 
@@ -83,6 +100,18 @@ def _trace_id(event):
     if TRACE_ID_PATTERN.fullmatch(client_trace_id):
         return client_trace_id
     return event["requestContext"]["requestId"]
+
+
+def _identity(event):
+    """(account id, device id) from the validated token, or None if the token lacks either.
+
+    account_id is added to the token by the user pool's pre token generation trigger; sub is the
+    id of the Cognito user, which for a device is the device. Without an authorizer on the route
+    there are no claims at all, so the request is refused rather than published anonymously.
+    """
+    claims = event.get("requestContext", {}).get("authorizer", {}).get("jwt", {}).get("claims", {})
+    account_id, device_id = claims.get("account_id"), claims.get("sub")
+    return (account_id, device_id) if account_id and device_id else None
 
 
 def _raw_body(event):

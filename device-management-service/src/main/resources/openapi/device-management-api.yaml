@@ -1,0 +1,12 @@
+openapi: 3.0.3
+info:
+  title: Device Management Service API
+  version: 0.0.1
+  description: |
+    Control plane of the edge fleet: device configuration, heartbeat and status, presigned image URLs.
+
+    Contract first: controller interfaces and DTOs are generated from this file at build time.
+    The paths below are on the architecture diagram and still to be specified here:
+servers:
+  - url: /
+paths: {}

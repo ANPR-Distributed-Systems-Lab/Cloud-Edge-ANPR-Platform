@@ -52,6 +52,22 @@ resource "aws_subnet" "public" {
   }
 }
 
+# Isolated subnets for databases: same zones as the public ones, but with no route to
+# the internet. They are not associated with the public route table, so they use the
+# VPC's main route table, which only contains the local route.
+resource "aws_subnet" "private" {
+  count = var.az_count
+
+  vpc_id            = aws_vpc.this.id
+  availability_zone = local.azs[count.index]
+  cidr_block        = cidrsubnet(var.vpc_cidr, var.subnet_newbits, var.private_subnet_offset + count.index)
+
+  tags = {
+    Name = "${var.name}-private-${local.azs[count.index]}"
+    Tier = "private"
+  }
+}
+
 # A subnet is "public" solely because its route table sends internet-bound
 # traffic (0.0.0.0/0) to the Internet Gateway.
 resource "aws_route_table" "public" {

@@ -1,0 +1,4 @@
+# For running the unit tests locally: pip install -r requirements-dev.txt && pytest
+# The Lambda runtime provides boto3 itself; the version here matches infrastructure/scripts.
+boto3==1.43.118
+pytest==9.1.1

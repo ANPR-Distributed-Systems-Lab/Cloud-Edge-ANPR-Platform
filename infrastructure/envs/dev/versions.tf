@@ -1,5 +1,4 @@
-# Environment "dev": the root module. Configures Terraform and the AWS provider,
-# then composes reusable modules into one working environment.
+# Terraform and provider configuration of the dev environment (the root module).
 
 terraform {
   required_version = ">= 1.10"
@@ -8,6 +7,16 @@ terraform {
     aws = {
       source  = "hashicorp/aws"
       version = "~> 6.0"
+    }
+
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
+    }
+
+    archive = {
+      source  = "hashicorp/archive" # zips Lambda sources
+      version = "~> 2.0"
     }
   }
 
@@ -33,24 +42,4 @@ provider "aws" {
       ManagedBy   = "terraform"
     }
   }
-}
-
-variable "region" {
-  type    = string
-  default = "eu-central-1"
-}
-
-variable "environment" {
-  type    = string
-  default = "dev"
-}
-
-locals {
-  name = "anpr-${var.environment}" # prefix of all resource names, e.g. anpr-dev-vpc
-}
-
-module "network" {
-  source = "../../modules/network"
-
-  name = local.name
 }

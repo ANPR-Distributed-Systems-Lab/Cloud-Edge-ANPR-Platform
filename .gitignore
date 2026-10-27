@@ -31,5 +31,7 @@ Thumbs.db
 *.tfstate.*
 crash.log
 *.tfplan
+# Lambda zips built by terraform plan
+.build/
 terraform.tfvars
 *.auto.tfvars

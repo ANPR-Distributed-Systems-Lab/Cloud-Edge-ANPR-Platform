@@ -10,3 +10,8 @@ output "vpc_cidr" {
 output "public_subnet_ids" {
   value = aws_subnet.public[*].id
 }
+
+output "private_subnet_ids" {
+  description = "Isolated subnets (no route to the internet), for databases."
+  value       = aws_subnet.private[*].id
+}

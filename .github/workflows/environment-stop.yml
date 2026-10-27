@@ -1,0 +1,57 @@
+name: Stop environment
+
+# Switches the dev environment OFF: every ECS service to 0 tasks, then RDS. Manual only.
+# Idempotent, so it is safe to run whenever: for example every few days, because AWS
+# starts a stopped RDS instance again after 7 days and this puts it back to sleep.
+# Stopped databases still cost for storage and backups; only instance hours are saved.
+# The logic lives in infrastructure/scripts/environment_power.py.
+on:
+  workflow_dispatch:
+
+# Start and stop never run at the same time.
+concurrency:
+  group: environment-power
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: eu-central-1
+  ECS_CLUSTER: anpr-dev
+  RDS_NAME_PREFIX: anpr-dev
+
+jobs:
+  stop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: dev
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      # Only the script is needed, not the whole repository.
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: infrastructure/scripts
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: infrastructure/scripts/requirements.txt
+
+      - run: pip install -r infrastructure/scripts/requirements.txt
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_POWER_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Stop services and databases
+        run: python infrastructure/scripts/environment_power.py stop
+
+      # Shown on the workflow run page. Runs even when the step above failed.
+      - name: Summary
+        if: always()
+        run: python infrastructure/scripts/environment_power.py status

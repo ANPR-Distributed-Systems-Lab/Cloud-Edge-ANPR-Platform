@@ -12,14 +12,14 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.UUID;
 
+import static org.hamcrest.Matchers.containsInAnyOrder;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
-import static org.hamcrest.Matchers.containsInAnyOrder;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -108,16 +108,6 @@ class AlertsControllerIT {
                 .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
     }
 
-    private String createAlert(String account, String plate) throws Exception {
-        String body = mockMvc.perform(post("/api/v1/alerts")
-                        .header(ACCOUNT_HEADER, account)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{ \"plate\": \"" + plate + "\" }"))
-                .andExpect(status().isCreated())
-                .andReturn().getResponse().getContentAsString();
-        return JsonPath.read(body, "$.alertId");
-    }
-
     @Test
     void listReturnsOnlyAlertsOfCurrentAccount() throws Exception {
         String account = UUID.randomUUID().toString();
@@ -175,5 +165,15 @@ class AlertsControllerIT {
         mockMvc.perform(get("/api/v1/alerts/{id}", alertId)
                         .header(ACCOUNT_HEADER, account))
                 .andExpect(status().isNotFound());
+    }
+
+    private String createAlert(String account, String plate) throws Exception {
+        String body = mockMvc.perform(post("/api/v1/alerts")
+                        .header(ACCOUNT_HEADER, account)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{ \"plate\": \"" + plate + "\" }"))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        return JsonPath.read(body, "$.alertId");
     }
 }

@@ -1,0 +1,18 @@
+<main>
+  <h1>Alerts</h1>
+
+  <app-alert-form
+    [saving]="saving()"
+    [alert]="editing()"
+    (submitted)="save($event)"
+    (cancelled)="closeForm()" />
+
+  @if (alerts.loading()) {
+    <p>Loading…</p>
+  } @else {
+    <app-alerts-table
+      [alerts]="alerts.alerts()"
+      (edited)="edit($event)"
+      (removed)="remove($event)" />
+  }
+</main>

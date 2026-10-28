@@ -12,6 +12,8 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.UUID;
 
+import static org.hamcrest.Matchers.containsInAnyOrder;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -104,6 +106,65 @@ class AlertsControllerIT {
         mockMvc.perform(get("/api/v1/alerts"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+    }
+
+    @Test
+    void listReturnsOnlyAlertsOfCurrentAccount() throws Exception {
+        String account = UUID.randomUUID().toString();
+        String otherAccount = UUID.randomUUID().toString();
+        createAlert(account, "WA10001");
+        createAlert(account, "WA10002");
+        createAlert(otherAccount, "WA10003");
+
+        mockMvc.perform(get("/api/v1/alerts")
+                        .header(ACCOUNT_HEADER, account))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.length()").value(2))
+                .andExpect(jsonPath("$.items[*].plate", containsInAnyOrder("WA10001", "WA10002")))
+                .andExpect(jsonPath("$.page.totalElements").value(2));
+    }
+
+    @Test
+    void getReturnsAlert() throws Exception {
+        String account = UUID.randomUUID().toString();
+        String alertId = createAlert(account, "LU20002");
+
+        mockMvc.perform(get("/api/v1/alerts/{id}", alertId)
+                        .header(ACCOUNT_HEADER, account))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.alertId").value(alertId))
+                .andExpect(jsonPath("$.plate").value("LU20002"));
+    }
+
+    @Test
+    void updateChangesAlertAndIncrementsVersion() throws Exception {
+        String account = UUID.randomUUID().toString();
+        String alertId = createAlert(account, "SK30003");
+
+        mockMvc.perform(put("/api/v1/alerts/{id}", alertId)
+                        .header(ACCOUNT_HEADER, account)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "plate": "SK30004", "alertText": "Changed", "version": 0 }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.plate").value("SK30004"))
+                .andExpect(jsonPath("$.alertText").value("Changed"))
+                .andExpect(jsonPath("$.version").value(1));
+    }
+
+    @Test
+    void deleteRemovesAlert() throws Exception {
+        String account = UUID.randomUUID().toString();
+        String alertId = createAlert(account, "BI40004");
+
+        mockMvc.perform(delete("/api/v1/alerts/{id}", alertId)
+                        .header(ACCOUNT_HEADER, account))
+                .andExpect(status().isNoContent());
+
+        mockMvc.perform(get("/api/v1/alerts/{id}", alertId)
+                        .header(ACCOUNT_HEADER, account))
+                .andExpect(status().isNotFound());
     }
 
     private String createAlert(String account, String plate) throws Exception {

@@ -153,14 +153,14 @@ rows about service code are not started.
 
 **The attribute `custom:account_id`.** Cognito does not let a custom attribute be removed from an existing
 pool. With the attribute removed from the configuration, `terraform plan` shows an in-place update of the
-pool, not a replacement, so applying it most likely leaves the attribute in the pool and the plan may keep
-showing the removal (to be checked after the apply). The decision is to recreate the pool on `dev` when the
-changes are deployed, which gives a clean schema. That is a deliberate one-off step:
+pool, but applying it fails with `cannot modify or remove schema items`. The way to a clean schema is to
+recreate the pool, a deliberate one-off step that was done on `dev` like this:
 
-1. Switch `deletion_protection` of the pool to `INACTIVE` and apply (in-place).
-2. Apply with `-replace=module.user_pool.aws_cognito_user_pool.this`. The pool, its app clients and groups are
-   recreated, the authorizers of the gateway follow in-place, and all users (people and devices) and the app
-   client ids change.
+1. Switch `deletion_protection` of the pool to `INACTIVE` and apply. (The same apply also failed on the
+   schema removal, but protection was already switched off by then.)
+2. Apply with `"-replace=module.user_pool.aws_cognito_user_pool.this"` (quote the argument in PowerShell).
+   The pool, its app clients and groups are recreated, the authorizers of the gateway follow in-place, and
+   all users (people and devices) and the app client ids change.
 3. Switch `deletion_protection` back to `ACTIVE` and apply.
 
 ## 10. Open points

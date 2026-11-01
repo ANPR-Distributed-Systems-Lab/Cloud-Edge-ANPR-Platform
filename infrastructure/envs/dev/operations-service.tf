@@ -48,6 +48,24 @@ module "operations_events_queue" {
   topic_arn = aws_sns_topic.edge_events.arn
 }
 
+# ---------------------------------------------------------------- device events queue
+# Pairings announced by device-management-service (device-events.tf): the service keeps its own copy
+# of "device -> owner account" built from them and uses it to find the account of every event above.
+# The body is the JSON of the event (eventId, occurredAt, version, deviceId, accountId); the attribute
+# eventType is device.paired or device.unpaired. Same delivery rules as the queue above: at-least-once,
+# 5 deliveries then the DLQ, so apply an event only when its version is newer than the stored one.
+
+module "operations_device_events_queue" {
+  source = "../../modules/event-queue"
+
+  name      = "${local.name}-operations-device-events"
+  topic_arn = aws_sns_topic.device_events.arn
+
+  filter_policy = jsonencode({
+    eventType = ["device.paired", "device.unpaired"]
+  })
+}
+
 # ---------------------------------------------------------------- permissions of the application
 # Used by the code in the container through the task role (no credentials to configure).
 
@@ -61,7 +79,10 @@ data "aws_iam_policy_document" "operations_app" {
       "sqs:GetQueueAttributes",
       "sqs:GetQueueUrl",
     ]
-    resources = [module.operations_events_queue.queue_arn]
+    resources = [
+      module.operations_events_queue.queue_arn,
+      module.operations_device_events_queue.queue_arn,
+    ]
   }
 }
 
@@ -85,7 +106,8 @@ module "operations_service" {
   secrets = module.operations_rds.ssm_parameter_arns
 
   environment = {
-    EVENTS_QUEUE_URL = module.operations_events_queue.queue_url
+    EVENTS_QUEUE_URL        = module.operations_events_queue.queue_url
+    DEVICE_EVENTS_QUEUE_URL = module.operations_device_events_queue.queue_url
   }
 
   task_role_policies = {

@@ -1,8 +1,9 @@
 # The user directory of the platform: web users and edge devices sign in here, and API Gateway
 # validates the access tokens issued by this pool.
 #
-# Nobody can sign up on their own. Administrators (later device-management-service, for devices)
-# create the users and give each one the account it belongs to.
+# Nobody can sign up on their own. Administrators create the people, device-management-service
+# creates the devices. Every user belongs to exactly one group, which tells what kind of account it
+# is (a person or a device); a trigger turns the group into the claim account_type of the tokens.
 
 variable "name" {
   type = string
@@ -13,8 +14,13 @@ variable "clients" {
   type        = map(list(string))
 }
 
+variable "groups" {
+  description = "Names of the groups that tell the kind of account (e.g. users, devices); create each user in one of them."
+  type        = set(string)
+}
+
 variable "pre_token_function_name" {
-  description = "Lambda that copies the account of the user into a claim (see lambdas/token_claims)."
+  description = "Lambda that turns the group of the user into the claim account_type (see lambdas/token_claims)."
   type        = string
 }
 
@@ -49,26 +55,21 @@ resource "aws_cognito_user_pool" "this" {
     require_symbols   = true
   }
 
-  # The account (tenant) of the user, stored as custom:account_id. Immutable on purpose: it is
-  # set when an administrator creates the user, and no client can change it later.
-  schema {
-    name                = "account_id"
-    attribute_data_type = "String"
-    mutable             = false
-    required            = false
-
-    string_attribute_constraints {
-      min_length = 36 # a UUID
-      max_length = 36
-    }
-  }
-
   lambda_config {
     pre_token_generation_config {
       lambda_arn     = var.pre_token_function_arn
       lambda_version = "V2_0"
     }
   }
+}
+
+# Membership is assigned by administrators and services with the right IAM permissions only;
+# no client can change it, so the claim account_type cannot be forged.
+resource "aws_cognito_user_group" "this" {
+  for_each = var.groups
+
+  name         = each.key
+  user_pool_id = aws_cognito_user_pool.this.id
 }
 
 resource "aws_lambda_permission" "pre_token" {
@@ -98,6 +99,11 @@ output "user_pool_id" {
 output "issuer" {
   description = "The `iss` of the tokens, what API Gateway authorizers check."
   value       = "https://${aws_cognito_user_pool.this.endpoint}"
+}
+
+output "user_pool_arn" {
+  description = "What IAM policies of services that manage users refer to."
+  value       = aws_cognito_user_pool.this.arn
 }
 
 output "client_ids" {

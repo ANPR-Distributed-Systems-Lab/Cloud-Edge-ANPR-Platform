@@ -88,5 +88,6 @@ fixed. The same happens to data of a device that was unpaired but still holds a 
 - **Rebuilding a consumer.** A new or restored database has no way to replay events. A "republish all pairs"
   action is the likely answer.
 - **Unpairing semantics.** Whether the Cognito user of the device is disabled at the same time.
-- **Alarm on the DLQ.** An alarm on the depth of the DLQ is planned together with the Terraform change.
+- **Alarm on the DLQ.** Nobody is told when a message lands in the DLQ. An alarm on its depth (with someone
+  to notify) is not part of the first Terraform change.
 - **Several devices per account.** The events already carry one device each, so they do not change.

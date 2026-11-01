@@ -1,6 +1,7 @@
 # device-management-service: everything the service owns, in one place.
 # Image repository, DynamoDB tables, ECS service and the role its deploy workflow uses.
-# Its API routes are registered in api.tf; the images bucket it signs URLs for is in storage.tf.
+# Its API routes are registered in api.tf; the images bucket it signs URLs for is in storage.tf;
+# the topic it publishes pairing events to is in device-events.tf.
 
 # ---------------------------------------------------------------- image repository
 
@@ -66,6 +67,32 @@ data "aws_iam_policy_document" "device_management_app" {
     actions   = ["s3:PutObject"]
     resources = ["${module.storage_bucket.arn}/${local.images_prefix}*"]
   }
+
+  # Pairing a device: the service creates the Cognito user of the device and puts it in the group
+  # of devices. Nothing else in the pool (no deleting users, no listing, no other groups).
+  statement {
+    sid = "CreateDeviceUsers"
+    actions = [
+      "cognito-idp:AdminCreateUser",
+      "cognito-idp:AdminSetUserPassword",
+      "cognito-idp:AdminAddUserToGroup",
+    ]
+    resources = [module.user_pool.user_pool_arn]
+  }
+
+  # Announces pairings to the other services (device-events.tf). The topic is encrypted, so
+  # publishing also needs the topic's key (the same one as edge-events).
+  statement {
+    sid       = "PublishDeviceEvents"
+    actions   = ["sns:Publish"]
+    resources = [aws_sns_topic.device_events.arn]
+  }
+
+  statement {
+    sid       = "UseTopicKey"
+    actions   = ["kms:GenerateDataKey*", "kms:Decrypt"]
+    resources = [data.aws_kms_key.sns.arn]
+  }
 }
 
 # ---------------------------------------------------------------- service
@@ -88,6 +115,9 @@ module "device_management_service" {
     DEVICE_CONFIGURATIONS_TABLE = module.device_configurations_table.name
     DEVICE_STATUSES_TABLE       = module.device_statuses_table.name
     IMAGES_BUCKET               = module.storage_bucket.name
+    DEVICE_EVENTS_TOPIC_ARN     = aws_sns_topic.device_events.arn
+    USER_POOL_ID                = module.user_pool.user_pool_id
+    DEVICES_GROUP               = one([for group, type in local.account_type_by_group : group if type == "device"])
   }
 
   task_role_policies = {

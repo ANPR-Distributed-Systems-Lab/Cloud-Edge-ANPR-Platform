@@ -1,16 +1,29 @@
 # Authentication: Amazon Cognito issues the tokens, API Gateway validates them (api.tf).
+# The model is described in docs/identity-and-access.md.
 #
 #   web client      people using the web application
 #   device client   Raspberry Pi edge nodes; each device is a user of the pool
 #
-# Every user belongs to one account (attribute custom:account_id). API Gateway hands the
-# identity to the backends: services receive the headers X-Account-Id and X-User-Id, and the
-# ingest function receives the claims (see api.tf and events.tf).
+# What a user is, a person or a device, is the group it belongs to. A pre token generation trigger turns
+# the group into the claim account_type ("user" or "device"). API Gateway hands the identity to the
+# backends: services receive the headers X-Account-Id (sub of the token) and X-Account-Type, the ingest
+# function receives the claims (see api.tf and events.tf). The account that owns a device is not in the
+# token: services learn it from the device-events topic (device-events.tf).
 #
-# Users are created by administrators, for example:
-#   aws cognito-idp admin-create-user --user-pool-id <id> --username <name> --message-action SUPPRESS \
-#       --user-attributes Name=custom:account_id,Value=<account uuid>
+# People are created by administrators, for example:
+#   aws cognito-idp admin-create-user --user-pool-id <id> --username <name> --message-action SUPPRESS
 #   aws cognito-idp admin-set-user-password --user-pool-id <id> --username <name> --password <...> --permanent
+#   aws cognito-idp admin-add-user-to-group --user-pool-id <id> --username <name> --group-name users
+# Devices are created by device-management-service when an administrator pairs them (group "devices").
+
+locals {
+  # Group of the user pool -> account_type claim of its tokens. The single source of truth: the user
+  # pool creates the groups, the trigger receives the mapping.
+  account_type_by_group = {
+    users   = "user"
+    devices = "device"
+  }
+}
 
 # Source: infrastructure/lambdas/token_claims/token_claims.py (unit tests next to it).
 module "token_claims" {
@@ -20,6 +33,10 @@ module "token_claims" {
   source_file     = "${path.module}/../../lambdas/token_claims/token_claims.py"
   handler         = "token_claims.handler"
   timeout_seconds = 5 # Cognito gives a trigger 5 seconds
+
+  environment = {
+    ACCOUNT_TYPE_BY_GROUP = jsonencode(local.account_type_by_group)
+  }
 }
 
 module "user_pool" {
@@ -34,6 +51,8 @@ module "user_pool" {
     # Password sign-in over TLS: the simplest flow for a Python client on the device.
     device = ["ALLOW_USER_PASSWORD_AUTH", "ALLOW_REFRESH_TOKEN_AUTH"]
   }
+
+  groups = keys(local.account_type_by_group)
 
   pre_token_function_name = module.token_claims.function_name
   pre_token_function_arn  = module.token_claims.function_arn

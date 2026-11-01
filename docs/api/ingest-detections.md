@@ -187,14 +187,17 @@ UI must tolerate a missing object for a short time.
 
 ## 8. Implementation status
 
-| Aspect | Bootstrap Lambda (`infrastructure/lambdas/event_ingest`) | This document |
+The Lambda lives in `infrastructure/lambdas/event_ingest`. The identity rules below are implemented (not
+deployed yet); the rest of the contract is still to build.
+
+| Aspect | Lambda now | This document |
 |---|---|---|
+| Required claims | `sub` and `account_type = device`, otherwise `403 FORBIDDEN` | Same (done) |
+| Message attributes | `eventType`, `traceId`, `deviceId` | Same (done) |
 | Validation | JSON syntax and size only | Full atomic validation with `fields[]` (to build) |
-| Required claims | `account_id` and `sub` | `sub` and `account_type = device` |
-| Message attributes | `eventType`, `traceId`, `accountId`, `deviceId` | `eventType`, `traceId`, `deviceId` |
-| Success body | `{messageId, traceId}` | `{batchId, accepted, traceId}` |
-| Error body | RFC 9457 with `code` and `requestId`, no `fields[]` | The same plus `fields[]` |
-| Content type check | Not done | 415 |
+| Success body | `{messageId, traceId}` | `{batchId, accepted, traceId}` (to build, needs the validation) |
+| Error body | RFC 9457 with `code` and `requestId`, no `fields[]` | The same plus `fields[]` (to build) |
+| Content type check | Not done | 415 (to build) |
 
 ## 9. Open points
 

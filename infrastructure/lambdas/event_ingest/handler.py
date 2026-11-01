@@ -7,8 +7,10 @@ published message is:
     body        the request body, unchanged (a JSON object or array, at most MAX_BODY_BYTES)
     attributes  eventType   derived from the route, never taken from the client
                 traceId     the client's X-Trace-Id header if valid, otherwise the API Gateway request id
-                accountId   the account of the device, from the token (never from the body)
-                deviceId    the id of the device (the token's sub), from the token
+                deviceId    the id of the device (the token's sub), from the token (never from the body)
+
+The owner of the device is not in the message: every consumer resolves it from its own copy of the
+device pairing (see docs/identity-and-access.md).
 
 Every queue subscribed to the topic receives a copy (fan-out). The response is 202 with the
 message id, or an RFC 9457 problem (400, 403, 404, 413, 503) carrying the same traceId.
@@ -30,6 +32,9 @@ from botocore.exceptions import BotoCoreError, ClientError
 TOPIC_ARN = os.environ["TOPIC_ARN"]
 EVENT_TYPE_BY_ROUTE = json.loads(os.environ["EVENT_TYPE_BY_ROUTE"])  # set by Terraform from the route list
 
+# Value of the account_type claim (see lambdas/token_claims) that identifies a device.
+DEVICE_ACCOUNT_TYPE = "device"
+
 # SNS accepts 256 KiB per message including attributes; keep headroom for the attributes.
 MAX_BODY_BYTES = 250 * 1024
 
@@ -47,10 +52,9 @@ def handler(event, context):
     if event_type is None:
         return _rejected(404, "UNKNOWN_ROUTE", "No event type is configured for this route.", trace_id)
 
-    identity = _identity(event)
-    if identity is None:
-        return _rejected(403, "MISSING_IDENTITY", "The token does not identify a device of an account.", trace_id)
-    account_id, device_id = identity
+    device_id = _device_id(event)
+    if device_id is None:
+        return _rejected(403, "FORBIDDEN", "The token is not a device token.", trace_id)
 
     body = _raw_body(event)
     if body is None:
@@ -69,7 +73,6 @@ def handler(event, context):
             MessageAttributes={
                 "eventType": {"DataType": "String", "StringValue": event_type},
                 "traceId": {"DataType": "String", "StringValue": trace_id},
-                "accountId": {"DataType": "String", "StringValue": account_id},
                 "deviceId": {"DataType": "String", "StringValue": device_id},
             },
         )
@@ -82,7 +85,6 @@ def handler(event, context):
         extra={
             "eventType": event_type,
             "traceId": trace_id,
-            "accountId": account_id,
             "deviceId": device_id,
             "messageId": published["MessageId"],
             "bodyBytes": len(body),
@@ -102,16 +104,16 @@ def _trace_id(event):
     return event["requestContext"]["requestId"]
 
 
-def _identity(event):
-    """(account id, device id) from the validated token, or None if the token lacks either.
+def _device_id(event):
+    """The id of the device from the validated token, or None if the token is not a device token.
 
-    account_id is added to the token by the user pool's pre token generation trigger; sub is the
-    id of the Cognito user, which for a device is the device. Without an authorizer on the route
+    sub is the id of the Cognito user, which for a device account is the device. account_type is added
+    to the token by the user pool's pre token generation trigger. Without an authorizer on the route
     there are no claims at all, so the request is refused rather than published anonymously.
     """
     claims = event.get("requestContext", {}).get("authorizer", {}).get("jwt", {}).get("claims", {})
-    account_id, device_id = claims.get("account_id"), claims.get("sub")
-    return (account_id, device_id) if account_id and device_id else None
+    device_id = claims.get("sub")
+    return device_id if device_id and claims.get("account_type") == DEVICE_ACCOUNT_TYPE else None
 
 
 def _raw_body(event):

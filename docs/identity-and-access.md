@@ -43,7 +43,7 @@ Naming pitfall, because the word "account" is used in two ways:
 - Devices sign in with a username and password over TLS and keep a refresh token (the bootstrap flow). The
   credentials are generated at pairing and stored on the device, never in the repository.
 - The pool has no custom attribute describing the account. The bootstrap attribute `custom:account_id` is
-  gone from the target (see section 9).
+  gone from the Terraform configuration and nothing reads it (see section 9 for what happens to the pool).
 
 ## 4. API Gateway
 
@@ -65,8 +65,11 @@ For service routes the gateway injects these headers, overwriting anything the c
 
 Lambda integrations receive the claims in the request context instead of headers.
 
-The pairing endpoint of device-management is exposed on a separate route with **IAM authorization**
-(AWS Signature V4): only an administrator with AWS credentials can call it, and no Cognito token opens it.
+The pairing endpoint of device-management is exposed on a separate route (`/api/v1/admin/...`) with **IAM
+authorization** (AWS Signature V4): only an administrator with AWS credentials can call it, and no Cognito
+token opens it. There is no token on such a route, so the gateway sets `X-Account-Type: iam` and
+`X-Account-Id` to the ARN of the calling IAM principal (useful in audit logs), overwriting whatever the
+client sent.
 
 ## 5. Authorization rules
 
@@ -133,16 +136,32 @@ owner of the device and returns the alerts of that account (supports `ETag` / `I
 
 ## 9. Changes to the bootstrap
 
-| Area | Today | Target |
+The rows about infrastructure (user pool, gateway, routes, ingest Lambda, messaging, task role permissions)
+are written in `infrastructure/` and were reviewed with `terraform plan`; they are **not applied yet**. The
+rows about service code are not started.
+
+| Area | Bootstrap | Target |
 |---|---|---|
-| User pool | Immutable attribute `custom:account_id`; trigger copies it into the claim `account_id` | Groups `users` / `devices`; trigger writes `account_type`; **the pool is recreated** on `dev` when the changes are deployed, because Cognito does not allow removing a custom attribute from an existing pool (to be confirmed in `terraform plan`; deletion protection has to be switched off for that step, and users and app client ids change) |
+| User pool | Immutable attribute `custom:account_id`; trigger copies it into the claim `account_id` | Groups `users` / `devices`; trigger writes `account_type`; no account attribute (see below) |
 | Gateway headers | `X-Account-Id` from claim `account_id`, `X-User-Id` from `sub` | `X-Account-Id` from `sub`, `X-Account-Type` from `account_type`; `X-User-Id` is dropped |
-| Routes | Alerts of a device at `/api/v1/devices/{deviceId}/alerts` behind `users` | One alerts endpoint `GET /api/v1/alerts` behind `users_and_devices`; new pairing route with IAM authorization |
+| Routes | Alerts of a device at `/api/v1/devices/{deviceId}/alerts` behind `users` | `GET /api/v1/alerts` behind `users_and_devices` (other alert methods stay behind `users`); `/api/v1/admin/*` of device-management with IAM authorization |
 | Ingest Lambda | Needs claims `account_id` and `sub`; publishes `accountId` and `deviceId` | Needs `sub` and `account_type = device`; publishes `deviceId` only; validates the body (see the ingest documents) |
-| Messaging | Topic `edge-events` and one queue for operations | Adds topic `device-events` and queue `operations-device-events` with a DLQ (5 receives, 14 days retention) |
-| device-management | No endpoint, tables only | Pairing endpoint, Cognito and SNS permissions on its task role |
+| Messaging | Topic `edge-events` and one queue for operations | Adds topic `device-events` (only the task role of device-management may publish) and queue `operations-device-events` with a DLQ (5 receives, 14 days retention) |
+| device-management | No endpoint, tables only | Pairing endpoint; task role may create device users in the pool, publish to `device-events` and use the topic key |
 | operations | `CurrentAccount` reads `X-Account-Id` as the owner | Reads `X-Account-Type`, resolves the owner of a device caller; tables `accounts` and `devices`; consumer of `device-events` |
-| `CLAUDE.md` | Local apps may connect to SNS/SQS on `dev` | Local apps do not connect to SNS/SQS on AWS |
+| `CLAUDE.md` | Local apps may connect to SNS/SQS on `dev` | Local apps do not connect to SNS/SQS on AWS (done) |
+
+**The attribute `custom:account_id`.** Cognito does not let a custom attribute be removed from an existing
+pool. With the attribute removed from the configuration, `terraform plan` shows an in-place update of the
+pool, not a replacement, so applying it most likely leaves the attribute in the pool and the plan may keep
+showing the removal (to be checked after the apply). The decision is to recreate the pool on `dev` when the
+changes are deployed, which gives a clean schema. That is a deliberate one-off step:
+
+1. Switch `deletion_protection` of the pool to `INACTIVE` and apply (in-place).
+2. Apply with `-replace=module.user_pool.aws_cognito_user_pool.this`. The pool, its app clients and groups are
+   recreated, the authorizers of the gateway follow in-place, and all users (people and devices) and the app
+   client ids change.
+3. Switch `deletion_protection` back to `ACTIVE` and apply.
 
 ## 10. Open points
 

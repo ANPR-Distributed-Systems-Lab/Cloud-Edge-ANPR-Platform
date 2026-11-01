@@ -70,6 +70,19 @@ output "operations_events_dlq_url" {
   value       = module.operations_events_queue.dlq_url
 }
 
+output "device_events_topic_arn" {
+  value = aws_sns_topic.device_events.arn
+}
+
+output "operations_device_events_queue_url" {
+  value = module.operations_device_events_queue.queue_url
+}
+
+output "operations_device_events_dlq_url" {
+  description = "Device events operations-service failed to process 5 times; inspect and redrive from here."
+  value       = module.operations_device_events_queue.dlq_url
+}
+
 output "storage_bucket_name" {
   value = module.storage_bucket.name
 }
@@ -83,7 +96,7 @@ output "device_statuses_table_name" {
 }
 
 output "user_pool_id" {
-  description = "Cognito user pool of web users and devices (see auth.tf for how to create users)."
+  description = "Cognito user pool of web users and devices (see auth.tf for how people are created; devices are created by device-management-service)."
   value       = module.user_pool.user_pool_id
 }
 

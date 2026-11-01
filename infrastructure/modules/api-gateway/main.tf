@@ -3,8 +3,10 @@
 #   services:   internet --> HTTP API --> VPC link --> Cloud Map lookup --> task private IP:port
 #   functions:  internet --> HTTP API --> Lambda function
 #
-# Every route requires a valid Cognito access token (JWT authorizer). Services receive the
-# identity of the caller as headers, functions as claims in the request event.
+# Every route is protected by an authorizer: a Cognito access token (JWT authorizer) of one of the
+# app clients the authorizer lists, or, for the reserved authorizer name "iam", an AWS Signature V4
+# request of an IAM principal allowed to execute-api:Invoke the route (administration tooling).
+# Services receive the identity of the caller as headers, functions as claims in the request event.
 
 variable "name" {
   type = string
@@ -25,7 +27,7 @@ variable "jwt_issuer" {
 }
 
 variable "authorizers" {
-  description = "Authorizers by name: the app client ids whose access tokens each one accepts. Backends refer to them by name."
+  description = "Authorizers by name: the app client ids whose access tokens each one accepts. Backends refer to them by name. The name \"iam\" is reserved for routes that require an AWS Signature V4 request instead of a token."
   type        = map(list(string))
 }
 
@@ -77,6 +79,9 @@ variable "log_retention_days" {
 }
 
 locals {
+  # Authorizer name of the routes that are protected by IAM instead of a token.
+  iam_authorizer = "iam"
+
   # Flatten {backend => routes[]} into one map entry per route, so that each route can be
   # created with for_each. The key "<backend>|<route>" is stable across applies.
   service_routes = merge([
@@ -149,13 +154,17 @@ resource "aws_apigatewayv2_integration" "service" {
 
   payload_format_version = "1.0"
 
-  # "overwrite": identity headers sent by the client are discarded, so callers cannot
-  # impersonate another account or user. The values come from the validated token:
-  # account_id is added by the pre token generation trigger, sub is the id of the Cognito
-  # user (for a device, the device).
-  request_parameters = {
-    "overwrite:header.X-Account-Id" = "$context.authorizer.claims.account_id"
-    "overwrite:header.X-User-Id"    = "$context.authorizer.claims.sub"
+  # Identity headers sent by the client are always overwritten, so callers cannot impersonate
+  # another account. Token routes: X-Account-Id is the sub of the caller's own account (for a
+  # device, the device id; the owner of a device is resolved by the service) and X-Account-Type is
+  # added by the pre token generation trigger ("user" or "device"). IAM routes carry no token: the
+  # caller is the IAM principal (X-Account-Type "iam", X-Account-Id its ARN, handy for audit logs).
+  request_parameters = each.value.authorizer == local.iam_authorizer ? {
+    "overwrite:header.X-Account-Id"   = "$context.identity.userArn"
+    "overwrite:header.X-Account-Type" = "iam"
+    } : {
+    "overwrite:header.X-Account-Id"   = "$context.authorizer.claims.sub"
+    "overwrite:header.X-Account-Type" = "$context.authorizer.claims.account_type"
   }
 }
 
@@ -166,8 +175,8 @@ resource "aws_apigatewayv2_route" "service" {
   api_id             = aws_apigatewayv2_api.this.id
   route_key          = each.value.route_key
   target             = "integrations/${aws_apigatewayv2_integration.service[each.value.service].id}"
-  authorization_type = "JWT"
-  authorizer_id      = aws_apigatewayv2_authorizer.jwt[each.value.authorizer].id
+  authorization_type = each.value.authorizer == local.iam_authorizer ? "AWS_IAM" : "JWT"
+  authorizer_id      = each.value.authorizer == local.iam_authorizer ? null : aws_apigatewayv2_authorizer.jwt[each.value.authorizer].id
 }
 
 # The service routes used to be called "this"; the rename must not recreate them.
@@ -196,8 +205,8 @@ resource "aws_apigatewayv2_route" "function" {
   api_id             = aws_apigatewayv2_api.this.id
   route_key          = each.value.route_key
   target             = "integrations/${aws_apigatewayv2_integration.function[each.value.function].id}"
-  authorization_type = "JWT"
-  authorizer_id      = aws_apigatewayv2_authorizer.jwt[each.value.authorizer].id
+  authorization_type = each.value.authorizer == local.iam_authorizer ? "AWS_IAM" : "JWT"
+  authorizer_id      = each.value.authorizer == local.iam_authorizer ? null : aws_apigatewayv2_authorizer.jwt[each.value.authorizer].id
 }
 
 # A function may be invoked by this API only (any stage, any of its routes).

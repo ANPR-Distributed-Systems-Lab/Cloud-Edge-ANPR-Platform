@@ -115,7 +115,7 @@ Content translated from the architecture diagram `Inżynierka (2).drawio` (as of
 ## Deviations
 
 Proposed deviations of the implementation from the diagram. Status: `proposed` (waiting for team approval) / `agreed`.
-In the OpenAPI contract they are referenced as `D1`–`D10` (without the `#` sign, which starts a comment in YAML).
+In the OpenAPI contract they are referenced as `D1`–`D11` (without the `#` sign, which starts a comment in YAML).
 
 | No. | Diagram | Implementation | Justification | Status |
 |---|---|---|---|---|
@@ -129,12 +129,13 @@ In the OpenAPI contract they are referenced as `D1`–`D10` (without the `#` sig
 | D8 | `detections` without a detection id | `detection_id` (UUID assigned by the RPi) | Idempotent SQS consumer: a duplicate message does not create a second record | proposed |
 | D9 | Response fields as in "Response payload" | Additional fields and rules: `alertId` in detections of all views; `deviceId` in routes (derived from `accounts`, because `device_locations` does not have it); `center`, `radiusMeters`, `truncated` (View 2); `generatedAt`, `lastSeenAt`, `lastPosition` (View 3); `lastDetectedAt` in suggestions; one alert per plate within an account (409 `ALERT_ALREADY_EXISTS`) | Fields are only added (backward compatible); they make drawing the map and incremental polling easier for the frontend; alert uniqueness prevents duplicates on the blacklist | proposed |
 | D10 | No pagination rules for the map and the RPi | No pagination, but with a limit: View 2, max 1000 detections + `truncated` flag, time range max 7 days; alert list for the RPi, full list | The map and the device need the complete data at once; the limit protects the database from queries over months of data. Exception to the "size max 100" rule | proposed |
+| D11 | View 6: alert list without filters | Optional filters in `GET /alerts`: plate prefix and creation time range (`from` inclusive, `to` exclusive); `to` must be after `from` (400 `INVALID_TIME_RANGE`) | With pagination a client-side filter only searches the current page; finding one alert on a long blacklist needs a server-side filter | proposed |
 
 ---
 
 ## Open questions (to be agreed within the team)
 
-1. Who approves deviations D1–D10? Until approval the contract is a draft version (`0.x`).
+1. Who approves deviations D1–D11? Until approval the contract is a draft version (`0.x`).
 2. View 6: history of detections "related to that car": only detections assigned to the alert (`alert_id`, as in the diagram: endpoint and index), or all detections of that plate, including those from before the alert was created?
 3. View 1: map pins: only the current results page (max 100), or a separate response with all points / clusters?
 4. Alert list for the RPi: does the device need anything besides the plate (e.g. `alertText`)?

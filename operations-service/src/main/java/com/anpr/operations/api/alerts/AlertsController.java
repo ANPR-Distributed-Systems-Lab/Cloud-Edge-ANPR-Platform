@@ -3,9 +3,9 @@ package com.anpr.operations.api.alerts;
 import com.anpr.operations.api.generated.AlertsApi;
 import com.anpr.operations.api.generated.model.*;
 import com.anpr.operations.internal.alerts.Alert;
+import com.anpr.operations.internal.alerts.AlertFilter;
 import com.anpr.operations.internal.alerts.AlertService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.annotation.CreatedBy;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
@@ -13,6 +13,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.net.URI;
+import java.time.OffsetDateTime;
 import java.util.UUID;
 
 @RestController
@@ -34,9 +35,10 @@ public class AlertsController implements AlertsApi {
     }
 
     @Override
-    public ResponseEntity<AlertPage> listAlerts(Integer page, Integer size, AlertSortField sort, SortDirection direction) {
+    public ResponseEntity<AlertPage> listAlerts(Integer page, Integer size, AlertSortField sort, SortDirection direction,
+                                                String plate, OffsetDateTime from, OffsetDateTime to) {
         PageRequest pageable = PageRequest.of(page, size, toSort(sort, direction));
-        return ResponseEntity.ok(mapper.toPage(alertService.list(pageable)));
+        return ResponseEntity.ok(mapper.toPage(alertService.list(new AlertFilter(plate, from, to), pageable)));
     }
 
     @Override
@@ -56,7 +58,6 @@ public class AlertsController implements AlertsApi {
         // Detections arrive with the SQS consumer (next stage).
         return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).build();
     }
-
 
     private static Sort toSort(AlertSortField field, SortDirection direction) {
         String property = switch (field) {

@@ -1,5 +1,6 @@
 package com.anpr.operations.api.error;
 
+import com.anpr.operations.shared.error.BadRequestException;
 import com.anpr.operations.shared.error.ConflictException;
 import com.anpr.operations.shared.error.ErrorCodes;
 import com.anpr.operations.shared.error.NotFoundException;
@@ -38,13 +39,6 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ConflictException.class)
     ProblemDetail handleConflict(ConflictException ex, HttpServletRequest request) {
         return problem(HttpStatus.CONFLICT, ex.getCode(), ex.getMessage(), request);
-    }
-
-    private ProblemDetail problem(HttpStatusCode status, String code, String detail, HttpServletRequest request) {
-        ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, detail);
-        problem.setProperty("code", code);
-        problem.setProperty("requestId", requestId(request));
-        return problem;
     }
 
     @ExceptionHandler(UnauthorizedException.class)
@@ -89,14 +83,26 @@ public class GlobalExceptionHandler {
         return problem(status, ErrorCodes.INVALID_REQUEST, "Request not supported", request);
     }
 
+    @ExceptionHandler(BadRequestException.class)
+    ProblemDetail handleInvalidInput(BadRequestException ex, HttpServletRequest request) {
+        return problem(HttpStatus.BAD_REQUEST, ex.getCode(), ex.getMessage(), request);
+    }
+
     @ExceptionHandler(Exception.class)
     ProblemDetail handleUnexpected(Exception ex, HttpServletRequest request) {
         log.error("Unexpected error", ex);
         return problem(HttpStatus.INTERNAL_SERVER_ERROR, ErrorCodes.INTERNAL_ERROR, "Unexpected error", request);
     }
 
-    private static String requestId(HttpServletRequest request){
+    private static String requestId(HttpServletRequest request) {
         String header = request.getHeader(REQUEST_ID_HEADER);
         return header != null && !header.isBlank() ? header : UUID.randomUUID().toString();
+    }
+
+    private ProblemDetail problem(HttpStatusCode status, ErrorCodes code, String detail, HttpServletRequest request) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, detail);
+        problem.setProperty("code", code.name());
+        problem.setProperty("requestId", requestId(request));
+        return problem;
     }
 }

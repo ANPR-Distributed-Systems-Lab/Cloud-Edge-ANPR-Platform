@@ -156,7 +156,7 @@ paths:
       tags: [alerts]
       operationId: listAlerts
       summary: List alerts
-      description: View 6. Sortable by creation date and by the date the alert was last triggered.
+      description: View 6. Sortable by creation date and by the date the alert was last triggered. Optional filters - plate prefix and creation time range (D11, proposal).
       parameters:
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/Size'
@@ -164,6 +164,12 @@ paths:
           in: query
           schema: { $ref: '#/components/schemas/AlertSortField' }
         - $ref: '#/components/parameters/Direction'
+        - name: plate
+          in: query
+          description: Plate prefix filter - only alerts whose plate starts with this value (D11, proposal)
+          schema: { $ref: '#/components/schemas/PlatePrefix' }
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
       responses:
         '200':
           description: OK

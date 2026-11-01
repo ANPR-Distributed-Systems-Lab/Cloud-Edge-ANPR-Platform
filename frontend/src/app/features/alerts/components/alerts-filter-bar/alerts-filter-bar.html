@@ -1,0 +1,20 @@
+<form [formGroup]="form" role="search">
+  <label for="alert-filter-plate">Plate</label>
+  <input
+    id="alert-filter-plate"
+    type="search"
+    maxlength="10"
+    autocomplete="off"
+    formControlName="plate"
+  />
+
+  <label for="alert-filter-from">Created from</label>
+  <input id="alert-filter-from" type="date" formControlName="from" />
+
+  <label for="alert-filter-to">Created to</label>
+  <input id="alert-filter-to" type="date" formControlName="to" />
+
+  @if (rangeInvalid()) {
+    <p>"Created to" must not be earlier than "Created from".</p>
+  }
+</form>

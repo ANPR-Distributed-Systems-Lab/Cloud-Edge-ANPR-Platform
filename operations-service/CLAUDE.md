@@ -27,7 +27,7 @@ Endpoints defined on the diagram — the contract must cover exactly these:
 - Diagram response fields include `id_konta`; the contract omits it from responses (D3) and it is never an input parameter (see section 2).
 - Gallery (View 1): the contract returns a presigned GET `imageUrl` instead of `s3_key` (D4, proposal).
 - Indexes: the diagram lists single-column B-Trees; we use composite indexes `(account_id, detected_at)` etc. (D1, section 5) — a deliberate design decision for the thesis.
-- Deviations are referenced in the contract as `D1`..`D10` — never write `#` after a space in an unquoted YAML string (it starts a comment and truncates the text).
+- Deviations are referenced in the contract as `D1`..`D11` — never write `#` after a space in an unquoted YAML string (it starts a comment and truncates the text).
 - Naming is open: diagram says "Alerts-And-Views-Service", repo directory is `operations-service`.
 
 ## 1. Package layout

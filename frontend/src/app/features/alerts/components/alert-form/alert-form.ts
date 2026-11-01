@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, effect, input, output } from '@angular/core';
 import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
-import { AlertResponse, CreateAlertRequest } from '../../../../api/generated';   
+import { AlertResponse, CreateAlertRequest } from '../../../../api/generated';
+import { normalizePlate } from '../../../../shared/util/plate';
 
 const PLATE_PATTERN = /^[A-Z0-9]{2,10}$/;
 @Component({
@@ -35,7 +36,7 @@ export class AlertForm {
 
     protected normalizePlate(): void {
         const control = this.form.controls.plate;
-        control.setValue(control.value.toUpperCase().replace(/[^A-Z0-9]/g, ''));
+        control.setValue(normalizePlate(control.value));
     }
 
     protected submit(): void {

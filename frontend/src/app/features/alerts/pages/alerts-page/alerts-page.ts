@@ -1,17 +1,20 @@
 import { HttpErrorResponse } from '@angular/common/http';
 import { ChangeDetectionStrategy, Component, OnInit, inject, signal, viewChild } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { EMPTY, Subject, catchError, exhaustMap, finalize, tap } from 'rxjs';
-import { AlertResponse, CreateAlertRequest } from '../../../../api/generated';
+import { EMPTY, Observable, Subject, catchError, exhaustMap, finalize, switchMap, tap } from 'rxjs';
+import { AlertPage, AlertResponse, AlertSortField, CreateAlertRequest } from '../../../../api/generated';
 import { errorMessage } from '../../../../core/http/error-messages';
 import { NotificationService } from '../../../../core/notification.service';
 import { AlertForm } from '../../components/alert-form/alert-form';
+import { AlertsFilterBar } from '../../components/alerts-filter-bar/alerts-filter-bar';
+import { AlertsPager } from '../../components/alerts-pager/alerts-pager';
 import { AlertsTable } from '../../components/alerts-table/alerts-table';
 import { AlertsFacade } from '../../data-access/alerts.facade';
+import { AlertsFilter } from '../../data-access/alerts.store';
 
 @Component({
   selector: 'app-alerts-page',
-  imports: [AlertForm, AlertsTable],
+  imports: [AlertForm, AlertsFilterBar, AlertsPager, AlertsTable],
   templateUrl: './alerts-page.html',
   changeDetection: ChangeDetectionStrategy.OnPush
 })
@@ -24,6 +27,7 @@ export class AlertsPage implements OnInit {
 
   private readonly form = viewChild.required(AlertForm);
   private readonly saveRequests = new Subject<CreateAlertRequest>();
+  private readonly loadRequests = new Subject<Observable<AlertPage>>();
 
   constructor() {
     this.saveRequests
@@ -48,10 +52,29 @@ export class AlertsPage implements OnInit {
         takeUntilDestroyed()
       )
       .subscribe();
+
+    this.loadRequests
+      .pipe(
+        switchMap(request$ => request$.pipe(catchError(() => EMPTY))),
+        takeUntilDestroyed()
+      )
+      .subscribe();
   }
 
   ngOnInit(): void {
-    this.alerts.load().subscribe();
+    this.loadRequests.next(this.alerts.load());
+  }
+
+  protected changePage(page: number): void {
+    this.loadRequests.next(this.alerts.changePage(page));
+  }
+
+  protected changeSort(sort: AlertSortField): void {
+    this.loadRequests.next(this.alerts.changeSort(sort));
+  }
+
+  protected changeFilter(filter: AlertsFilter): void {
+    this.loadRequests.next(this.alerts.changeFilter(filter));
   }
 
   protected save(request: CreateAlertRequest): void {

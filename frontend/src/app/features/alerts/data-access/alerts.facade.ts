@@ -1,8 +1,8 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
-import { AlertPage, AlertResponse, CreateAlertRequest, UpdateAlertRequest } from '../../../api/generated';
+import { AlertPage, AlertResponse, AlertSortField, CreateAlertRequest, UpdateAlertRequest } from '../../../api/generated';
 import { AlertsDataService } from './alerts-data.service';
-import { AlertsStore } from './alerts.store';
+import { AlertsFilter, AlertsStore } from './alerts.store';
 
 @Injectable({ providedIn: 'root' })
 export class AlertsFacade {
@@ -11,9 +11,23 @@ export class AlertsFacade {
 
   readonly alerts = this.store.alerts;
   readonly loading = this.store.loading;
+  readonly query = this.store.query;
+  readonly pageMeta = this.store.pageMeta;
 
   load(): Observable<AlertPage> {
     return this.data.load();
+  }
+
+  changePage(page: number): Observable<AlertPage> {
+    return this.data.changePage(page);
+  }
+
+  changeSort(sort: AlertSortField): Observable<AlertPage> {
+    return this.data.changeSort(sort);
+  }
+
+  changeFilter(filter: AlertsFilter): Observable<AlertPage> {
+    return this.data.changeFilter(filter);
   }
 
   get(alertId: string): Observable<AlertResponse> {

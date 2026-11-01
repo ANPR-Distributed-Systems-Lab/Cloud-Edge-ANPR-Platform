@@ -7,12 +7,24 @@
     (submitted)="save($event)"
     (cancelled)="closeForm()" />
 
+  <app-alerts-filter-bar (filterChanged)="changeFilter($event)" />
+
   @if (alerts.loading()) {
-    <p>Loading…</p>
-  } @else {
-    <app-alerts-table
-      [alerts]="alerts.alerts()"
-      (edited)="edit($event)"
-      (removed)="remove($event)" />
+    <p role="status">Loading…</p>
+  }
+
+  <app-alerts-table
+    [alerts]="alerts.alerts()"
+    [sort]="alerts.query().sort"
+    [direction]="alerts.query().direction"
+    (sortChanged)="changeSort($event)"
+    (edited)="edit($event)"
+    (removed)="remove($event)" />
+
+  @if (alerts.pageMeta(); as meta) {
+    <app-alerts-pager
+      [page]="meta.page"
+      [totalPages]="meta.totalPages"
+      (pageChanged)="changePage($event)" />
   }
 </main>

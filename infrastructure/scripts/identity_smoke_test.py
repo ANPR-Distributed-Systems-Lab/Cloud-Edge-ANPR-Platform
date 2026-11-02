@@ -6,9 +6,9 @@ Creates one test person (group "users") and one test device (group "devices") in
 checks with their real tokens:
 
   tokens   the access tokens carry the claim account_type ("user" / "device") and their app client
-  ingest   a device token is accepted (202) and the event reaches the operations queue with the
-           attributes eventType and deviceId and without accountId; a person's token and a request
-           without a token are refused (401)
+  ingest   a valid batch with a device token is accepted (202) and the event reaches the operations queue
+           with the attributes eventType and deviceId and without accountId; an invalid batch is refused
+           (400 VALIDATION_FAILED); a person's token and a request without a token are refused (401)
   alerts   both kinds of tokens may list alerts, only a person's may create them
   admin    the admin route refuses an unsigned request (403) and lets a signed one reach the service
 
@@ -38,6 +38,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 import boto3
@@ -86,6 +87,26 @@ def terraform_outputs(directory, profile):
 def new_password():
     """Satisfies the policy of the pool: at least 12 characters with lower and upper case, a digit and a symbol."""
     return secrets.token_urlsafe(18) + "aA1!"
+
+
+def detection_batch(batch_id, device_id):
+    """One valid detection as the edge sends it (docs/api/ingest-detections.md); batch_id marks this run."""
+    now = datetime.now(timezone.utc)
+    frame_id = str(uuid.uuid4())
+    return {
+        "batchId": batch_id,
+        "detections": [{
+            "detectionId": str(uuid.uuid4()),
+            "frameId": frame_id,
+            "detectedAt": now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}Z",
+            "plate": "SMOKE01",
+            "ocrConfidence": 0.9,
+            "detectorConfidence": 0.9,
+            "imageKey": f"images/{device_id}/{now:%Y/%m/%d}/{frame_id}.jpg",
+            "corners": [[0.40, 0.50], [0.45, 0.50], [0.45, 0.55], [0.40, 0.55]],
+            "location": {"lat": 52.2297, "lon": 21.0122},
+        }],
+    }
 
 
 def claims_of(token):
@@ -212,13 +233,19 @@ def run(session, outputs, region, accounts):
           device_claims.get("account_type") == "device" and device_claims.get("client_id") == device_client)
 
     # ingest
-    marker = str(uuid.uuid4())
-    status, text = call("POST", f"{api}/api/v1/ingest/detections", device_jwt, {"smokeTest": marker})
+    marker = str(uuid.uuid4())  # the batchId, found again in the queue
+    batch = detection_batch(marker, device_claims["sub"])
+    status, text = call("POST", f"{api}/api/v1/ingest/detections", device_jwt, batch)
     body = json.loads(text) if status == 202 else {}
     check_status("ingest: device token accepted with 202", status, status == 202)
-    status_person = call("POST", f"{api}/api/v1/ingest/detections", person_jwt, {"smokeTest": marker})[0]
+    check("ingest: response names the batch and one accepted detection",
+          body.get("batchId") == marker and body.get("accepted") == 1)
+    status_invalid, text_invalid = call("POST", f"{api}/api/v1/ingest/detections", device_jwt, {"smokeTest": marker})
+    check_status("ingest: invalid batch refused with 400 VALIDATION_FAILED", status_invalid,
+                 status_invalid == 400 and json.loads(text_invalid).get("code") == "VALIDATION_FAILED")
+    status_person = call("POST", f"{api}/api/v1/ingest/detections", person_jwt, batch)[0]
     check_status("ingest: person token refused with 401", status_person, status_person == 401)
-    status_anonymous = call("POST", f"{api}/api/v1/ingest/detections", None, {"smokeTest": marker})[0]
+    status_anonymous = call("POST", f"{api}/api/v1/ingest/detections", None, batch)[0]
     check_status("ingest: request without a token refused with 401", status_anonymous, status_anonymous == 401)
 
     message = find_test_message(sqs, queue_url, marker) if status == 202 else None

@@ -48,17 +48,17 @@ module "api" {
       discovery_service_arn = module.operations_service.discovery_service_arn
       authorizer            = "users"
 
-      # Mirrors the paths in operations-api.yaml (except the alert list of a device, see below);
-      # {proxy+} matches any sub-path. Alerts are managed by people only.
+      # Mirrors the paths in operations-api.yaml; {proxy+} matches any sub-path.
+      # Alerts are managed by people only.
       routes = [
-        "ANY /api/v1/views/{proxy+}",
+        "ANY /api/v1/detections/{proxy+}",
         "POST /api/v1/alerts",
         "ANY /api/v1/alerts/{proxy+}",
       ]
     }
 
     # The alert list is read by the web application and by the devices (every device of an account
-    # gets the alerts of its owner), so it replaces GET /api/v1/devices/{deviceId}/alerts.
+    # gets the alerts of its owner).
     operations_alert_list = {
       discovery_service_arn = module.operations_service.discovery_service_arn
       authorizer            = "users_and_devices"

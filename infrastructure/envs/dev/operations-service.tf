@@ -1,6 +1,6 @@
 # operations-service: everything the service owns, in one place.
 # Image repository, database, events queue, ECS service and the role its deploy workflow uses.
-# Its API routes are registered in api.tf.
+# Its API routes are registered in api.tf; the images bucket it signs download URLs for is in storage.tf.
 
 # ---------------------------------------------------------------- image repository
 
@@ -84,6 +84,15 @@ data "aws_iam_policy_document" "operations_app" {
       module.operations_device_events_queue.queue_arn,
     ]
   }
+
+  # Detections in responses carry imageUrl, a presigned GET URL of the photo. A presigned URL carries the
+  # permissions of whoever signed it, so the task role itself must be allowed to read images/ (read only:
+  # the devices upload through device-management). The bucket uses SSE-S3, so no KMS permission is needed.
+  statement {
+    sid       = "SignImageDownloads"
+    actions   = ["s3:GetObject"]
+    resources = ["${module.storage_bucket.arn}/${local.images_prefix}*"]
+  }
 }
 
 # ---------------------------------------------------------------- service
@@ -108,6 +117,7 @@ module "operations_service" {
   environment = {
     EVENTS_QUEUE_URL        = module.operations_events_queue.queue_url
     DEVICE_EVENTS_QUEUE_URL = module.operations_device_events_queue.queue_url
+    IMAGES_BUCKET           = module.storage_bucket.name
   }
 
   task_role_policies = {

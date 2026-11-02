@@ -11,9 +11,8 @@ from botocore.stub import Stubber
 TOPIC_ARN = "arn:aws:sns:eu-central-1:123456789012:anpr-dev-edge-events"
 ROUTE = "POST /api/v1/ingest/detections"
 REQUEST_ID = "api-gateway-request-id"
-ACCOUNT_ID = "00000000-0000-0000-0000-000000000001"
 DEVICE_ID = "a1b2c3d4-5678-90ab-cdef-111111111111"
-DEVICE_CLAIMS = {"sub": DEVICE_ID, "account_id": ACCOUNT_ID}
+DEVICE_CLAIMS = {"sub": DEVICE_ID, "account_type": "device"}
 
 
 @pytest.fixture
@@ -55,7 +54,6 @@ def expect_publish(sns, message, event_type="detection", trace_id=REQUEST_ID):
             "MessageAttributes": {
                 "eventType": {"DataType": "String", "StringValue": event_type},
                 "traceId": {"DataType": "String", "StringValue": trace_id},
-                "accountId": {"DataType": "String", "StringValue": ACCOUNT_ID},
                 "deviceId": {"DataType": "String", "StringValue": DEVICE_ID},
             },
         },
@@ -102,12 +100,13 @@ def test_decodes_base64_encoded_bodies(ingest, sns):
     "claims",
     [
         None,  # the route has no authorizer
-        {"sub": DEVICE_ID},  # no account
-        {"account_id": ACCOUNT_ID},  # no device
-        {"sub": "", "account_id": ACCOUNT_ID},
+        {"sub": DEVICE_ID},  # no account type
+        {"sub": DEVICE_ID, "account_type": "user"},  # a person, not a device
+        {"account_type": "device"},  # no id
+        {"sub": "", "account_type": "device"},
     ],
 )
-def test_rejects_requests_whose_token_does_not_identify_a_device_of_an_account(ingest, sns, claims):
+def test_rejects_requests_whose_token_is_not_a_device_token(ingest, sns, claims):
     event = api_event("{}", claims=claims)
     if claims is None:
         del event["requestContext"]["authorizer"]
@@ -115,7 +114,7 @@ def test_rejects_requests_whose_token_does_not_identify_a_device_of_an_account(i
     response = ingest.handler(event, None)
 
     assert response["statusCode"] == 403
-    assert json.loads(response["body"])["code"] == "MISSING_IDENTITY"
+    assert json.loads(response["body"])["code"] == "FORBIDDEN"
 
 
 @pytest.mark.parametrize("body", ["", "not json", '"a string"', "42", "null"])

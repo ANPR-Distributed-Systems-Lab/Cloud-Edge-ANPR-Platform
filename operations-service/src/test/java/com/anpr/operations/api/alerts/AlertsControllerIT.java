@@ -27,6 +27,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class AlertsControllerIT {
 
     private static final String ACCOUNT_HEADER = "X-Account-Id";
+    private static final String ACCOUNT_TYPE_HEADER = "X-Account-Type";
 
     @Autowired
     private MockMvc mockMvc;
@@ -95,10 +96,34 @@ class AlertsControllerIT {
                         .header(ACCOUNT_HEADER, account)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                { "plate": "PO55555", "alertText": "Changed", "version": 7 }
+                                { "alertText": "Changed", "version": 7 }
                                 """))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("CONCURRENT_MODIFICATION"));
+    }
+
+    @Test
+    void updateChangesTheTextAndNeverThePlate() throws Exception {
+        String account = UUID.randomUUID().toString();
+        String alertId = createAlert(account, "LU22222");
+
+        mockMvc.perform(put("/api/v1/alerts/{id}", alertId)
+                        .header(ACCOUNT_HEADER, account)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "plate": "LU33333", "alertText": "Changed", "version": 0 }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.plate").value("LU22222"))
+                .andExpect(jsonPath("$.alertText").value("Changed"));
+    }
+
+    @Test
+    void deviceCallerOfTheAlertListIsNotImplementedYet() throws Exception {
+        mockMvc.perform(get("/api/v1/alerts")
+                        .header(ACCOUNT_HEADER, UUID.randomUUID().toString())
+                        .header(ACCOUNT_TYPE_HEADER, "device"))
+                .andExpect(status().isNotImplemented());
     }
 
     @Test
@@ -145,10 +170,10 @@ class AlertsControllerIT {
                         .header(ACCOUNT_HEADER, account)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                { "plate": "SK30004", "alertText": "Changed", "version": 0 }
+                                { "alertText": "Changed", "version": 0 }
                                 """))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.plate").value("SK30004"))
+                .andExpect(jsonPath("$.plate").value("SK30003"))
                 .andExpect(jsonPath("$.alertText").value("Changed"))
                 .andExpect(jsonPath("$.version").value(1));
     }

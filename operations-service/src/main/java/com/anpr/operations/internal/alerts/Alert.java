@@ -36,8 +36,7 @@ public class Alert {
         return alert;
     }
 
-    public void update(String plate, String alertText) {
-        this.plate = plate;
+    public void update(String alertText) {
         this.alertText = alertText;
     }
 }

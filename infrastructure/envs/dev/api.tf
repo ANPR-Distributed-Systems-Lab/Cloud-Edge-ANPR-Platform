@@ -5,6 +5,7 @@
 #
 # Every route is listed here, so this file shows the whole public surface, and every route
 # names the authorizer that protects it. Add a route for every new path a service exposes.
+# Who the callers are and what each may do: docs/identity-and-access.md.
 
 # Security group of the API Gateway VPC link. Service tasks accept traffic from
 # this group only, so the VPC link is the single way in.
@@ -34,7 +35,8 @@ module "api" {
 
   jwt_issuer = module.user_pool.issuer
 
-  # Who may call: tokens of the web application, of the devices, or of both.
+  # Who may call: tokens of the web application, of the devices, or of both. The reserved name "iam"
+  # (used by routes below, not listed here) means: an AWS Signature V4 request of an administrator.
   authorizers = {
     users             = [module.user_pool.client_ids["web"]]
     devices           = [module.user_pool.client_ids["device"]]
@@ -47,12 +49,21 @@ module "api" {
       authorizer            = "users"
 
       # Mirrors the paths in operations-api.yaml; {proxy+} matches any sub-path.
+      # Alerts are managed by people only.
       routes = [
-        "ANY /api/v1/views/{proxy+}",
-        "ANY /api/v1/alerts",
+        "ANY /api/v1/detections/{proxy+}",
+        "POST /api/v1/alerts",
         "ANY /api/v1/alerts/{proxy+}",
-        "ANY /api/v1/devices/{deviceId}/alerts",
       ]
+    }
+
+    # The alert list is read by the web application and by the devices (every device of an account
+    # gets the alerts of its owner).
+    operations_alert_list = {
+      discovery_service_arn = module.operations_service.discovery_service_arn
+      authorizer            = "users_and_devices"
+
+      routes = ["GET /api/v1/alerts"]
     }
 
     device_management = {
@@ -69,6 +80,17 @@ module "api" {
         "ANY /api/v1/devices/{deviceId}/status",
         "ANY /api/v1/images/presigned-urls",
       ]
+    }
+
+    # Pairing of devices with accounts (creates the Cognito user of the device and publishes
+    # device.paired). Only an administrator with AWS credentials may call it: requests must be
+    # signed (SigV4) by a principal allowed to execute-api:Invoke on this API. The contract is
+    # still to be written, so the whole /admin namespace is routed.
+    device_management_admin = {
+      discovery_service_arn = module.device_management_service.discovery_service_arn
+      authorizer            = "iam"
+
+      routes = ["ANY /api/v1/admin/{proxy+}"]
     }
   }
 

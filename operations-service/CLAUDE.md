@@ -8,26 +8,24 @@ Business layer microservice (diagram name: "Mikroserwis 2 / Alerts-And-Views-Ser
 
 **Source of truth for views 1–6** (description, response payload, indexing requirements, agreed deviations): [`docs/views-specification.md`](../docs/views-specification.md). Read it before changing the contract, schema or queries. Any new deviation from the diagram is added to its "Odstępstwa" table.
 
-Endpoints defined on the diagram — the contract must cover exactly these:
+Endpoints of the diagram, as changed by deviations D11-D16 — the contract must cover exactly these:
 
 | Endpoint | View | Purpose |
 |---|---|---|
-| `GET /api/v1/views/anpr-search` | 1 | Plate search with autocomplete and time filter (map pins, table, photo gallery) |
-| `GET /api/v1/views/radial-analysis` | 2 | Detections within X metres of a point + device GPS track in the same time window |
-| `GET /api/v1/views/live-feed` | 3 | Latest detections + device positions/track from the last 20 minutes |
-| `GET /api/v1/alerts` | 6 | Alert list, sortable by created date and last triggered date |
+| `GET /api/v1/detections/search` | 1 | Detection search by exact plate and time range (map pins, table) |
+| `GET /api/v1/detections/radial-analysis` | 2 | Detections within X metres of a point + device GPS track in the same time window |
+| `GET /api/v1/detections/live-feed` | 3 | Latest detections + device positions/track from the last 20 minutes |
+| `GET /api/v1/alerts` | 6, IoT | Alert list: pages for people, sortable by created date and last triggered date; the full list with `ETag` for devices |
 | `POST /api/v1/alerts` | 6 | Create alert for a plate |
-| `PUT /api/v1/alerts/{alertId}` | 6 | Update alert |
+| `PUT /api/v1/alerts/{alertId}` | 6 | Update alert text (the plate is immutable) |
 | `DELETE /api/v1/alerts/{alertId}` | 6 | Delete alert |
-| `GET /api/v1/alerts/{alertId}/detections` | 6 | Detection history linked to an alert |
-| `GET /api/v1/devices/{deviceId}/alerts` | IoT | Alert list synced by Raspberry Pi |
 
-- Additions not on the diagram, **pending agreement with the teammate** (then add them to the diagram, or remove from the contract): `GET /api/v1/alerts/{alertId}` (edit form, refresh after 409) and `GET /api/v1/views/anpr-search/plate-suggestions` (lightweight autocomplete). Fallback if rejected: autocomplete as a parameter of `anpr-search`.
+- Additions not on the diagram, **pending agreement with the teammate** (then add them to the diagram, or remove from the contract): `GET /api/v1/alerts/{alertId}` (edit form, refresh after 409), `GET /api/v1/detections/{detectionId}` (details of one detection, D18) and `GET /api/v1/detections/plate-suggestions` (lightweight autocomplete). Fallback if rejected: autocomplete as a parameter of the search.
 - Out of scope: Views 4 (Raspberry Pi settings) and 5 (device health) — DynamoDB, another service. The frontend (same owner) consumes that service's contract.
 - Diagram response fields include `id_konta`; the contract omits it from responses (D3) and it is never an input parameter (see section 2).
-- Gallery (View 1): the contract returns a presigned GET `imageUrl` instead of `s3_key` (D4, proposal).
+- Detections return a presigned GET `imageUrl` instead of `s3_key` (D4, proposal).
 - Indexes: the diagram lists single-column B-Trees; we use composite indexes `(account_id, detected_at)` etc. (D1, section 5) — a deliberate design decision for the thesis.
-- Deviations are referenced in the contract as `D1`..`D10` — never write `#` after a space in an unquoted YAML string (it starts a comment and truncates the text).
+- Deviations are referenced in the contract as `D1`..`D18` — never write `#` after a space in an unquoted YAML string (it starts a comment and truncates the text).
 - Naming is open: diagram says "Alerts-And-Views-Service", repo directory is `operations-service`.
 
 ## 1. Package layout
@@ -53,9 +51,9 @@ Areas: `search` (View 1), `radial` (View 2), `livefeed` (View 3), `alerts` (View
 
 - `operations-api.yaml` (service root) is the source of truth. Controllers and DTOs are generated into `target/` (gitignored).
 - Separate schemas for create, update and response (`CreateAlertRequest`, `UpdateAlertRequest`, `AlertResponse`). Never one shared object.
-- Every list endpoint is paginated with an upper bound (`size` max 100). Sort fields are enums, never free text.
-- Account identity comes from the API Gateway injected header (JWT claims), never from a path/query/body parameter.
-- `GET /devices/{deviceId}/alerts` must verify the device belongs to the caller's account and supports `ETag` / `If-None-Match`.
+- Every list endpoint is paginated with an upper bound (`size` max 100, `GET /detections/search` max 1000). Sort fields are enums, never free text.
+- Account identity comes from the API Gateway injected headers (JWT claims), never from a path/query/body parameter. `X-Account-Id` is the caller's own account: for `X-Account-Type: device` it is the device, and the owner of the data is found in the `devices` table (docs/identity-and-access.md).
+- `GET /alerts` called by a device (`X-Account-Type: device`) returns all alerts of its owner and supports `ETag` / `If-None-Match`; a person gets pages and no `ETag`.
 - A contract change ships in one PR: yaml + backend + regenerated frontend client + tests.
 - Backward compatible only: add fields, never rename/remove. Breaking change = new version path.
 
@@ -89,7 +87,7 @@ Areas: `search` (View 1), `radial` (View 2), `livefeed` (View 3), `alerts` (View
 ## 6. SQS consumers
 
 - Delivery is at-least-once. Every consumer is idempotent: detections are keyed by the edge-generated `detection_id` (unique constraint + `ON CONFLICT DO NOTHING`).
-- Alert matching (set `alert_id`, update `last_detected_at`) happens in the same transaction as the insert; the resulting change is published to SNS after commit (root rule: modified record → event).
+- Detections store no alert id: the alert of a detection follows from `(account_id, plate)` when reading (D14). `lastDetectedAt` of an alert is computed when reading, as the latest `detected_at` of its plate in the account (D17); consumers never touch `alerts`.
 - A message that fails N times goes to the DLQ; one poison message must not block the queue.
 - Trace id is read from message attributes into MDC and cleared in `finally`.
 

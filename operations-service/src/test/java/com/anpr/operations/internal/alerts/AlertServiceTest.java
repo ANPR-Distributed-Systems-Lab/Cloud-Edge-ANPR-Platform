@@ -99,46 +99,22 @@ class AlertServiceTest {
         Alert alert = existingAlert("WA12345", 1L);
         when(alertRepository.findByAlertIdAndAccountId(alert.getAlertId(), ACCOUNT_ID)).thenReturn(Optional.of(alert));
 
-        assertThatThrownBy(() -> alertService.update(alert.getAlertId(), "WA12345", null, 0L))
+        assertThatThrownBy(() -> alertService.update(alert.getAlertId(), null, 0L))
                 .isInstanceOfSatisfying(ConflictException.class,
                         e -> assertThat(e.getCode()).isEqualTo(ErrorCodes.CONCURRENT_MODIFICATION));
         verify(alertRepository, never()).saveAndFlush(any());
     }
 
     @Test
-    void updateToPlateUsedByAnotherAlertThrowsConflict() {
-        Alert alert = existingAlert("WA12345", 0L);
-        when(alertRepository.findByAlertIdAndAccountId(alert.getAlertId(), ACCOUNT_ID)).thenReturn(Optional.of(alert));
-        when(alertRepository.existsByAccountIdAndPlate(ACCOUNT_ID, "KR99999")).thenReturn(true);
-
-        assertThatThrownBy(() -> alertService.update(alert.getAlertId(), "KR99999", null, 0L))
-                .isInstanceOfSatisfying(ConflictException.class,
-                        e -> assertThat(e.getCode()).isEqualTo(ErrorCodes.ALERT_ALREADY_EXISTS));
-        verify(alertRepository, never()).saveAndFlush(any());
-    }
-
-    @Test
-    void updateToFreePlateSavesChanges() {
-        Alert alert = existingAlert("WA12345", 0L);
-        when(alertRepository.findByAlertIdAndAccountId(alert.getAlertId(), ACCOUNT_ID)).thenReturn(Optional.of(alert));
-        when(alertRepository.existsByAccountIdAndPlate(ACCOUNT_ID, "KR99999")).thenReturn(false);
-        when(alertRepository.saveAndFlush(alert)).thenReturn(alert);
-
-        Alert updated = alertService.update(alert.getAlertId(), "KR99999", "Moved", 0L);
-
-        assertThat(updated.getPlate()).isEqualTo("KR99999");
-        assertThat(updated.getAlertText()).isEqualTo("Moved");
-    }
-
-    @Test
-    void updateKeepingSamePlateSkipsDuplicateCheck() {
+    void updateChangesTheTextAndKeepsThePlate() {
         Alert alert = existingAlert("WA12345", 0L);
         when(alertRepository.findByAlertIdAndAccountId(alert.getAlertId(), ACCOUNT_ID)).thenReturn(Optional.of(alert));
         when(alertRepository.saveAndFlush(alert)).thenReturn(alert);
 
-        Alert updated = alertService.update(alert.getAlertId(), "WA12345", "New text", 0L);
+        Alert updated = alertService.update(alert.getAlertId(), "New text", 0L);
 
         assertThat(updated.getAlertText()).isEqualTo("New text");
+        assertThat(updated.getPlate()).isEqualTo("WA12345");
         verify(alertRepository, never()).existsByAccountIdAndPlate(any(), anyString());
     }
 

@@ -115,30 +115,39 @@ Content translated from the architecture diagram `Inżynierka (2).drawio` (as of
 ## Deviations
 
 Proposed deviations of the implementation from the diagram. Status: `proposed` (waiting for team approval) / `agreed`.
-In the OpenAPI contract they are referenced as `D1`–`D10` (without the `#` sign, which starts a comment in YAML).
+In the OpenAPI contract they are referenced as `D1`–`D18` (without the `#` sign, which starts a comment in YAML).
 
 | No. | Diagram | Implementation | Justification | Status |
 |---|---|---|---|---|
 | D1 | Separate B-Tree on `account_id` and `datetime` | Composite indexes, e.g. `(account_id, datetime DESC)`, `(account_id, plate, datetime DESC)` | Every query filters by account and time at once; one composite index serves both conditions | proposed |
 | D2 | Coordinates as `GEOMETRY` | `GEOGRAPHY(Point, 4326)` | `ST_DWithin` on geography measures the radius in metres (View 2); on geometry 4326 it uses degrees | proposed |
 | D3 | `account_id` in every response | No `account_id` in API responses | The account comes from the token; the field adds nothing for the frontend. It is never an input parameter | proposed |
-| D4 | `s3_key` in the response | `imageUrl` (presigned GET, short expiry) | The bucket is private; the browser cannot show a photo from the key alone (Gallery, View 1) | proposed |
-| D5 | Autocomplete in `GET /views/anpr-search` | Separate `GET /views/anpr-search/plate-suggestions` | A different, lighter response queried on every keystroke | proposed |
+| D4 | `s3_key` in the response | `imageUrl` (presigned GET, short expiry) | The bucket is private; the browser cannot show a photo from the key alone | proposed |
+| D5 | Autocomplete in `GET /views/anpr-search` | Separate `GET /detections/plate-suggestions` | A different, lighter response queried on every keystroke | proposed |
 | D6 | No `GET /alerts/{id}` | Endpoint added | Edit form and refresh after 409 | proposed |
 | D7 | `alerts` without id and version | `alert_id` (UUID), `version` | Endpoints use `{alert_id}`; `version` protects against overwriting a concurrent edit (409) | proposed |
 | D8 | `detections` without a detection id | `detection_id` (UUID assigned by the RPi) | Idempotent SQS consumer: a duplicate message does not create a second record | proposed |
-| D9 | Response fields as in "Response payload" | Additional fields and rules: `alertId` in detections of all views; `deviceId` in routes (derived from `accounts`, because `device_locations` does not have it); `center`, `radiusMeters`, `truncated` (View 2); `generatedAt`, `lastSeenAt`, `lastPosition` (View 3); `lastDetectedAt` in suggestions; one alert per plate within an account (409 `ALERT_ALREADY_EXISTS`) | Fields are only added (backward compatible); they make drawing the map and incremental polling easier for the frontend; alert uniqueness prevents duplicates on the blacklist | proposed |
-| D10 | No pagination rules for the map and the RPi | No pagination, but with a limit: View 2, max 1000 detections + `truncated` flag, time range max 7 days; alert list for the RPi, full list | The map and the device need the complete data at once; the limit protects the database from queries over months of data. Exception to the "size max 100" rule | proposed |
+| D9 | Response fields as in "Response payload" | Additional fields and rules: `alertId` in detections of all views; `deviceId` in routes; `center`, `radiusMeters`, `truncated` (View 2, separately for detections and for the route); `ocrConfidence`, `detectorConfidence` from ingest; `nextCursor`, `hasMore`, `lastSeenAt`, `lastPosition` (View 3); `lastDetectedAt` in suggestions; one alert per plate within an account (409 `ALERT_ALREADY_EXISTS`) | Fields are only added (backward compatible); they make drawing the map and incremental polling easier for the frontend; alert uniqueness prevents duplicates on the blacklist | proposed |
+| D10 | No pagination rules for the map and the RPi | No pagination, but with a limit: View 2, max 5000 detections (the most recent) + `truncated` flag, a route with at most one point per `trackIntervalSeconds` (request parameter, max 180 s) and at most 5000 points (the most recent) + `truncated` flag, time range max 7 days, radius max 5 km; alert list for the RPi, full list | The map and the device need the complete data at once; the limit protects the database from queries over months of data. Exception to the "size max 100" rule | agreed |
+| D11 | Paths `/api/v1/views/...` | `/api/v1/detections/search`, `/plate-suggestions`, `/radial-analysis`, `/live-feed` | The path names a resource, not a screen of the frontend | agreed |
+| D12 | "Photo gallery" tab in View 1 | Dropped from the plans: the results are a map and a list | Smaller scope | agreed |
+| D13 | Partial plate search in View 1 | Optional `plate` as an exact match (partial numbers are served by `plate-suggestions`); `from` and `to` optional, an omitted side of the range is unbounded; `size` max 1000 instead of a separate endpoint for the map | A prefix could not find exactly `WA1234` without `WA12345`; the map uses the results of the same endpoint | agreed |
+| D14 | `alert_id` in `detections`, `GET /alerts/{alert_id}/detections` | No column and no endpoint: the history of an alert is `GET /detections/search?plate=...`, and `alertId` in responses follows from the pair account and plate | The history is about the car, so it also covers detections from before the alert was created; deleting an alert breaks nothing | agreed |
+| D15 | `GET /devices/{device_id}/alerts` | Removed: the RPi uses `GET /alerts` and gets the full list of its owner with an `ETag`; a person gets pages without an `ETag` | Alerts belong to the account, so all devices of an account have the same list | agreed |
+| D16 | Modifying an alert | `PUT` changes `alertText` only, the plate is immutable (a fix is a delete and a new alert) | An alert is identified by its plate, and editing the plate had no defined meaning | agreed |
+| D17 | `last_detection_time` stored in `alerts` | `lastDetectedAt` computed when reading: the latest `detectedAt` of the plate in the account (index `(account_id, plate, detected_at DESC)`) | Always consistent with the detections, also those delivered late (store-and-forward); consumers never modify alerts, so they do not bump their `version` | agreed |
+| D18 | No way to get a single detection | Added `GET /detections/{detectionId}` | Details of a detection opened from a list or a map | agreed |
 
 ---
 
 ## Open questions (to be agreed within the team)
 
 1. Who approves deviations D1–D10? Until approval the contract is a draft version (`0.x`).
-2. View 6: history of detections "related to that car": only detections assigned to the alert (`alert_id`, as in the diagram: endpoint and index), or all detections of that plate, including those from before the alert was created?
-3. View 1: map pins: only the current results page (max 100), or a separate response with all points / clusters?
-4. Alert list for the RPi: does the device need anything besides the plate (e.g. `alertText`)?
-5. How does the RPi obtain a JWT: a Cognito user token or a separate device identity?
-6. Expiry of the photo presigned URLs (D4): the gallery and cached pages stop working once they expire.
-7. Changing the plate of an existing alert: what happens to detections already assigned to it? Deleting an alert: is `alert_id` in detections set to `null`?
-8. Limits not in the diagram: radius 25–5000 m, Live Feed window max 60 min, View 2 time range max 7 days. Do we accept them?
+2. Expiry of the photo presigned URLs (D4): cached pages stop working once they expire.
+3. Limit not in the diagram: Live Feed window max 60 min. Do we accept it?
+
+---
+
+## Known limitations
+
+1. **View 3, Live Feed cursor.** The cursor follows the order in which detections were stored (ingestion time, then `detectionId`), so detections of one batch with an identical ingestion time are not lost. Two batches stored at the same time can finish their transactions in a different order than they started, so the Live Feed returns only detections stored at least 2 seconds before the request. This holds as long as the consumer transaction that stores a batch takes less than 2 seconds; a longer one can be skipped by the cursor. Cost: new detections appear in the Live Feed about 2 seconds later. Clients need no deduplication.

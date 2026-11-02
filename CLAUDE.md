@@ -29,7 +29,7 @@ The development environment setup relies on a hybrid approach designed to maximi
 * Application code (Spring Boot / Python) is run natively, directly from the developer's IDE (IntelliJ, PyCharm).
 * Infrastructure dependencies (PostgreSQL, local DynamoDB Local instance) are launched using a `docker-compose.yml` file.
 * Databases are always local during development. The databases in the deployed `dev` environment on AWS are private and reachable only by the deployed services.
-* The locally running application can connect directly to SQS/SNS queues from the deployed `dev` cloud environment on AWS (via configuration flags).
+* The locally running application does not connect to SQS/SNS in the deployed `dev` cloud environment on AWS: a local consumer would compete with the deployed one for the same messages. How messaging is exercised locally (mocks, a local emulator, ...) is each developer's choice.
 
 ## 5. Infrastructure (IaC), Security, and FinOps
 AWS configuration is managed declaratively from the `/infrastructure` directory.

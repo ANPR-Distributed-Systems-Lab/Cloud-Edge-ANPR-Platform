@@ -1,6 +1,6 @@
 # operations-service: everything the service owns, in one place.
 # Image repository, database, events queue, ECS service and the role its deploy workflow uses.
-# Its API routes are registered in api.tf.
+# Its API routes are registered in api.tf; the images bucket it signs download URLs for is in storage.tf.
 
 # ---------------------------------------------------------------- image repository
 
@@ -48,6 +48,24 @@ module "operations_events_queue" {
   topic_arn = aws_sns_topic.edge_events.arn
 }
 
+# ---------------------------------------------------------------- device events queue
+# Pairings announced by device-management-service (device-events.tf): the service keeps its own copy
+# of "device -> owner account" built from them and uses it to find the account of every event above.
+# The body is the JSON of the event (eventId, occurredAt, version, deviceId, accountId); the attribute
+# eventType is device.paired or device.unpaired. Same delivery rules as the queue above: at-least-once,
+# 5 deliveries then the DLQ, so apply an event only when its version is newer than the stored one.
+
+module "operations_device_events_queue" {
+  source = "../../modules/event-queue"
+
+  name      = "${local.name}-operations-device-events"
+  topic_arn = aws_sns_topic.device_events.arn
+
+  filter_policy = jsonencode({
+    eventType = ["device.paired", "device.unpaired"]
+  })
+}
+
 # ---------------------------------------------------------------- permissions of the application
 # Used by the code in the container through the task role (no credentials to configure).
 
@@ -61,7 +79,19 @@ data "aws_iam_policy_document" "operations_app" {
       "sqs:GetQueueAttributes",
       "sqs:GetQueueUrl",
     ]
-    resources = [module.operations_events_queue.queue_arn]
+    resources = [
+      module.operations_events_queue.queue_arn,
+      module.operations_device_events_queue.queue_arn,
+    ]
+  }
+
+  # Detections in responses carry imageUrl, a presigned GET URL of the photo. A presigned URL carries the
+  # permissions of whoever signed it, so the task role itself must be allowed to read images/ (read only:
+  # the devices upload through device-management). The bucket uses SSE-S3, so no KMS permission is needed.
+  statement {
+    sid       = "SignImageDownloads"
+    actions   = ["s3:GetObject"]
+    resources = ["${module.storage_bucket.arn}/${local.images_prefix}*"]
   }
 }
 
@@ -85,7 +115,9 @@ module "operations_service" {
   secrets = module.operations_rds.ssm_parameter_arns
 
   environment = {
-    EVENTS_QUEUE_URL = module.operations_events_queue.queue_url
+    EVENTS_QUEUE_URL        = module.operations_events_queue.queue_url
+    DEVICE_EVENTS_QUEUE_URL = module.operations_device_events_queue.queue_url
+    IMAGES_BUCKET           = module.storage_bucket.name
   }
 
   task_role_policies = {

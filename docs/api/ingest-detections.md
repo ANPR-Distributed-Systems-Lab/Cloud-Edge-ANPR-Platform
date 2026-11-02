@@ -72,7 +72,7 @@ A frame with several plates is several detections that share `frameId` and `imag
 | `detections[].plate` | yes | `^[A-Z0-9]{3,8}$`: uppercase letters and digits, no spaces (same convention as the labeling guide) |
 | `detections[].ocrConfidence` | yes | Number, 0 to 1 inclusive |
 | `detections[].detectorConfidence` | yes | Number, 0 to 1 inclusive |
-| `detections[].imageKey` | yes | S3 object key (never a URL, presigned URLs expire and carry a signature). Starts with `images/`, at most 1024 bytes. Returned earlier by `POST /api/v1/images/presigned-urls` |
+| `detections[].imageKey` | yes | S3 object key (never a URL, presigned URLs expire and carry a signature): `images/{deviceId}/{yyyy}/{MM}/{dd}/{frameId}.jpg`, where `deviceId` is the calling device and `frameId` the frame of this detection. Assigned by device-management together with the presigned upload URL (`POST /api/v1/images/presigned-urls`), never built by the device |
 | `detections[].corners` | yes | 4 points `[x, y]`, normalized to 0-1 on the image referenced by `imageKey`, order top-left, top-right, bottom-right, bottom-left (clockwise, convex, non-degenerate) |
 | `detections[].location` | yes | Object, see below |
 | `location.lat` | yes | Number, -90 to 90, WGS84 decimal degrees |
@@ -130,7 +130,7 @@ the Spring services use, with the stable `code` and the `requestId` (= the trace
 | 400 | `INVALID_JSON` | Lambda | The body is not a UTF-8 JSON object |
 | 400 | `VALIDATION_FAILED` | Lambda | Any rule in section 2 is broken. Nothing is published |
 | 401 | (gateway) | API Gateway | Missing, invalid or expired token, or a token of another app client |
-| 403 | `FORBIDDEN` | Lambda | Valid token, but it is not a device token (no `sub` or `account_type` is not `device`), or an `imageKey` belongs to another device |
+| 403 | `FORBIDDEN` | Lambda | Valid token, but it is not a device token (no `sub` or `account_type` is not `device`) |
 | 413 | `PAYLOAD_TOO_LARGE` | Lambda (API Gateway above 10 MB) | Body over the size limit |
 | 415 | `UNSUPPORTED_MEDIA_TYPE` | Lambda | `Content-Type` is not `application/json` |
 | 429 | (gateway) | API Gateway | Throttled. Honour `Retry-After` |
@@ -140,7 +140,8 @@ the Spring services use, with the stable `code` and the `requestId` (= the trace
 
 `fields[].code` values: `REQUIRED`, `TYPE`, `FORMAT` (UUID, timestamp), `PATTERN`, `RANGE`, `SIZE` (array
 length), `INVALID_CORNERS`, `INVALID_LOCATION`, `DUPLICATE_DETECTION_ID` (twice in one batch),
-`TIMESTAMP_IN_FUTURE`, `TIMESTAMP_TOO_OLD`, `IMAGE_KEY_FOREIGN`.
+`TIMESTAMP_IN_FUTURE`, `TIMESTAMP_TOO_OLD`, `IMAGE_KEY_FOREIGN` (an `imageKey` under the prefix of another
+device; a body error, so 400 like the others, while 403 is kept for the token).
 
 Errors produced by the HTTP API itself (401, 429, 504) have the gateway's default body, which cannot be
 customised on an HTTP API. The edge relies on the status code for them, not on the body.
@@ -152,7 +153,7 @@ customised on an HTTP API. The edge relies on the status code for them, not on t
 | 202 | Delete the batch from the local queue |
 | 400, 413, 415 | The same body will never succeed: do not retry it. Move it to a local quarantine and log it. Because validation is atomic, one bad detection rejects up to 99 good ones, so the edge should validate with the same rules before sending and, on a 400, may split the batch and resend the valid part |
 | 401 | Refresh the token and retry |
-| 403 | Configuration problem (not a device token, or a foreign image key): stop retrying and raise the alert beep |
+| 403 | Configuration problem (not a device token): stop retrying and raise the alert beep |
 | 429, 5xx, network error | Retry with exponential backoff and jitter, with the **same** `batchId` and `detectionId`s (safe, the pipeline is idempotent) |
 
 ## 5. SNS event
@@ -187,21 +188,12 @@ UI must tolerate a missing object for a short time.
 
 ## 8. Implementation status
 
-The Lambda lives in `infrastructure/lambdas/event_ingest`. The identity rules below are implemented and
-deployed on `dev`; the rest of the contract is still to build.
-
-| Aspect | Lambda now | This document |
-|---|---|---|
-| Required claims | `sub` and `account_type = device`, otherwise `403 FORBIDDEN` | Same (done) |
-| Message attributes | `eventType`, `traceId`, `deviceId` | Same (done) |
-| Validation | JSON syntax and size only | Full atomic validation with `fields[]` (to build) |
-| Success body | `{messageId, traceId}` | `{batchId, accepted, traceId}` (to build, needs the validation) |
-| Error body | RFC 9457 with `code` and `requestId`, no `fields[]` | The same plus `fields[]` (to build) |
-| Content type check | Not done | 415 (to build) |
+The Lambda lives in `infrastructure/lambdas/event_ingest` and implements this document and
+[ingest-device-locations.md](ingest-device-locations.md): identity, content type, size, the atomic validation
+with `fields[]` and the `202` body. Unit tests next to it cover every rule.
 
 ## 9. Open points
 
-- Final S3 key layout (decides whether `IMAGE_KEY_FOREIGN` can be checked by the prefix `images/{deviceId}/`).
 - Proposed defaults to confirm: max 100 detections, 250 KiB body, 5-minute future and 30-day past limits for
   `detectedAt`, `accuracyM` and `fixAgeMs` optional, unknown properties ignored.
 - `POST /api/v1/ingest/device-locations` is specified separately.

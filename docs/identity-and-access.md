@@ -83,7 +83,7 @@ The **owner** of a request is resolved like this: a `user` caller is its own own
 | Alert list (`GET /api/v1/alerts`) | user and device | Alerts belong to the user account. A user gets pages of their own alerts. A device gets the full list of its owner with an `ETag`, so every device of one account has the same list |
 | Other alert routes (`/api/v1/alerts*`) | user | The alerts of the caller's own account |
 | `/api/v1/devices/{deviceId}/...` (configuration, heartbeat, status) | user and device | Device: `{deviceId}` must equal `X-Account-Id`. User: the device must be owned by `X-Account-Id`. Anything else is refused |
-| Image upload URLs (`/api/v1/images/presigned-urls`) | device | Keys are scoped to the caller's `deviceId` (final key layout is an open point of the ingest documents) |
+| Image upload URLs (`/api/v1/images/presigned-urls`) | device | Keys are assigned by device-management under the caller's prefix, `images/{deviceId}/{yyyy}/{MM}/{dd}/{frameId}.jpg`; ingest refuses a key of another device |
 | Pairing of devices (device-management) | administrator | IAM (SigV4) |
 
 ## 6. Where the link is stored

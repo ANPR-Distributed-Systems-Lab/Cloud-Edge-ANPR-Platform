@@ -14,6 +14,7 @@ RUN --mount=type=cache,target=/root/.m2 sh mvnw -B -q dependency:go-offline
 
 # Tests run in a separate CI job (they need Docker for Testcontainers, which
 # is not available inside `docker build`), so they are skipped here.
+COPY operations-api.yaml ./
 COPY src src
 RUN --mount=type=cache,target=/root/.m2 sh mvnw -B -q -DskipTests package \
     && java -Djarmode=tools -jar target/operations-service-*.jar extract --destination /workspace/extracted

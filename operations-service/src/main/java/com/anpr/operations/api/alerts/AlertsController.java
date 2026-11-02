@@ -4,8 +4,8 @@ import com.anpr.operations.api.generated.AlertsApi;
 import com.anpr.operations.api.generated.model.*;
 import com.anpr.operations.internal.alerts.Alert;
 import com.anpr.operations.internal.alerts.AlertService;
+import com.anpr.operations.shared.security.CurrentAccount;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.annotation.CreatedBy;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
@@ -20,6 +20,7 @@ import java.util.UUID;
 public class AlertsController implements AlertsApi {
     private final AlertService alertService;
     private final AlertApiMapper mapper;
+    private final CurrentAccount currentAccount;
 
     @Override
     public ResponseEntity<AlertResponse> createAlert(CreateAlertRequest request) {
@@ -34,14 +35,19 @@ public class AlertsController implements AlertsApi {
     }
 
     @Override
-    public ResponseEntity<AlertPage> listAlerts(Integer page, Integer size, AlertSortField sort, SortDirection direction) {
+    public ResponseEntity<AlertPage> listAlerts(Integer page, Integer size, AlertSortField sort, SortDirection direction,
+                                                String ifNoneMatch) {
+        if (currentAccount.isDevice()) {
+            // A device reads the alerts of its owner: full list and ETag, once the devices table exists (next stage).
+            return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).build();
+        }
         PageRequest pageable = PageRequest.of(page, size, toSort(sort, direction));
         return ResponseEntity.ok(mapper.toPage(alertService.list(pageable)));
     }
 
     @Override
     public ResponseEntity<AlertResponse> updateAlert(UUID alertId, UpdateAlertRequest request) {
-        Alert alert = alertService.update(alertId, request.getPlate(), request.getAlertText(), request.getVersion());
+        Alert alert = alertService.update(alertId, request.getAlertText(), request.getVersion());
         return ResponseEntity.ok(mapper.toResponse(alert));
     }
 
@@ -50,13 +56,6 @@ public class AlertsController implements AlertsApi {
         alertService.delete(alertId);
         return ResponseEntity.noContent().build();
     }
-
-    @Override
-    public ResponseEntity<DetectionPage> listAlertDetections(UUID alertId, Integer page, Integer size) {
-        // Detections arrive with the SQS consumer (next stage).
-        return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).build();
-    }
-
 
     private static Sort toSort(AlertSortField field, SortDirection direction) {
         String property = switch (field) {

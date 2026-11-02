@@ -26,6 +26,23 @@ class CurrentAccountTest {
     }
 
     @Test
+    void aDeviceIsRecognisedByTheAccountTypeHeader() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader(CurrentAccount.ACCOUNT_TYPE_HEADER, "device");
+
+        assertThat(new CurrentAccount(request).isDevice()).isTrue();
+    }
+
+    @Test
+    void aPersonOrAMissingAccountTypeIsNotADevice() {
+        MockHttpServletRequest person = new MockHttpServletRequest();
+        person.addHeader(CurrentAccount.ACCOUNT_TYPE_HEADER, "user");
+
+        assertThat(new CurrentAccount(person).isDevice()).isFalse();
+        assertThat(new CurrentAccount(new MockHttpServletRequest()).isDevice()).isFalse();
+    }
+
+    @Test
     void missingHeaderIsUnauthenticated() {
         CurrentAccount account = new CurrentAccount(new MockHttpServletRequest());
 

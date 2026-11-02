@@ -43,17 +43,13 @@ public class AlertService {
     }
 
     @Transactional
-    public Alert update(UUID alertId, String plate, String alertText, long version) {
+    public Alert update(UUID alertId, String alertText, long version) {
         Alert alert = findOwned(alertId);
         if (!Objects.equals(alert.getVersion(), version)) {
             throw new ConflictException(ErrorCodes.CONCURRENT_MODIFICATION, "Alert was modified by someone else");
         }
-        if (!alert.getPlate().equals(plate)
-                && alertRepository.existsByAccountIdAndPlate(alert.getAccountId(), plate)) {
-            throw new ConflictException(ErrorCodes.ALERT_ALREADY_EXISTS, "Alert for this plate already exists");
-        }
 
-        alert.update(plate, alertText);
+        alert.update(alertText);
         return alertRepository.saveAndFlush(alert);
     }
 

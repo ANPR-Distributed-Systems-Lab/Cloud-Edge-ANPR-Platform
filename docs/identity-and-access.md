@@ -79,8 +79,9 @@ The **owner** of a request is resolved like this: a `user` caller is its own own
 | Endpoint | Callers | Rule |
 |---|---|---|
 | `POST /api/v1/ingest/*` | device | Identity from the token only (`sub` = `deviceId`). The Lambda also requires `account_type = device` |
-| Views (`/api/v1/views/*`) | user | Data filtered by the caller's own account |
-| Alerts (`/api/v1/alerts*`) | user and device | Alerts belong to the user account. A user works on their own alerts. A device reads the alerts of its owner, so every device of one account gets the same list |
+| Detections (`/api/v1/detections/*`) | user | Data filtered by the caller's own account |
+| Alert list (`GET /api/v1/alerts`) | user and device | Alerts belong to the user account. A user gets pages of their own alerts. A device gets the full list of its owner with an `ETag`, so every device of one account has the same list |
+| Other alert routes (`/api/v1/alerts*`) | user | The alerts of the caller's own account |
 | `/api/v1/devices/{deviceId}/...` (configuration, heartbeat, status) | user and device | Device: `{deviceId}` must equal `X-Account-Id`. User: the device must be owned by `X-Account-Id`. Anything else is refused |
 | Image upload URLs (`/api/v1/images/presigned-urls`) | device | Keys are scoped to the caller's `deviceId` (final key layout is an open point of the ingest documents) |
 | Pairing of devices (device-management) | administrator | IAM (SigV4) |
@@ -128,11 +129,11 @@ body and publishes it to SNS with the attribute `deviceId`; the queue of operati
 consumer resolves the owner of the device in its `devices` table and stores the record with `account_id`
 and `device_id`.
 
-**A user opens the application.** The `web` client signs in. Views filter by `account_id = X-Account-Id`
-with no lookup. device-management finds the devices of the user by the index on `accountId`.
+**A user opens the application.** The `web` client signs in. Detection queries filter by
+`account_id = X-Account-Id` with no lookup. device-management finds the devices of the user by the index on `accountId`.
 
 **A device reads alerts.** The device calls `GET /api/v1/alerts` with its token. The service resolves the
-owner of the device and returns the alerts of that account (supports `ETag` / `If-None-Match`).
+owner of the device and returns all alerts of that account (supports `ETag` / `If-None-Match`).
 
 ## 9. Changes to the bootstrap
 
@@ -175,5 +176,5 @@ recreate the pool, a deliberate one-off step that was done on `dev` like this:
 - **Several devices per account.** Drop the uniqueness of `account_id` in `devices` and check the
   authorization rules that assume exactly one device.
 - **Owner lookup cost.** Services may cache `deviceId` → `accountId` for a short time.
-- **Contract of operations-service.** The alerts endpoint, `CurrentAccount` and the removal of
-  `/api/v1/devices/{deviceId}/alerts` are aligned when its contract is reviewed.
+- **Device callers in operations-service.** The contract is aligned with this document, but the service has no
+  `devices` table yet, so `GET /api/v1/alerts` answers 501 to a device until the owner can be resolved.

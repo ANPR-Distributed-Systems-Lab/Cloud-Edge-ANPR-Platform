@@ -52,7 +52,7 @@ Areas: `search` (View 1), `radial` (View 2), `livefeed` (View 3), `alerts` (View
 - `operations-api.yaml` (service root) is the source of truth. Controllers and DTOs are generated into `target/` (gitignored).
 - Separate schemas for create, update and response (`CreateAlertRequest`, `UpdateAlertRequest`, `AlertResponse`). Never one shared object.
 - Every list endpoint is paginated with an upper bound (`size` max 100, `GET /detections/search` max 1000). Sort fields are enums, never free text.
-- Account identity comes from the API Gateway injected header (JWT claims), never from a path/query/body parameter.
+- Account identity comes from the API Gateway injected headers (JWT claims), never from a path/query/body parameter. `X-Account-Id` is the caller's own account: for `X-Account-Type: device` it is the device, and the owner of the data is found in the `devices` table (docs/identity-and-access.md).
 - `GET /alerts` called by a device (`X-Account-Type: device`) returns all alerts of its owner and supports `ETag` / `If-None-Match`; a person gets pages and no `ETag`.
 - A contract change ships in one PR: yaml + backend + regenerated frontend client + tests.
 - Backward compatible only: add fields, never rename/remove. Breaking change = new version path.

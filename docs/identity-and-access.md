@@ -2,8 +2,8 @@
 
 Who may call what, how a caller is identified, and how a device is linked to the user who owns it.
 
-Status: design agreed, not implemented yet. The bootstrap Terraform in `infrastructure/` differs from this
-document in the places listed in [section 9](#9-changes-to-the-bootstrap).
+Status: design agreed. The infrastructure part is deployed on `dev`; the service code is in progress, see
+[section 9](#9-changes-to-the-bootstrap).
 
 ## 1. Principles
 
@@ -138,18 +138,19 @@ owner of the device and returns all alerts of that account (supports `ETag` / `I
 ## 9. Changes to the bootstrap
 
 The rows about infrastructure (user pool, gateway, routes, ingest Lambda, messaging, task role permissions)
-are written in `infrastructure/` and were reviewed with `terraform plan`; they are **not applied yet**. The
-rows about service code are not started.
+are applied on `dev` and checked end to end by `infrastructure/scripts/identity_smoke_test.py`. Of the rows
+about service code, operations-service only recognises device callers so far (and answers 501 to them on the
+alert list); the pairing endpoint of device-management is not started.
 
 | Area | Bootstrap | Target |
 |---|---|---|
 | User pool | Immutable attribute `custom:account_id`; trigger copies it into the claim `account_id` | Groups `users` / `devices`; trigger writes `account_type`; no account attribute (see below) |
 | Gateway headers | `X-Account-Id` from claim `account_id`, `X-User-Id` from `sub` | `X-Account-Id` from `sub`, `X-Account-Type` from `account_type`; `X-User-Id` is dropped |
-| Routes | Alerts of a device at `/api/v1/devices/{deviceId}/alerts` behind `users` | `GET /api/v1/alerts` behind `users_and_devices` (other alert methods stay behind `users`); `/api/v1/admin/*` of device-management with IAM authorization |
+| Routes | Alerts of a device at `/api/v1/devices/{deviceId}/alerts` behind `users` | `/api/v1/detections/*` behind `users`; `GET /api/v1/alerts` behind `users_and_devices` (other alert methods stay behind `users`); `/api/v1/admin/*` of device-management with IAM authorization |
 | Ingest Lambda | Needs claims `account_id` and `sub`; publishes `accountId` and `deviceId` | Needs `sub` and `account_type = device`; publishes `deviceId` only; validates the body (see the ingest documents) |
 | Messaging | Topic `edge-events` and one queue for operations | Adds topic `device-events` (only the task role of device-management may publish) and queue `operations-device-events` with a DLQ (5 receives, 14 days retention) |
 | device-management | No endpoint, tables only | Pairing endpoint; task role may create device users in the pool, publish to `device-events` and use the topic key |
-| operations | `CurrentAccount` reads `X-Account-Id` as the owner | Reads `X-Account-Type`, resolves the owner of a device caller; tables `accounts` and `devices`; consumer of `device-events` |
+| operations | `CurrentAccount` reads `X-Account-Id` as the owner | Reads `X-Account-Type`, resolves the owner of a device caller; tables `accounts` and `devices`; consumer of `device-events`; task role may read `images/` to sign download URLs |
 | `CLAUDE.md` | Local apps may connect to SNS/SQS on `dev` | Local apps do not connect to SNS/SQS on AWS (done) |
 
 **The attribute `custom:account_id`.** Cognito does not let a custom attribute be removed from an existing

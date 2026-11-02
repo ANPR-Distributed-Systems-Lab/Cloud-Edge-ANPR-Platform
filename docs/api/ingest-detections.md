@@ -187,8 +187,8 @@ UI must tolerate a missing object for a short time.
 
 ## 8. Implementation status
 
-The Lambda lives in `infrastructure/lambdas/event_ingest`. The identity rules below are implemented (not
-deployed yet); the rest of the contract is still to build.
+The Lambda lives in `infrastructure/lambdas/event_ingest`. The identity rules below are implemented and
+deployed on `dev`; the rest of the contract is still to build.
 
 | Aspect | Lambda now | This document |
 |---|---|---|

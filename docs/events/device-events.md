@@ -4,7 +4,8 @@ Events about the link between a device and its owner. device-management publishe
 reassigns or unpairs a device; every service that needs the link keeps its own copy built from them
 (today: operations). The background is in [identity-and-access.md](../identity-and-access.md).
 
-Status: design agreed, not implemented yet.
+Status: design agreed. The topic and the queue of operations are deployed on `dev`; the publisher
+(device-management) and the consumer (operations) are not written yet.
 
 ## 1. Flow
 
@@ -67,8 +68,9 @@ keep their meaning.
   Equal or lower versions are acknowledged and ignored.
 - `device.paired`: upsert the account `accountId` (when missing) and the link `deviceId` → `accountId`
   together with `version`, in one transaction.
-- `device.unpaired`: remove the link (or mark it inactive, the service decides), keep `version`. Records
-  stored earlier keep the owner they had.
+- `device.unpaired`: keep the row of the device and clear its owner, keep `version`. Deleting the row would
+  lose `version`, and a late, older `device.paired` would then link the device again. Records stored earlier
+  keep the owner they had.
 - The message is deleted from the queue only after the transaction commits. On failure it returns after the
   visibility timeout, and after 5 failed receives it goes to the DLQ. One bad message must not block the queue.
 

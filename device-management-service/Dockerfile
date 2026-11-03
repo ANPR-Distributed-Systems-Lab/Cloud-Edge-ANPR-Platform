@@ -13,7 +13,9 @@ COPY .mvn .mvn
 RUN --mount=type=cache,target=/root/.m2 sh mvnw -B -q dependency:go-offline
 
 # Tests run in a separate CI job (they need Docker for Testcontainers, which
-# is not available inside `docker build`), so they are skipped here.
+# is not available inside `docker build`), so they are skipped here. The contract
+# is needed by the build: controllers and DTOs are generated from it.
+COPY device-management-api.yaml ./
 COPY src src
 RUN --mount=type=cache,target=/root/.m2 sh mvnw -B -q -DskipTests package \
     && java -Djarmode=tools -jar target/device-management-service-*.jar extract --destination /workspace/extracted

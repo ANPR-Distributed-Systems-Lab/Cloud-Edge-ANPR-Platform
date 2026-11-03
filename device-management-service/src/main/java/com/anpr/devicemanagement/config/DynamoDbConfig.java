@@ -1,10 +1,10 @@
 package com.anpr.devicemanagement.config;
 
 import com.anpr.devicemanagement.internal.configuration.DeviceConfiguration;
-import com.anpr.devicemanagement.internal.status.DeviceStatus;
+import com.anpr.devicemanagement.internal.devices.Device;
+import com.anpr.devicemanagement.internal.metrics.Measurement;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
@@ -23,7 +23,6 @@ import java.net.URI;
  * Repositories inject the {@link DynamoDbTable} beans and never deal with table names or clients.
  */
 @Configuration
-@EnableConfigurationProperties(AwsProperties.class)
 public class DynamoDbConfig {
 
     private static final Logger log = LoggerFactory.getLogger(DynamoDbConfig.class);
@@ -43,9 +42,15 @@ public class DynamoDbConfig {
         return builder.build();
     }
 
+    /** The default extensions stay on: the versioned record extension implements optimistic locking. */
     @Bean
     DynamoDbEnhancedClient dynamoDbEnhancedClient(DynamoDbClient dynamoDbClient) {
         return DynamoDbEnhancedClient.builder().dynamoDbClient(dynamoDbClient).build();
+    }
+
+    @Bean
+    DynamoDbTable<Device> devicesTable(DynamoDbEnhancedClient client, AwsProperties aws) {
+        return client.table(aws.dynamodb().tables().devices(), TableSchema.fromBean(Device.class));
     }
 
     @Bean
@@ -54,7 +59,7 @@ public class DynamoDbConfig {
     }
 
     @Bean
-    DynamoDbTable<DeviceStatus> deviceStatusesTable(DynamoDbEnhancedClient client, AwsProperties aws) {
-        return client.table(aws.dynamodb().tables().deviceStatuses(), TableSchema.fromBean(DeviceStatus.class));
+    DynamoDbTable<Measurement> deviceMetricsTable(DynamoDbEnhancedClient client, AwsProperties aws) {
+        return client.table(aws.dynamodb().tables().deviceMetrics(), TableSchema.fromBean(Measurement.class));
     }
 }

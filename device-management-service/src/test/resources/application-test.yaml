@@ -1,0 +1,18 @@
+# Names the AWS resources would have; nothing here is reached in tests except DynamoDB Local
+# (its endpoint is added by DynamoDbLocalSupport). Cognito and SNS are replaced by mocks.
+app:
+  aws:
+    region: eu-central-1
+    dynamodb:
+      tables:
+        devices: devices
+        device-configurations: device-configurations
+        device-metrics: device-metrics
+    s3:
+      images-bucket: test-images-bucket
+    cognito:
+      user-pool-id: eu-central-1_test
+      users-group: users
+      devices-group: devices
+    sns:
+      device-events-topic-arn: arn:aws:sns:eu-central-1:000000000000:device-events

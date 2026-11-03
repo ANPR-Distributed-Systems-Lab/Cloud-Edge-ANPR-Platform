@@ -61,11 +61,19 @@ jobs:
       - name: Plan
         run: terraform plan -no-color -out=tfplan
 
-      # The same plan as in the log above, readable on the run page.
+      # The same plan as in the log above, readable on the run page. The first line says whether
+      # the plan will be applied, so the page cannot be mistaken for a deployment.
       - name: Plan summary
+        env:
+          APPLY: ${{ inputs.apply }}
         run: |
           {
-            echo '### Terraform plan'
+            if [ "$APPLY" = "true" ]; then
+              echo '### Terraform plan (will be applied)'
+            else
+              echo '### Terraform plan only - nothing was changed'
+              echo 'Run the workflow again with "Apply the plan" ticked to apply it.'
+            fi
             echo '```'
             terraform show -no-color tfplan | head -c 900000
             echo '```'
@@ -73,4 +81,15 @@ jobs:
 
       - name: Apply
         if: inputs.apply
-        run: terraform apply -no-color tfplan
+        run: |
+          set -o pipefail
+          terraform apply -no-color tfplan | tee apply.log
+
+      # Reached only when the apply succeeded.
+      - name: Apply summary
+        if: inputs.apply
+        run: |
+          {
+            echo '### APPLIED - the changes above are now live in dev'
+            grep 'Apply complete' apply.log
+          } >> "$GITHUB_STEP_SUMMARY"

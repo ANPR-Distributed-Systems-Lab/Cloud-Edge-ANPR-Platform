@@ -10,11 +10,8 @@
 # function receives the claims (see api.tf and events.tf). The account that owns a device is not in the
 # token: services learn it from the device-events topic (device-events.tf).
 #
-# People are created by administrators, for example:
-#   aws cognito-idp admin-create-user --user-pool-id <id> --username <name> --message-action SUPPRESS
-#   aws cognito-idp admin-set-user-password --user-pool-id <id> --username <name> --password <...> --permanent
-#   aws cognito-idp admin-add-user-to-group --user-pool-id <id> --username <name> --group-name users
-# Devices are created by device-management-service when an administrator pairs them (group "devices").
+# People are created by administrators with infrastructure/scripts/create_user.py (group "users").
+# Devices are created by device-management-service when an administrator creates them (group "devices").
 
 locals {
   # Group of the user pool -> account_type claim of its tokens. The single source of truth: the user

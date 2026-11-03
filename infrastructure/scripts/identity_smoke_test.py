@@ -10,10 +10,13 @@ checks with their real tokens:
            with the attributes eventType and deviceId and without accountId; an invalid batch is refused
            (400 VALIDATION_FAILED); a person's token and a request without a token are refused (401)
   alerts   both kinds of tokens may list alerts, only a person's may create them
-  admin    the admin route refuses an unsigned request (403) and lets a signed one reach the service
+  device   device-management routes let in the right kind of token only (person: edit configuration,
+           metrics chart; device: report metrics, upload URLs; both: device and configuration)
+  admin    the admin routes refuse an unsigned request (403) and let a signed one reach the service
+           (a DELETE of a random device id: nothing is deleted)
 
 It never gets further than the gateway for the service routes, so it works while the services have no
-running tasks (the gateway then answers 503, which still proves the caller was let in).
+running tasks (the gateway then answers 500 or 503, which still proves the caller was let in).
 
 Whatever happens, the script deletes the two test users and the one message it published (only that
 message: other messages in the queue are left alone). If operations-service is running, it may consume
@@ -37,6 +40,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import uuid
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -161,16 +165,16 @@ def call(method, url, token=None, body=None):
     return send(urllib.request.Request(url, data=data, headers=headers, method=method))
 
 
-def signed_call(session, region, method, url, body):
-    """A request signed with the AWS credentials of the caller (Signature V4), as the pairing script will send it."""
-    data = json.dumps(body).encode()
+def signed_call(session, region, method, url, body=None):
+    """A request signed with the AWS credentials of the caller (Signature V4), as an administrator sends it."""
+    data = None if body is None else json.dumps(body).encode()
     aws_request = AWSRequest(method=method, url=url, data=data, headers={"Content-Type": "application/json"})
     SigV4Auth(session.get_credentials().get_frozen_credentials(), "execute-api", region).add_auth(aws_request)
     return send(urllib.request.Request(url, data=data, headers=dict(aws_request.headers), method=method))
 
 
 def let_in(status):
-    """The gateway accepted the caller (whatever the service behind it answered, even 503 without tasks)."""
+    """The gateway accepted the caller (whatever the service behind it answered, even 500 or 503 without tasks)."""
     return status not in (401, 403)
 
 
@@ -270,13 +274,25 @@ def run(session, outputs, region, accounts):
     status = call("POST", f"{api}/api/v1/alerts", device_jwt, {})[0]
     check_status("alerts: device may not create (401)", status, status == 401)
 
-    # admin route (protected by IAM)
-    admin_url = f"{api}/api/v1/admin/smoke-test"
-    status = call("POST", admin_url, None, {})[0]
+    # device routes of device-management (split by caller)
+    status = call("GET", f"{api}/api/v1/device", person_jwt)[0]
+    check_status("device: person may read their device", status, let_in(status))
+    status = call("GET", f"{api}/api/v1/device/config", device_jwt)[0]
+    check_status("device: device may read its configuration", status, let_in(status))
+    status = call("PUT", f"{api}/api/v1/device/config", device_jwt, {})[0]
+    check_status("device: device may not edit its configuration (401)", status, status == 401)
+    status = call("POST", f"{api}/api/v1/device/metrics", person_jwt, {})[0]
+    check_status("device: person may not report metrics (401)", status, status == 401)
+    status = call("POST", f"{api}/api/v1/images/presigned-urls", device_jwt, {})[0]
+    check_status("device: device may ask for upload URLs", status, let_in(status))
+
+    # admin routes (protected by IAM). A random device id: the service answers 404, nothing is deleted.
+    admin_url = f"{api}/api/v1/admin/devices/{uuid.uuid4()}"
+    status = call("DELETE", admin_url)[0]
     check_status("admin: unsigned request refused with 403", status, status == 403)
-    status = call("POST", admin_url, person_jwt, {})[0]
+    status = call("DELETE", admin_url, person_jwt)[0]
     check_status("admin: person token refused with 403", status, status == 403)
-    status = signed_call(session, region, "POST", admin_url, {})[0]
+    status = signed_call(session, region, "DELETE", admin_url)[0]
     check_status("admin: signed request let through to the service", status, let_in(status))
 
 

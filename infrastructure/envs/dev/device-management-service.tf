@@ -1,7 +1,8 @@
 # device-management-service: everything the service owns, in one place.
 # Image repository, DynamoDB tables, ECS service and the role its deploy workflow uses.
 # Its API routes are registered in api.tf; the images bucket it signs URLs for is in storage.tf;
-# the topic it publishes pairing events to is in device-events.tf.
+# the topic it publishes pairing events to is in device-events.tf. The contract is
+# device-management-service/device-management-api.yaml, the design docs/device-management.md.
 
 # ---------------------------------------------------------------- image repository
 
@@ -12,8 +13,22 @@ module "device_management_ecr" {
 }
 
 # ---------------------------------------------------------------- database (DynamoDB)
-# The key schemas must match the item classes of the service
-# (internal/configuration/DeviceConfiguration, internal/status/DeviceStatus).
+# The key schemas must match the item classes of the service (internal/devices/Device,
+# internal/configuration/DeviceConfiguration, internal/metrics/Measurement).
+
+# Registry of devices: one item per device with its owner (accountId), Cognito username and the
+# version of its ownership. The index finds the device of an account (people call the API with
+# their own account id, not the device id).
+module "devices_table" {
+  source = "../../modules/dynamodb-table"
+
+  name     = "${local.name}-devices"
+  hash_key = "deviceId"
+
+  global_secondary_indexes = [
+    { name = "accountId-index", hash_key = "accountId" },
+  ]
+}
 
 # One configuration item per device (diagram: PK id_urzadzenia, no sort key).
 module "device_configurations_table" {
@@ -23,15 +38,16 @@ module "device_configurations_table" {
   hash_key = "deviceId"
 }
 
-# Heartbeat history of every device (diagram: PK id_urzadzenia, SK datetime).
-# reportedAt is epoch milliseconds: a number, so a device's items sort chronologically.
-# expiresAt (epoch seconds) lets DynamoDB delete old heartbeats for free once the service sets it.
-module "device_statuses_table" {
+# Metrics history of every device (diagram: device_statuses, PK id_urzadzenia, SK datetime).
+# recordedAt is the moment of the measurement in epoch milliseconds: a number, so a device's items
+# sort chronologically. expiresAt (epoch seconds, 7 days after the measurement) lets DynamoDB delete
+# old measurements for free.
+module "device_metrics_table" {
   source = "../../modules/dynamodb-table"
 
-  name           = "${local.name}-device-statuses"
+  name           = "${local.name}-device-metrics"
   hash_key       = "deviceId"
-  range_key      = "reportedAt"
+  range_key      = "recordedAt"
   range_key_type = "N"
   ttl_attribute  = "expiresAt"
 }
@@ -40,7 +56,9 @@ module "device_statuses_table" {
 # Used by the code in the container through the task role (no credentials to configure).
 
 data "aws_iam_policy_document" "device_management_app" {
-  # Item-level access to its two tables. No Scan: every access pattern goes by key.
+  # Item-level access to its tables. No Scan: every access pattern goes by key. Creating and deleting
+  # a device writes the registry and the configuration in one transaction (TransactWriteItems needs
+  # the item permissions only).
   statement {
     sid = "ReadWriteDeviceTables"
     actions = [
@@ -55,9 +73,17 @@ data "aws_iam_policy_document" "device_management_app" {
       "dynamodb:DescribeTable",
     ]
     resources = [
+      module.devices_table.arn,
       module.device_configurations_table.arn,
-      module.device_statuses_table.arn,
+      module.device_metrics_table.arn,
     ]
+  }
+
+  # The device of an account is found through the index of the registry.
+  statement {
+    sid       = "QueryDevicesByAccount"
+    actions   = ["dynamodb:Query"]
+    resources = ["${module.devices_table.arn}/index/*"]
   }
 
   # A presigned URL carries the permissions of whoever signed it: to let devices upload
@@ -68,14 +94,19 @@ data "aws_iam_policy_document" "device_management_app" {
     resources = ["${module.storage_bucket.arn}/${local.images_prefix}*"]
   }
 
-  # Pairing a device: the service creates the Cognito user of the device and puts it in the group
-  # of devices. Nothing else in the pool (no deleting users, no listing, no other groups).
+  # Creating a device: the service checks that the owner is a person (finds the user by sub and reads
+  # its groups), creates the Cognito user of the device and puts it in the group of devices. Deleting
+  # a device (or undoing a failed creation) deletes that user. The application only ever deletes
+  # users it created as devices; IAM cannot narrow AdminDeleteUser to a group.
   statement {
-    sid = "CreateDeviceUsers"
+    sid = "ManageDeviceUsers"
     actions = [
+      "cognito-idp:ListUsers",
+      "cognito-idp:AdminListGroupsForUser",
       "cognito-idp:AdminCreateUser",
       "cognito-idp:AdminSetUserPassword",
       "cognito-idp:AdminAddUserToGroup",
+      "cognito-idp:AdminDeleteUser",
     ]
     resources = [module.user_pool.user_pool_arn]
   }
@@ -112,11 +143,13 @@ module "device_management_service" {
 
   # Names of the resources above; none of them is secret.
   environment = {
+    DEVICES_TABLE               = module.devices_table.name
     DEVICE_CONFIGURATIONS_TABLE = module.device_configurations_table.name
-    DEVICE_STATUSES_TABLE       = module.device_statuses_table.name
+    DEVICE_METRICS_TABLE        = module.device_metrics_table.name
     IMAGES_BUCKET               = module.storage_bucket.name
     DEVICE_EVENTS_TOPIC_ARN     = aws_sns_topic.device_events.arn
     USER_POOL_ID                = module.user_pool.user_pool_id
+    USERS_GROUP                 = one([for group, type in local.account_type_by_group : group if type == "user"])
     DEVICES_GROUP               = one([for group, type in local.account_type_by_group : group if type == "device"])
   }
 

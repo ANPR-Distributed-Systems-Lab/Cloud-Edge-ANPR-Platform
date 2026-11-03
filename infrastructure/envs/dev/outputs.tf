@@ -108,3 +108,8 @@ output "user_pool_client_ids" {
   description = "App client ids by name (web, device); what a client passes when it signs in."
   value       = module.user_pool.client_ids
 }
+
+output "terraform_role_arn" {
+  description = "Value for the AWS_TERRAFORM_ROLE_ARN variable in the GitHub environment dev-terraform."
+  value       = module.terraform_role.role_arn
+}

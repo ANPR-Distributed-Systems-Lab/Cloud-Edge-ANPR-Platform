@@ -115,7 +115,7 @@ Content translated from the architecture diagram `Inżynierka (2).drawio` (as of
 ## Deviations
 
 Proposed deviations of the implementation from the diagram. Status: `proposed` (waiting for team approval) / `agreed`.
-In the OpenAPI contract they are referenced as `D1`–`D18` (without the `#` sign, which starts a comment in YAML).
+In the OpenAPI contracts they are referenced as `D1`–`D23` (without the `#` sign, which starts a comment in YAML).
 
 | No. | Diagram | Implementation | Justification | Status |
 |---|---|---|---|---|
@@ -137,6 +137,11 @@ In the OpenAPI contract they are referenced as `D1`–`D18` (without the `#` sig
 | D16 | Modifying an alert | `PUT` changes `alertText` only, the plate is immutable (a fix is a delete and a new alert) | An alert is identified by its plate, and editing the plate had no defined meaning | agreed |
 | D17 | `last_detection_time` stored in `alerts` | `lastDetectedAt` computed when reading: the latest `detectedAt` of the plate in the account (index `(account_id, plate, detected_at DESC)`) | Always consistent with the detections, also those delivered late (store-and-forward); consumers never modify alerts, so they do not bump their `version` | agreed |
 | D18 | No way to get a single detection | Added `GET /detections/{detectionId}` | Details of a detection opened from a list or a map | agreed |
+| D19 | Views 4 and 5 addressed by `device_id` | No device id in the paths: `GET /api/v1/device`, `/api/v1/device/config`, `/api/v1/device/metrics` (device-management-api.yaml). A device acts on itself, a person on the device of their account | The id comes from the token and cannot be forged; one device per account for now | agreed |
+| D20 | View 4 payload: `device_id`, `plate_cooldown`, `batching_parameters`, `ML_model_parameters` | Adds `intervals` (metrics, configuration and alert polling, GPS sampling) and `camera` (exposure, gain, white balance, fps; the resolution is fixed at 4056x3040), plus `version` and `updatedAt`: a stale `version` is 409, and the device polls with `ETag` / `If-None-Match` | The device is configured remotely in full; optimistic locking as for alerts | agreed |
+| D21 | View 5: `connection_status` stored with every status | `online` and `lastMetricsAt` computed in `GET /api/v1/device` from the latest measurement and the metrics interval of the device; measurements add free disk, uptime and the GPS state; kept for 7 days (TTL) | A device that stopped reporting cannot report that it is offline | agreed |
+| D22 | `device_statuses` with SK `datetime` | Table `device-metrics` with SK `recordedAt`, epoch milliseconds of the measurement, the same name as in the API | A number sorts chronologically; the table is named after what it holds | agreed |
+| D23 | No device registry | Table `devices` (PK `deviceId`, index by `accountId`) with the owner, the Cognito username and the ownership version; administrator endpoints create and delete devices (docs/device-management.md) | The source of truth of ownership and of the device events | agreed |
 
 ---
 

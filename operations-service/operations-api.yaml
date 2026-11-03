@@ -9,6 +9,8 @@ info:
     The caller's account always comes from the token (API Gateway headers), never from request parameters (D3).
     One account owns exactly one device (the device id is unique per account in the accounts table).
     Plate numbers are always uppercase letters and digits without spaces - the client normalizes user input before sending.
+    A request may carry X-Trace-Id (1 to 64 characters from A-Z a-z 0-9 -); otherwise the request id of API Gateway is
+    used. It is returned in the response header X-Trace-Id and as requestId of errors.
 servers:
   - url: /
 security:
@@ -405,7 +407,7 @@ components:
           description: Stable machine-readable code, e.g. ALERT_NOT_FOUND, ALERT_ALREADY_EXISTS, CONCURRENT_MODIFICATION, VALIDATION_FAILED
         requestId:
           type: string
-          description: Trace id of the request, to find it in the logs
+          description: Trace id of the request (also in the response header X-Trace-Id), to find it in the logs
         fields:
           type: array
           items: { $ref: '#/components/schemas/FieldError' }
@@ -415,7 +417,9 @@ components:
       required: [field, code]
       properties:
         field: { type: string }
-        code: { type: string }
+        code:
+          type: string
+          description: REQUIRED, RANGE, SIZE or PATTERN (the same codes as device-management and the ingest Lambda)
         message: { type: string }
 
     Plate:

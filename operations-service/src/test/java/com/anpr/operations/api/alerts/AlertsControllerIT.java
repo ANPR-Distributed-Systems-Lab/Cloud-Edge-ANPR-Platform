@@ -65,6 +65,16 @@ class AlertsControllerIT {
     }
 
     @Test
+    void anErrorCarriesTheTraceIdOfTheRequest() throws Exception {
+        mockMvc.perform(get("/api/v1/alerts/{alertId}", UUID.randomUUID())
+                        .header(ACCOUNT_HEADER, UUID.randomUUID().toString())
+                        .header("X-Trace-Id", "trace-abc-1"))
+                .andExpect(status().isNotFound())
+                .andExpect(header().string("X-Trace-Id", "trace-abc-1"))
+                .andExpect(jsonPath("$.requestId").value("trace-abc-1"));
+    }
+
+    @Test
     void invalidPlateReturns400() throws Exception {
         mockMvc.perform(post("/api/v1/alerts")
                         .header(ACCOUNT_HEADER, UUID.randomUUID().toString())
@@ -74,7 +84,8 @@ class AlertsControllerIT {
                                 """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
-                .andExpect(jsonPath("$.fields[0].field").value("plate"));
+                .andExpect(jsonPath("$.fields[0].field").value("plate"))
+                .andExpect(jsonPath("$.fields[0].code").value("PATTERN"));
     }
 
     @Test

@@ -4,7 +4,7 @@ import com.anpr.operations.shared.error.ConflictException;
 import com.anpr.operations.shared.error.ErrorCodes;
 import com.anpr.operations.shared.error.NotFoundException;
 import com.anpr.operations.shared.error.UnauthorizedException;
-import jakarta.servlet.http.HttpServletRequest;
+import com.anpr.operations.shared.tracing.TraceId;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -28,44 +28,52 @@ import java.util.UUID;
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
-    static final String REQUEST_ID_HEADER = "X-Request-Id";
+    /** Bean Validation constraint names translated to the field codes shared with device-management and ingest. */
+    private static final Map<String, String> FIELD_CODES = Map.of(
+            "NotNull", ErrorCodes.REQUIRED,
+            "Min", ErrorCodes.RANGE,
+            "Max", ErrorCodes.RANGE,
+            "DecimalMin", ErrorCodes.RANGE,
+            "DecimalMax", ErrorCodes.RANGE,
+            "Size", ErrorCodes.SIZE,
+            "Pattern", ErrorCodes.PATTERN);
 
     @ExceptionHandler(NotFoundException.class)
-    ProblemDetail handleNotFound(NotFoundException ex, HttpServletRequest request) {
-        return problem(HttpStatus.NOT_FOUND, ex.getCode(), ex.getMessage(), request);
+    ProblemDetail handleNotFound(NotFoundException ex) {
+        return problem(HttpStatus.NOT_FOUND, ex.getCode(), ex.getMessage());
     }
 
     @ExceptionHandler(ConflictException.class)
-    ProblemDetail handleConflict(ConflictException ex, HttpServletRequest request) {
-        return problem(HttpStatus.CONFLICT, ex.getCode(), ex.getMessage(), request);
+    ProblemDetail handleConflict(ConflictException ex) {
+        return problem(HttpStatus.CONFLICT, ex.getCode(), ex.getMessage());
     }
 
-    private ProblemDetail problem(HttpStatusCode status, String code, String detail, HttpServletRequest request) {
+    private ProblemDetail problem(HttpStatusCode status, String code, String detail) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, detail);
         problem.setProperty("code", code);
-        problem.setProperty("requestId", requestId(request));
+        problem.setProperty("requestId", TraceId.current().orElseGet(() -> UUID.randomUUID().toString()));
         return problem;
     }
 
     @ExceptionHandler(UnauthorizedException.class)
-    ProblemDetail handleUnauthorized(UnauthorizedException ex, HttpServletRequest request) {
-        return problem(HttpStatus.UNAUTHORIZED, ex.getCode(), ex.getMessage(), request);
+    ProblemDetail handleUnauthorized(UnauthorizedException ex) {
+        return problem(HttpStatus.UNAUTHORIZED, ex.getCode(), ex.getMessage());
     }
 
     @ExceptionHandler(ObjectOptimisticLockingFailureException.class)
-    ProblemDetail handleOptimisticLock(ObjectOptimisticLockingFailureException ex, HttpServletRequest request) {
+    ProblemDetail handleOptimisticLock(ObjectOptimisticLockingFailureException ex) {
         return problem(HttpStatus.CONFLICT, ErrorCodes.CONCURRENT_MODIFICATION,
-                "Resource was modified by someone else", request);
+                "Resource was modified by someone else");
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
-    ProblemDetail handleBodyValidation(MethodArgumentNotValidException ex, HttpServletRequest request) {
+    ProblemDetail handleBodyValidation(MethodArgumentNotValidException ex) {
         ProblemDetail problem = problem(HttpStatus.BAD_REQUEST, ErrorCodes.VALIDATION_FAILED,
-                "Request validation failed", request);
+                "Request validation failed");
         problem.setProperty("fields", ex.getBindingResult().getFieldErrors().stream()
                 .map(error -> Map.of(
                         "field", error.getField(),
-                        "code", String.valueOf(error.getCode()),
+                        "code", FIELD_CODES.getOrDefault(error.getCode(), String.valueOf(error.getCode()).toUpperCase()),
                         "message", String.valueOf(error.getDefaultMessage())))
                 .toList());
         return problem;
@@ -76,27 +84,22 @@ public class GlobalExceptionHandler {
             MethodArgumentTypeMismatchException.class,
             MissingServletRequestParameterException.class,
             HttpMessageNotReadableException.class})
-    ProblemDetail handleBadRequest(Exception ex, HttpServletRequest request) {
-        return problem(HttpStatus.BAD_REQUEST, ErrorCodes.INVALID_REQUEST, "Invalid request", request);
+    ProblemDetail handleBadRequest(Exception ex) {
+        return problem(HttpStatus.BAD_REQUEST, ErrorCodes.INVALID_REQUEST, "Invalid request");
     }
 
     @ExceptionHandler({
             NoResourceFoundException.class,
             HttpRequestMethodNotSupportedException.class,
             HttpMediaTypeNotSupportedException.class})
-    ProblemDetail handleUnsupported(Exception ex, HttpServletRequest request) {
+    ProblemDetail handleUnsupported(Exception ex) {
         HttpStatusCode status = ((ErrorResponse) ex).getStatusCode();
-        return problem(status, ErrorCodes.INVALID_REQUEST, "Request not supported", request);
+        return problem(status, ErrorCodes.INVALID_REQUEST, "Request not supported");
     }
 
     @ExceptionHandler(Exception.class)
-    ProblemDetail handleUnexpected(Exception ex, HttpServletRequest request) {
+    ProblemDetail handleUnexpected(Exception ex) {
         log.error("Unexpected error", ex);
-        return problem(HttpStatus.INTERNAL_SERVER_ERROR, ErrorCodes.INTERNAL_ERROR, "Unexpected error", request);
-    }
-
-    private static String requestId(HttpServletRequest request){
-        String header = request.getHeader(REQUEST_ID_HEADER);
-        return header != null && !header.isBlank() ? header : UUID.randomUUID().toString();
+        return problem(HttpStatus.INTERNAL_SERVER_ERROR, ErrorCodes.INTERNAL_ERROR, "Unexpected error");
     }
 }

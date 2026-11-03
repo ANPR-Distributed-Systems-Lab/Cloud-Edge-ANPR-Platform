@@ -3,7 +3,8 @@
 Who may call what, how a caller is identified, and how a device is linked to the user who owns it.
 
 Status: design agreed. The infrastructure part is deployed on `dev`; the service code is in progress, see
-[section 9](#9-changes-to-the-bootstrap).
+[section 9](#9-changes-to-the-bootstrap). device-management-service is described in
+[device-management.md](device-management.md).
 
 ## 1. Principles
 
@@ -33,7 +34,9 @@ Naming pitfall, because the word "account" is used in two ways:
 ## 3. Cognito
 
 - One user pool (Essentials tier, which the pre token generation trigger needs to change access tokens).
-  Nobody signs up on their own: administrators create the users.
+  Nobody signs up on their own: administrators create the users, people with
+  `infrastructure/scripts/create_user.py` (a permanent password the administrator types in) and devices through
+  device-management (section 7).
 - Groups `users` and `devices`. Membership is assigned by the backend only and a client cannot change it.
   Every account is in exactly one group.
 - Two public app clients (no secret): `web` for people, `device` for edge nodes.
@@ -54,7 +57,7 @@ list of app clients whose access tokens it accepts:
 |---|---|---|
 | `users` | `web` | views, user-only endpoints |
 | `devices` | `device` | ingest |
-| `users_and_devices` | `web` and `device` | endpoints used by both (alerts, device configuration) |
+| `users_and_devices` | `web` and `device` | endpoints used by both (alert list, the device and its configuration) |
 
 For service routes the gateway injects these headers, overwriting anything the client sent:
 
@@ -62,12 +65,13 @@ For service routes the gateway injects these headers, overwriting anything the c
 |---|---|
 | `X-Account-Id` | `sub` of the token (the caller's own account id) |
 | `X-Account-Type` | claim `account_type` (`user` or `device`) |
+| `X-Request-Id` | the request id of API Gateway (`$context.requestId`), the trace id when the client sent no `X-Trace-Id` |
 
 Lambda integrations receive the claims in the request context instead of headers.
 
-The pairing endpoint of device-management is exposed on a separate route (`/api/v1/admin/...`) with **IAM
-authorization** (AWS Signature V4): only an administrator with AWS credentials can call it, and no Cognito
-token opens it. There is no token on such a route, so the gateway sets `X-Account-Type: iam` and
+The endpoints that create and delete devices (`/api/v1/admin/devices`, device-management) use **IAM
+authorization** (AWS Signature V4): only an administrator with AWS credentials can call them, and no Cognito
+token opens them. There is no token on such a route, so the gateway sets `X-Account-Type: iam` and
 `X-Account-Id` to the ARN of the calling IAM principal (useful in audit logs), overwriting whatever the
 client sent.
 
@@ -82,18 +86,20 @@ The **owner** of a request is resolved like this: a `user` caller is its own own
 | Detections (`/api/v1/detections/*`) | user | Data filtered by the caller's own account |
 | Alert list (`GET /api/v1/alerts`) | user and device | Alerts belong to the user account. A user gets pages of their own alerts. A device gets the full list of its owner with an `ETag`, so every device of one account has the same list |
 | Other alert routes (`/api/v1/alerts*`) | user | The alerts of the caller's own account |
-| `/api/v1/devices/{deviceId}/...` (configuration, heartbeat, status) | user and device | Device: `{deviceId}` must equal `X-Account-Id`. User: the device must be owned by `X-Account-Id`. Anything else is refused |
+| The device and its configuration (`GET /api/v1/device`, `GET /api/v1/device/config`) | user and device | No device id in the path. A device gets itself (`X-Account-Id` = `deviceId`), a user gets the device owned by `X-Account-Id`. A device that is not registered (deleted) gets 404 |
+| Editing the configuration (`PUT /api/v1/device/config`), metrics chart (`GET /api/v1/device/metrics`) | user | The device owned by `X-Account-Id` |
+| Reporting metrics (`POST /api/v1/device/metrics`) | device | The calling device, which must be registered |
 | Image upload URLs (`/api/v1/images/presigned-urls`) | device | Keys are assigned by device-management under the caller's prefix, `images/{deviceId}/{yyyy}/{MM}/{dd}/{frameId}.jpg`; ingest refuses a key of another device |
-| Pairing of devices (device-management) | administrator | IAM (SigV4) |
+| Creating and deleting devices (`/api/v1/admin/devices`) | administrator | IAM (SigV4) |
 
 ## 6. Where the link is stored
 
 Both services that need to know the owner of a device keep their own copy. Exact schemas belong to the
 services.
 
-- **device-management** (DynamoDB): one item per device with `deviceId` (key), `accountId` (owner) and
-  `version`, plus an index by `accountId` so the UI can list the devices of a user. It is the source of
-  truth and the only writer.
+- **device-management** (DynamoDB, table `devices`): one item per device with `deviceId` (key), `accountId`
+  (owner), `username` (its Cognito login), `createdAt` and `version`, plus the index `accountId-index`, through
+  which a request of a user finds the user's device. It is the source of truth and the only writer.
 - **operations** (PostgreSQL): table `accounts` (`account_id` = the `sub` of a user) and table `devices`
   (`device_id`, `account_id`, `version`), filled from events. While the rule is 1:1, `account_id` is unique
   in `devices`; going to several devices per account later is a migration that drops that constraint.
@@ -103,23 +109,26 @@ services.
   also when a `device.paired` event names an account that is not there yet. Profile data (name, e-mail)
   stays in Cognito.
 
-## 7. Pairing
+## 7. Creating and deleting devices
 
-An administrator pairs a device with a user through device-management, which owns the device registry.
-For now a script calls the endpoint. The OpenAPI contract is written later.
+An administrator creates a device for a user, and deletes it, through device-management, which owns the device
+registry. There is no endpoint that changes the owner: a device is deleted and a new one is created, with a new
+`deviceId`. The steps, their order and what happens when one fails are in
+[device-management.md](device-management.md#5-creating-and-deleting-a-device). In short:
 
-1. The administrator calls the pairing endpoint (SigV4) with the `accountId` of the user.
-2. device-management creates the Cognito user of the device and adds it to the group `devices`. Cognito
-   returns its `sub`: that is the `deviceId`.
-3. device-management writes the device item (`deviceId`, `accountId`, `version = 1`).
-4. **After the write** it publishes `device.paired` to the SNS topic `device-events`.
-5. It returns the `deviceId` and the generated credentials to the administrator. The credentials are shown
-   once and go onto the device.
-6. operations receives the event from its own queue and upserts `accounts` and `devices`.
+1. The administrator calls `POST /api/v1/admin/devices` (SigV4) with the `accountId` of the user, the username
+   and the password of the device. The password goes onto the device and is never stored by the service.
+2. device-management checks that the account is a user without a device, creates the Cognito user of the device
+   and adds it to the group `devices`. Cognito returns its `sub`, which is the `deviceId`.
+3. device-management writes the device item (`deviceId`, `accountId`, `version = 1`) together with its default
+   configuration.
+4. **After the write** it publishes `device.paired` to the SNS topic `device-events`. If the publish fails, the
+   steps before are undone.
+5. operations receives the event from its own queue and upserts `accounts` and `devices`.
 
-Changing the owner or unpairing uses the same endpoint family. Every change raises `version` and publishes
-`device.paired` (new owner) or `device.unpaired`. Events, delivery and failure handling are described in
-[device-events.md](events/device-events.md).
+`DELETE /api/v1/admin/devices/{deviceId}` deletes the Cognito user, publishes `device.unpaired` (`version + 1`) and
+deletes the device item last, so a failed deletion can be repeated. Events, delivery and failure handling are
+described in [device-events.md](events/device-events.md).
 
 ## 8. Runtime flows
 
@@ -138,18 +147,19 @@ owner of the device and returns all alerts of that account (supports `ETag` / `I
 ## 9. Changes to the bootstrap
 
 The rows about infrastructure (user pool, gateway, routes, ingest Lambda, messaging, task role permissions)
-are applied on `dev` and checked end to end by `infrastructure/scripts/identity_smoke_test.py`. Of the rows
-about service code, operations-service only recognises device callers so far (and answers 501 to them on the
-alert list); the pairing endpoint of device-management is not started.
+are applied on `dev` and checked end to end by `infrastructure/scripts/identity_smoke_test.py`, with one
+exception: the body validation of the ingest Lambda (on `main`) is not deployed yet. Of the rows about service
+code, operations-service only recognises device callers so far (and answers 501 to them on the alert list);
+device-management is implemented and tested locally, not deployed.
 
 | Area | Bootstrap | Target |
 |---|---|---|
 | User pool | Immutable attribute `custom:account_id`; trigger copies it into the claim `account_id` | Groups `users` / `devices`; trigger writes `account_type`; no account attribute (see below) |
 | Gateway headers | `X-Account-Id` from claim `account_id`, `X-User-Id` from `sub` | `X-Account-Id` from `sub`, `X-Account-Type` from `account_type`; `X-User-Id` is dropped |
-| Routes | Alerts of a device at `/api/v1/devices/{deviceId}/alerts` behind `users` | `/api/v1/detections/*` behind `users`; `GET /api/v1/alerts` behind `users_and_devices` (other alert methods stay behind `users`); `/api/v1/admin/*` of device-management with IAM authorization |
+| Routes | Alerts of a device at `/api/v1/devices/{deviceId}/alerts` behind `users`; device-management at `/api/v1/devices/{deviceId}/...` | `/api/v1/detections/*` behind `users`; `GET /api/v1/alerts` behind `users_and_devices` (other alert methods stay behind `users`); device-management at `/api/v1/device...` split by caller (section 5); `POST /api/v1/admin/devices` and `DELETE /api/v1/admin/devices/{deviceId}` with IAM authorization |
 | Ingest Lambda | Needs claims `account_id` and `sub`; publishes `accountId` and `deviceId` | Needs `sub` and `account_type = device`; publishes `deviceId` only; validates the body (see the ingest documents) |
 | Messaging | Topic `edge-events` and one queue for operations | Adds topic `device-events` (only the task role of device-management may publish) and queue `operations-device-events` with a DLQ (5 receives, 14 days retention) |
-| device-management | No endpoint, tables only | Pairing endpoint; task role may create device users in the pool, publish to `device-events` and use the topic key |
+| device-management | No endpoint, tables only | Device, configuration, metrics and upload URL endpoints, creating and deleting devices; table `devices` with the index by `accountId`; task role may find people (`ListUsers`, `AdminListGroupsForUser`), create and delete device users, publish to `device-events` and use the topic key |
 | operations | `CurrentAccount` reads `X-Account-Id` as the owner | Reads `X-Account-Type`, resolves the owner of a device caller; tables `accounts` and `devices`; consumer of `device-events`; task role may read `images/` to sign download URLs |
 | `CLAUDE.md` | Local apps may connect to SNS/SQS on `dev` | Local apps do not connect to SNS/SQS on AWS (done) |
 
@@ -167,13 +177,15 @@ recreate the pool, a deliberate one-off step that was done on `dev` like this:
 
 ## 10. Open points
 
-- **Publish failure after the write.** The DynamoDB write can succeed and the SNS publish fail, leaving
-  operations without the link. Deliberately postponed. Candidates: an idempotent pairing endpoint that
-  always republishes, an administrator action that republishes all pairs, DynamoDB Streams → EventBridge
-  Pipes → SNS (to be verified).
-- **Unpairing.** Should it also disable or delete the Cognito user of the device? An unpaired device with a
-  valid token can still call ingest; its events then end in the DLQ.
-- **Device credentials.** Password generation, storage on the Raspberry Pi, rotation and token lifetimes.
+- **Publish failure after the write.** Creating a device undoes itself when the publish fails, and a failed
+  deletion can be repeated. What remains: a publish that timed out after SNS accepted it, and consumers that
+  lose events otherwise (a rebuilt database). Candidates: an administrator action that republishes all pairs,
+  DynamoDB Streams → EventBridge Pipes → SNS (to be verified).
+- **Deleted device with a valid token.** Deleting a device deletes its Cognito user, but an access token it
+  already holds stays valid until it expires. device-management refuses it (the registration is gone); ingest
+  accepts it and its events end in the DLQ.
+- **Device credentials.** The administrator provides the password when creating the device. Storage on the
+  Raspberry Pi, rotation and token lifetimes are still open.
 - **Several devices per account.** Drop the uniqueness of `account_id` in `devices` and check the
   authorization rules that assume exactly one device.
 - **Owner lookup cost.** Services may cache `deviceId` → `accountId` for a short time.

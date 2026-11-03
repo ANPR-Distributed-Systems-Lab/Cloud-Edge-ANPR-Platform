@@ -1,11 +1,12 @@
 # Device events
 
-Events about the link between a device and its owner. device-management publishes them when it pairs,
-reassigns or unpairs a device; every service that needs the link keeps its own copy built from them
-(today: operations). The background is in [identity-and-access.md](../identity-and-access.md).
+Events about the link between a device and its owner. device-management publishes them when it creates or
+deletes a device; every service that needs the link keeps its own copy built from them (today: operations). The
+background is in [identity-and-access.md](../identity-and-access.md), the publisher is described in
+[device-management.md](../device-management.md#5-creating-and-deleting-a-device).
 
-Status: design agreed. The topic and the queue of operations are deployed on `dev`; the publisher
-(device-management) and the consumer (operations) are not written yet.
+Status: design agreed. The topic and the queue of operations are deployed on `dev`. The publisher
+(device-management) is implemented and tested locally, not deployed; the consumer (operations) is not written yet.
 
 ## 1. Flow
 
@@ -28,8 +29,8 @@ device-management --publish (after the DynamoDB write)--> SNS topic "device-even
 
 | `eventType` | Published when |
 |---|---|
-| `device.paired` | A device gets an owner, the first time or when the owner changes |
-| `device.unpaired` | A device loses its owner |
+| `device.paired` | A device is created for its owner. There is no change of owner: a device is deleted and a new one created |
+| `device.unpaired` | A device is deleted |
 
 ### Message attributes
 
@@ -54,7 +55,7 @@ device-management --publish (after the DynamoDB write)--> SNS topic "device-even
 |---|---|---|
 | `eventId` | yes | UUID of the event, for logs and tracing |
 | `occurredAt` | yes | RFC 3339 UTC time of the change |
-| `version` | yes | Integer per device, starting at 1 and raised by device-management on every ownership change. Stored in the device item |
+| `version` | yes | Integer per device, starting at 1 and raised by device-management on every ownership change. Stored in the device item. Today `device.paired` of a new device has version 1 and `device.unpaired` of its deletion version 2 |
 | `deviceId` | yes | Cognito `sub` of the device account |
 | `accountId` | `device.paired` only | The owning user account. Absent in `device.unpaired` |
 
@@ -84,12 +85,12 @@ fixed. The same happens to data of a device that was unpaired but still holds a 
 
 ## 5. Open points
 
-- **Publish failure after the write.** If the DynamoDB write succeeds and the publish fails, consumers never
-  learn about the change. Postponed on purpose, see [identity-and-access.md](../identity-and-access.md#10-open-points)
-  for the candidates (idempotent endpoint that republishes, republish-all action, DynamoDB Streams).
+- **Publish failure after the write.** Creating a device is undone when `device.paired` cannot be published, and
+  a deletion whose `device.unpaired` failed can be repeated (the registration is deleted last). Left open: a
+  publish that timed out after SNS accepted it, see [identity-and-access.md](../identity-and-access.md#10-open-points)
+  for the candidates (republish-all action, DynamoDB Streams).
 - **Rebuilding a consumer.** A new or restored database has no way to replay events. A "republish all pairs"
   action is the likely answer.
-- **Unpairing semantics.** Whether the Cognito user of the device is disabled at the same time.
 - **Alarm on the DLQ.** Nobody is told when a message lands in the DLQ. An alarm on its depth (with someone
   to notify) is not part of the first Terraform change.
 - **Several devices per account.** The events already carry one device each, so they do not change.

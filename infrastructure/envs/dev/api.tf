@@ -66,31 +66,51 @@ module "api" {
       routes = ["GET /api/v1/alerts"]
     }
 
+    # device-management-api.yaml. The device is never in the path: a device acts on itself, a person on
+    # the device of their account. Routes are split by caller, so a token of the wrong kind is refused
+    # here already (the service checks the caller type again).
     device_management = {
       discovery_service_arn = module.device_management_service.discovery_service_arn
-      authorizer            = "users_and_devices" # devices fetch their configuration, the web application shows it
+      authorizer            = "users_and_devices"
 
-      # The paths of the architecture diagram; the contract itself is still being written
-      # (device-management-api.yaml), until then the service answers 404 on all of them.
-      # They do not overlap with the operations routes above: API Gateway picks the route
-      # whose path matches most specifically.
       routes = [
-        "ANY /api/v1/devices/{deviceId}/config",
-        "ANY /api/v1/devices/{deviceId}/heartbeat",
-        "ANY /api/v1/devices/{deviceId}/status",
-        "ANY /api/v1/images/presigned-urls",
+        "GET /api/v1/device",
+        "GET /api/v1/device/config",
       ]
     }
 
-    # Pairing of devices with accounts (creates the Cognito user of the device and publishes
-    # device.paired). Only an administrator with AWS credentials may call it: requests must be
-    # signed (SigV4) by a principal allowed to execute-api:Invoke on this API. The contract is
-    # still to be written, so the whole /admin namespace is routed.
+    # The owner edits the configuration (View 4) and charts the metrics (View 5).
+    device_management_users = {
+      discovery_service_arn = module.device_management_service.discovery_service_arn
+      authorizer            = "users"
+
+      routes = [
+        "PUT /api/v1/device/config",
+        "GET /api/v1/device/metrics",
+      ]
+    }
+
+    # The device reports its metrics and asks for upload URLs of its photos.
+    device_management_devices = {
+      discovery_service_arn = module.device_management_service.discovery_service_arn
+      authorizer            = "devices"
+
+      routes = [
+        "POST /api/v1/device/metrics",
+        "POST /api/v1/images/presigned-urls",
+      ]
+    }
+
+    # Creating and deleting devices. Only an administrator with AWS credentials may call it: requests
+    # must be signed (SigV4) by a principal allowed to execute-api:Invoke on this API.
     device_management_admin = {
       discovery_service_arn = module.device_management_service.discovery_service_arn
       authorizer            = "iam"
 
-      routes = ["ANY /api/v1/admin/{proxy+}"]
+      routes = [
+        "POST /api/v1/admin/devices",
+        "DELETE /api/v1/admin/devices/{deviceId}",
+      ]
     }
   }
 

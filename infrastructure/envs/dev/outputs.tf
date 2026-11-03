@@ -87,12 +87,16 @@ output "storage_bucket_name" {
   value = module.storage_bucket.name
 }
 
+output "devices_table_name" {
+  value = module.devices_table.name
+}
+
 output "device_configurations_table_name" {
   value = module.device_configurations_table.name
 }
 
-output "device_statuses_table_name" {
-  value = module.device_statuses_table.name
+output "device_metrics_table_name" {
+  value = module.device_metrics_table.name
 }
 
 output "user_pool_id" {

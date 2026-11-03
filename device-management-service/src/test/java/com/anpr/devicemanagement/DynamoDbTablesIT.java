@@ -1,104 +1,114 @@
 package com.anpr.devicemanagement;
 
 import com.anpr.devicemanagement.internal.configuration.DeviceConfiguration;
-import com.anpr.devicemanagement.internal.status.DeviceStatus;
-import org.junit.jupiter.api.BeforeEach;
+import com.anpr.devicemanagement.internal.devices.Device;
+import com.anpr.devicemanagement.internal.metrics.Measurement;
+import com.anpr.devicemanagement.support.DynamoDbLocalSupport;
+import com.anpr.devicemanagement.support.TestData;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.DockerImageName;
-import software.amazon.awssdk.enhanced.dynamodb.DynamoDbTable;
-import software.amazon.awssdk.enhanced.dynamodb.Key;
 import software.amazon.awssdk.enhanced.dynamodb.model.QueryConditional;
-import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.AttributeDefinition;
+import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 import software.amazon.awssdk.services.dynamodb.model.KeySchemaElement;
 import software.amazon.awssdk.services.dynamodb.model.KeyType;
 import software.amazon.awssdk.services.dynamodb.model.ScalarAttributeType;
 import software.amazon.awssdk.services.dynamodb.model.TableDescription;
 
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Map;
+import java.util.UUID;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * The application's DynamoDB wiring against DynamoDB Local: endpoint, credentials and the
- * item classes. The tables are created here from the item classes, and the assertions pin the
- * key schemas that Terraform creates in AWS (infrastructure/envs/dev/device-management-service.tf):
- * if an item class and the Terraform table drift apart, this test fails.
+ * The item classes against DynamoDB Local. The tables are created from the item classes, and the assertions pin the
+ * key schemas Terraform creates in AWS (infrastructure/envs/dev/device-management-service.tf): if an item class and
+ * the Terraform table drift apart, this test fails. The raw items pin the stored attribute names and types.
  */
-@SpringBootTest
-@Testcontainers
-class DynamoDbTablesIT {
+class DynamoDbTablesIT extends DynamoDbLocalSupport {
 
-    private static final int DYNAMODB_PORT = 8000;
-    private static final String CONFIGURATIONS = "device-configurations";
-    private static final String STATUSES = "device-statuses";
+    @Test
+    void devicesAreKeyedByDeviceIdAndIndexedByAccountId() {
+        TableDescription table = describe(devicesTable.tableName());
 
-    @Container
-    static final GenericContainer<?> DYNAMODB = new GenericContainer<>(DockerImageName.parse("amazon/dynamodb-local:3.3.2"))
-            .withCommand("-jar", "DynamoDBLocal.jar", "-inMemory", "-sharedDb")
-            .withExposedPorts(DYNAMODB_PORT);
-
-    @DynamicPropertySource
-    static void dynamoDbLocal(DynamicPropertyRegistry registry) {
-        registry.add("app.aws.dynamodb.endpoint",
-                () -> "http://" + DYNAMODB.getHost() + ":" + DYNAMODB.getMappedPort(DYNAMODB_PORT));
-        registry.add("app.aws.dynamodb.tables.device-configurations", () -> CONFIGURATIONS);
-        registry.add("app.aws.dynamodb.tables.device-statuses", () -> STATUSES);
-    }
-
-    @Autowired
-    private DynamoDbClient client;
-
-    @Autowired
-    private DynamoDbTable<DeviceConfiguration> configurations;
-
-    @Autowired
-    private DynamoDbTable<DeviceStatus> statuses;
-
-    /** The container lives for the whole class, so the tables are created by the first test only. */
-    @BeforeEach
-    void createTablesOnce() {
-        if (!client.listTables().tableNames().contains(CONFIGURATIONS)) {
-            configurations.createTable();
-            statuses.createTable();
-        }
+        assertThat(table.keySchema()).containsExactly(key("deviceId", KeyType.HASH));
+        assertThat(table.attributeDefinitions()).containsExactlyInAnyOrder(
+                attribute("deviceId", ScalarAttributeType.S),
+                attribute("accountId", ScalarAttributeType.S));
+        assertThat(table.globalSecondaryIndexes()).singleElement().satisfies(index -> {
+            assertThat(index.indexName()).isEqualTo("accountId-index");
+            assertThat(index.keySchema()).containsExactly(key("accountId", KeyType.HASH));
+        });
     }
 
     @Test
     void deviceConfigurationsAreKeyedByDeviceId() {
-        TableDescription table = describe(CONFIGURATIONS);
+        TableDescription table = describe(configurationsTable.tableName());
 
         assertThat(table.keySchema()).containsExactly(key("deviceId", KeyType.HASH));
         assertThat(table.attributeDefinitions()).containsExactly(attribute("deviceId", ScalarAttributeType.S));
     }
 
     @Test
-    void deviceStatusesAreKeyedByDeviceIdAndNumericReportedAt() {
-        TableDescription table = describe(STATUSES);
+    void deviceMetricsAreKeyedByDeviceIdAndNumericRecordedAt() {
+        TableDescription table = describe(measurementsTable.tableName());
 
         assertThat(table.keySchema()).containsExactlyInAnyOrder(
                 key("deviceId", KeyType.HASH),
-                key("reportedAt", KeyType.RANGE));
+                key("recordedAt", KeyType.RANGE));
         assertThat(table.attributeDefinitions()).containsExactlyInAnyOrder(
                 attribute("deviceId", ScalarAttributeType.S),
-                attribute("reportedAt", ScalarAttributeType.N));
+                attribute("recordedAt", ScalarAttributeType.N));
     }
 
     @Test
-    void theTablesAreReachableThroughTheTypedBeans() {
-        Key unknownDevice = Key.builder().partitionValue("unknown-device").build();
+    void aMeasurementStoresItsMomentInMillisAndItsExpiryInSeconds() {
+        UUID deviceId = UUID.randomUUID();
+        Instant recordedAt = Instant.parse("2026-11-02T10:00:00.123Z");
+        Measurement measurement = TestData.measurement(recordedAt);
+        measurement.storeFor(deviceId, Duration.ofDays(7));
+        measurementsTable.putItem(measurement);
 
-        assertThat(configurations.getItem(unknownDevice)).isNull();
-        assertThat(statuses.query(QueryConditional.keyEqualTo(unknownDevice)).items()).isEmpty();
+        Map<String, AttributeValue> item = rawItem(measurementsTable.tableName(), Map.of(
+                "deviceId", AttributeValue.fromS(deviceId.toString()),
+                "recordedAt", AttributeValue.fromN(String.valueOf(recordedAt.toEpochMilli()))));
+
+        assertThat(item.get("expiresAt").n()).isEqualTo(String.valueOf(recordedAt.plus(Duration.ofDays(7)).getEpochSecond()));
+        assertThat(item.get("gps").m().get("fix").s()).isEqualTo("FIX_3D");
+    }
+
+    @Test
+    void aConfigurationStoresItsSettingsAsTopLevelAttributes() {
+        UUID deviceId = UUID.randomUUID();
+        configurationsTable.putItem(DeviceConfiguration.initial(deviceId, TestData.settings(60), Instant.EPOCH));
+
+        Map<String, AttributeValue> item = rawItem(configurationsTable.tableName(),
+                Map.of("deviceId", AttributeValue.fromS(deviceId.toString())));
+
+        assertThat(item).containsKeys("version", "updatedAt", "plateCooldownSeconds", "batching", "ml", "intervals", "camera");
+        assertThat(item.get("camera").m().get("exposure").m().get("mode").s()).isEqualTo("MANUAL");
+    }
+
+    @Test
+    void aDeviceIsFoundThroughTheIndexOfItsAccount() {
+        Device device = Device.register(UUID.randomUUID(), UUID.randomUUID(), "rpi-index", Instant.EPOCH);
+        devicesTable.putItem(device);
+
+        assertThat(devicesTable.index(Device.ACCOUNT_INDEX)
+                .query(request -> request.queryConditional(
+                        QueryConditional.keyEqualTo(key -> key.partitionValue(device.getAccountId().toString()))))
+                .stream().flatMap(page -> page.items().stream()))
+                .singleElement()
+                .satisfies(found -> assertThat(found.getDeviceId()).isEqualTo(device.getDeviceId()));
+    }
+
+    private Map<String, AttributeValue> rawItem(String table, Map<String, AttributeValue> key) {
+        return dynamoDbClient.getItem(request -> request.tableName(table).key(key)).item();
     }
 
     private TableDescription describe(String tableName) {
-        return client.describeTable(request -> request.tableName(tableName)).table();
+        return dynamoDbClient.describeTable(request -> request.tableName(tableName)).table();
     }
 
     private static KeySchemaElement key(String name, KeyType type) {

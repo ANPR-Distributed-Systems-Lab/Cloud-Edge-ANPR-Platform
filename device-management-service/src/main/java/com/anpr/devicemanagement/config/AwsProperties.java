@@ -13,10 +13,18 @@ import org.springframework.validation.annotation.Validated;
  *
  * @param region   AWS region of the clients
  * @param dynamodb DynamoDB endpoint and table names
+ * @param s3       bucket of the photos the devices upload
+ * @param cognito  user pool of people and devices
+ * @param sns      topic of the device events
  */
 @Validated
 @ConfigurationProperties(prefix = "app.aws")
-public record AwsProperties(@NotBlank String region, @Valid @NotNull DynamoDb dynamodb) {
+public record AwsProperties(
+        @NotBlank String region,
+        @Valid @NotNull DynamoDb dynamodb,
+        @Valid @NotNull S3 s3,
+        @Valid @NotNull Cognito cognito,
+        @Valid @NotNull Sns sns) {
 
     /**
      * @param endpoint only for DynamoDB Local (development and tests), e.g. http://localhost:8000; empty in AWS
@@ -29,6 +37,19 @@ public record AwsProperties(@NotBlank String region, @Valid @NotNull DynamoDb dy
         }
     }
 
-    public record Tables(@NotBlank String deviceConfigurations, @NotBlank String deviceStatuses) {
+    public record Tables(@NotBlank String devices, @NotBlank String deviceConfigurations, @NotBlank String deviceMetrics) {
+    }
+
+    public record S3(@NotBlank String imagesBucket) {
+    }
+
+    /**
+     * @param usersGroup   group of people; only they may own a device
+     * @param devicesGroup group the users of new devices are put in
+     */
+    public record Cognito(@NotBlank String userPoolId, @NotBlank String usersGroup, @NotBlank String devicesGroup) {
+    }
+
+    public record Sns(@NotBlank String deviceEventsTopicArn) {
     }
 }

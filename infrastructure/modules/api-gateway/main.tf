@@ -159,12 +159,16 @@ resource "aws_apigatewayv2_integration" "service" {
   # device, the device id; the owner of a device is resolved by the service) and X-Account-Type is
   # added by the pre token generation trigger ("user" or "device"). IAM routes carry no token: the
   # caller is the IAM principal (X-Account-Type "iam", X-Account-Id its ARN, handy for audit logs).
+  # X-Request-Id is the id of the request in the access logs below; a service uses it as the trace id
+  # when the client sent no X-Trace-Id, so its logs and the access logs share one id.
   request_parameters = each.value.authorizer == local.iam_authorizer ? {
     "overwrite:header.X-Account-Id"   = "$context.identity.userArn"
     "overwrite:header.X-Account-Type" = "iam"
+    "overwrite:header.X-Request-Id"   = "$context.requestId"
     } : {
     "overwrite:header.X-Account-Id"   = "$context.authorizer.claims.sub"
     "overwrite:header.X-Account-Type" = "$context.authorizer.claims.account_type"
+    "overwrite:header.X-Request-Id"   = "$context.requestId"
   }
 }
 

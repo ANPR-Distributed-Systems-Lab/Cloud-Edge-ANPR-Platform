@@ -34,6 +34,15 @@ variable "ttl_attribute" {
   default     = null
 }
 
+variable "global_secondary_indexes" {
+  description = "Optional indexes by another attribute (string keys, all attributes projected), e.g. to find items by owner."
+  type = list(object({
+    name     = string
+    hash_key = string
+  }))
+  default = []
+}
+
 variable "deletion_protection" {
   type    = bool
   default = true
@@ -56,6 +65,26 @@ resource "aws_dynamodb_table" "this" {
     content {
       name = attribute.value
       type = var.range_key_type
+    }
+  }
+
+  # Key attributes of the indexes must be declared like the table keys (an attribute already declared above is skipped).
+  dynamic "attribute" {
+    for_each = toset([for index in var.global_secondary_indexes : index.hash_key if !contains(compact([var.hash_key, var.range_key]), index.hash_key)])
+
+    content {
+      name = attribute.value
+      type = "S"
+    }
+  }
+
+  dynamic "global_secondary_index" {
+    for_each = var.global_secondary_indexes
+
+    content {
+      name            = global_secondary_index.value.name
+      hash_key        = global_secondary_index.value.hash_key
+      projection_type = "ALL"
     }
   }
 

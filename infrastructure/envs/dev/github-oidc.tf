@@ -1,7 +1,7 @@
 # Lets GitHub Actions work in this environment without stored AWS credentials (OpenID Connect).
 #
-# This file holds what is shared by all workflows: the trust in GitHub and the role of the
-# start/stop workflows. The deploy role of each service lives in that service's own file.
+# This file holds what is shared by all workflows: the trust in GitHub and the roles of the
+# infrastructure and start/stop workflows. The deploy role of each service lives in that service's own file.
 
 # Registers GitHub as a trusted identity provider. One per AWS account and URL,
 # shared by every role that GitHub workflows assume.
@@ -25,4 +25,17 @@ module "env_power_role" {
 
   ecs_cluster_name = module.cluster.cluster_name
   rds_name_prefix  = local.name
+}
+
+# Role of the "Deploy infrastructure" workflow: runs terraform plan and apply. It has its own GitHub
+# environment, so that only trusted branches can use this administrator role (see the module).
+module "terraform_role" {
+  source = "../../modules/github-terraform-role"
+
+  name                 = "${local.name}-terraform"
+  oidc_provider_arn    = aws_iam_openid_connect_provider.github.arn
+  github_repository    = var.github_repository
+  github_owner_id      = var.github_owner_id
+  github_repository_id = var.github_repository_id
+  github_environment   = "${var.environment}-terraform"
 }

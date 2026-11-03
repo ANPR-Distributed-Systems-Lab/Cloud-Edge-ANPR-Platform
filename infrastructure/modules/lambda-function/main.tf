@@ -67,6 +67,10 @@ data "archive_file" "code" {
   type        = "zip"
   source_file = var.source_file
   output_path = "${path.root}/.build/${var.name}.zip"
+
+  # The same bytes on every operating system, so the hash below does not depend on who runs
+  # Terraform (a laptop or the GitHub runner).
+  output_file_mode = "0666"
 }
 
 # ---------------------------------------------------------------- logs

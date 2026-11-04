@@ -4,7 +4,7 @@ import numpy as np
 from PIL import Image
 
 from anpr_ml.frames import dhash, hamming
-from anpr_ml.make_splits import make_splits
+from anpr_ml.make_splits import add_new_sessions, make_splits
 from anpr_ml.select_frames import allocate, dedupe, evenly
 from anpr_ml.validate_export import validate_xml
 
@@ -42,6 +42,20 @@ def test_splits_are_deterministic_disjoint_and_mix_days():
     assert len({s.split("_")[1] for s in one["test"]}) == 3  # one test session per day
 
 
+def test_adding_sessions_keeps_every_existing_assignment():
+    old_sessions = [f"session_2026100{d}_{h:02d}0000" for d in (4, 5, 6) for h in range(6)]
+    new_sessions = [f"session_20261020_{h:02d}0000" for h in range(10)]
+    old = make_splits(old_sessions, 3, 3, seed=1)
+
+    added = add_new_sessions(old, old_sessions + new_sessions, 2, 2)
+
+    for name in ("train", "val", "test"):
+        assert set(old[name]) <= set(added[name])
+    assert [len(added[k]) - len(old[k]) for k in ("test", "val", "train")] == [2, 2, 6]
+    assert sorted(added["train"] + added["val"] + added["test"]) == sorted(old_sessions + new_sessions)
+    assert add_new_sessions(added, old_sessions + new_sessions, 2, 2) == added  # nothing new, nothing changes
+
+
 def _xml(shapes: str) -> ET.Element:
     return ET.fromstring(f'<annotations><image id="0" name="a.jpg" width="4056" height="3040">{shapes}</image></annotations>')
 
@@ -71,6 +85,11 @@ def test_wrong_corner_order_point_count_and_text_are_errors():
     assert validate_xml(_xml(_plate(GOOD, text="")))[0].errors
     assert not validate_xml(_xml(_plate(GOOD, text="", readable="no")))[0].errors
     assert validate_xml(_xml(_plate("-50,1000;150,1010;150,1050;-50,1040")))[0].errors  # outside the frame
+
+
+def test_warning_starts_below_70_px():
+    assert validate_xml(_xml(_plate("1000,1000;1068,1002;1068,1012;1000,1010")))[0].warnings
+    assert not validate_xml(_xml(_plate("1000,1000;1072,1002;1072,1012;1000,1010")))[0].warnings
 
 
 def test_small_plate_warns_and_ignore_region_needs_no_text():

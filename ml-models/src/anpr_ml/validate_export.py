@@ -21,7 +21,7 @@ READABLE = {"yes", "no"}
 OCCLUSION = {"none", "partial"}
 TYPES = {"standard", "two-line", "motorcycle", "other"}
 TEXT_RE = re.compile(r"[A-Z0-9]{3,8}")  # generic charset; the per-position Polish rules come with the OCR model
-IGNORE_WIDTH_PX = 80  # plates narrower than this on the original belong in plate_ignore
+IGNORE_WIDTH_PX = 70  # plates narrower than this on the original belong in plate_ignore
 EDGE_TOLERANCE_PX = 2
 
 

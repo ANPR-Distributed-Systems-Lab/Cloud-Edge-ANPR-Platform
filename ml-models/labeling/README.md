@@ -20,6 +20,19 @@ CVAT with the default context, which points at the Raspberry Pi.
 `splits.json` must not change once labeling started (`--force` is needed to overwrite it): it is what keeps
 the test sessions out of training.
 
+## New recordings
+
+When new sessions are copied into `data/`, add them without touching anything labeled so far:
+
+```powershell
+uv run anpr-index                           # hashes only the frames not indexed yet
+uv run anpr-splits --add --test 3 --val 3   # assigns only the new sessions; the others keep their split
+```
+
+`--test` and `--val` count the new sessions only. Pick them so test and validation keep roughly their share
+(about 1 in 7 sessions each). The new frames then appear in the next `anpr-select` batches; frames already in
+a batch are never offered again.
+
 ## Making a batch
 
 ```powershell
@@ -51,8 +64,10 @@ Frames are hard-linked into `labeling/batches/<batch>/` (no extra disk space) an
   The plate is the whole rectangle including the blue EU strip, not just the block of characters. If unsure,
   err slightly outside (1-2 px), evenly on all sides, never tighter than the characters and never on one side only
   (an uneven margin distorts the characters when the plate is rectified).
-- **Small plates**: narrower than about 80 px on the original frame go to label `plate_ignore` (4 points, no
+- **Small plates**: narrower than about 70 px on the original frame go to label `plate_ignore` (4 points, no
   attributes). The threshold is confirmed with the width statistics from `anpr-validate` after the first ~100 labels.
+  From 70 px up label the plate as `plate` and set `readable` honestly, even when it is hard to read: the
+  `readable` values per width show how far OCR can reach.
 - **Cut off at the frame edge**: label the plate only if all four corners are inside the image. Otherwise draw
   it as `plate_ignore`.
 - **Attributes of `plate`**:

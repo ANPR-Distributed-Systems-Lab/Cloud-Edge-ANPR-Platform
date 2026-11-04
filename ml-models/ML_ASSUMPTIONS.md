@@ -83,7 +83,7 @@ Each plate is a polygon with exactly **4 points** (set as "Number of points = 4"
   - `readable`: yes / no. Unreadable plates stay in detection data but are excluded from OCR.
   - `occlusion`: none / partial (named so it does not clash with CVAT's built-in `occluded` flag).
   - `type`: standard / two-line / motorcycle / other (values fixed in the labeling guide).
-- **Small plates:** plates narrower than about **80 px on the original** are not labeled as regular plates. They get a separate label (`plate_ignore`, 4 points, no text) so the detector is not trained on noise. The threshold is confirmed with a histogram of plate widths after the first ~100 labels.
+- **Small plates:** plates narrower than about **70 px on the original** are not labeled as regular plates. They get a separate label (`plate_ignore`, 4 points, no text) so the detector is not trained on noise. 70 px is about 22 px at a 1280 px detector input (33 px at 1920), near the ~30 px a keypoint detector needs. The first batch (`train_001`) started at 80 px, and was lowered to 70 px because plates of 70 px and wider were often still readable. The threshold is confirmed with a histogram of plate widths after the first ~100 labels.
 
 ### Pre-labeling loop
 1. Label ~150-300 frames by hand to bootstrap.
@@ -106,7 +106,7 @@ Sensor pixel pitch 1.55 um, lens 6 mm, so the focal length is about 3870 px. A P
 | 40 m | 50 | 24 | 16 | 12 |
 
 Rules of thumb used for the decisions below:
-- OCR needs roughly 100 px of plate width (character height >= 20-25 px), which gives a useful range of about 20 m on the original frame.
+- OCR needs roughly 100 px of plate width (character height >= 20-25 px), which gives a useful range of about 20 m on the original frame. Labeling of `train_001` suggests the real range is wider: some plates of 70 px and more are readable. Re-measure it from `readable` against plate width once enough labels exist.
 - A keypoint detector needs roughly 30 px of plate width.
 - At 1280x960 the detection range (about 20-25 m) matches the OCR range, so it is the leading candidate for the detector input.
 
@@ -189,7 +189,7 @@ All metrics are computed on the session-split test set and logged to Weights & B
 | 1 | Detector input resolution | Pi 5 latency benchmark, plus plate-width histogram from real labels |
 | 2 | Final OCR model and rule handling | After the baseline, once per-position character rules are written down |
 | 3 | Share of synthetic data for OCR | After the baseline, based on errors on rare characters |
-| 4 | Small-plate threshold (~80 px on the original) | Histogram after the first ~100 labels |
+| 4 | Small-plate threshold (~70 px on the original) | Histogram after the first ~100 labels |
 | 5 | Metric acceptance thresholds | After the first baseline run |
 | 6 | Perceptual-hash distance threshold for deduplication | Tuned by eye on a sample of frames |
 | 7 | Mixed precision on the GTX 1660 Super | Check on the first training run |

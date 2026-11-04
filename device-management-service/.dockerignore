@@ -1,0 +1,10 @@
+# Keep the build context small and the layer cache stable.
+target/
+.git/
+.idea/
+.vscode/
+*.iml
+HELP.md
+compose.yaml
+Dockerfile
+.dockerignore

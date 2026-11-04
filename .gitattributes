@@ -1,0 +1,3 @@
+# Lambda sources are zipped by Terraform; the same line endings everywhere keep the code hash
+# (and so the plan) identical on Windows and on the GitHub runner.
+infrastructure/lambdas/**/*.py text eol=lf

@@ -1,0 +1,11 @@
+services:
+  postgres:
+    image: 'postgis/postgis:17-3.5'
+    environment:
+      - 'POSTGRES_DB=anpr_operations'
+      - 'POSTGRES_USER=anpr'
+      - 'POSTGRES_PASSWORD=secret'
+    ports:
+      - '5432'
+    labels:
+      org.springframework.boot.service-connection: postgres

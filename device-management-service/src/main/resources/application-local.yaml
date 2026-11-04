@@ -1,0 +1,29 @@
+# Profile "local": running the service on a developer machine (docs/device-management.md, section 9).
+# DynamoDB Local from compose.yaml with the tables created at startup; Cognito and SNS replaced by local
+# stand-ins (com.anpr.devicemanagement.local). The profile refuses to start without the local endpoint.
+
+# Plain text instead of JSON, for reading in the IDE (the one exception to JSON logs, see CLAUDE.md).
+# Every line keeps the trace id and the key-value pairs of the log call (%kvp).
+logging:
+  structured:
+    format:
+      console: ""
+  pattern:
+    console: "%d{HH:mm:ss.SSS} %clr(%5p) [%X{traceId:-}] %clr(%-40.40logger{39}){cyan} : %m %kvp%n%wEx"
+
+app:
+  aws:
+    dynamodb:
+      endpoint: http://localhost:8000
+      tables:
+        devices: devices
+        device-configurations: device-configurations
+        device-metrics: device-metrics
+    s3:
+      images-bucket: local-images
+    cognito:
+      user-pool-id: local
+      users-group: users
+      devices-group: devices
+    sns:
+      device-events-topic-arn: local

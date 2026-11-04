@@ -1,0 +1,15 @@
+# Local dependencies of the service (CLAUDE.md, section 4). Spring Boot starts it together with the application
+# (spring-boot-docker-compose); `docker compose up -d` works as well. The data survives restarts in the volume.
+services:
+  dynamodb:
+    image: 'amazon/dynamodb-local:3.3.2'
+    command: '-jar DynamoDBLocal.jar -sharedDb -dbPath /home/dynamodblocal/data'
+    # The image runs as an unprivileged user that cannot write to a freshly created volume.
+    user: root
+    ports:
+      - '8000:8000'
+    volumes:
+      - 'dynamodb-data:/home/dynamodblocal/data'
+
+volumes:
+  dynamodb-data:

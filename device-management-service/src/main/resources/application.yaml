@@ -1,0 +1,85 @@
+spring:
+  application:
+    name: device-management-service
+
+# JSON log lines (Elastic Common Schema); the MDC (traceId) and the key-value pairs of a log call are fields.
+logging:
+  structured:
+    format:
+      console: ecs
+
+# Exposes /actuator/health/liveness and /readiness. The ECS container health check calls liveness
+# (outside Kubernetes Spring Boot does not enable these probes by itself).
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+app:
+  # In AWS every value below comes from environment variables set by ECS
+  # (infrastructure/envs/dev/device-management-service.tf). Required unless noted: startup fails when one is missing.
+  aws:
+    region: ${AWS_REGION:eu-central-1}
+    dynamodb:
+      # Only for DynamoDB Local (development and tests), e.g. http://localhost:8000. Empty in AWS.
+      endpoint: ${DYNAMODB_ENDPOINT:}
+      tables:
+        devices: ${DEVICES_TABLE:}
+        device-configurations: ${DEVICE_CONFIGURATIONS_TABLE:}
+        device-metrics: ${DEVICE_METRICS_TABLE:}
+    s3:
+      images-bucket: ${IMAGES_BUCKET:}
+    cognito:
+      user-pool-id: ${USER_POOL_ID:}
+      users-group: ${USERS_GROUP:}
+      devices-group: ${DEVICES_GROUP:}
+    sns:
+      device-events-topic-arn: ${DEVICE_EVENTS_TOPIC_ARN:}
+
+  overview:
+    # A device is online while its latest measurement is younger than this many of its metrics intervals.
+    online-within-metrics-intervals: 3
+
+  metrics:
+    retention: 7d
+    max-clock-skew: 5m
+
+  images:
+    upload-url-validity: 30m
+    # The same limits as detectedAt in the ingest Lambda.
+    max-capture-age: 30d
+    max-clock-skew: 5m
+
+  # The configuration a new device starts with. Must satisfy the ranges of device-management-api.yaml
+  # (checked by DefaultSettingsIT). Exposure and white balance are the defaults of rpi-edge/settings.py.
+  configuration:
+    defaults:
+      plate-cooldown-seconds: 60
+      batching:
+        detections-batch-size: 20
+        locations-batch-size: 100
+        image-urls-batch-size: 20
+        max-batch-delay-seconds: 10
+      ml:
+        detector-min-confidence: 0.5
+        ocr-min-confidence: 0.6
+        min-plate-width-px: 60
+      intervals:
+        metrics-seconds: 60
+        config-poll-seconds: 60
+        alerts-poll-seconds: 60
+        location-sample-seconds: 5
+      camera:
+        exposure:
+          mode: MANUAL
+          exposure-us: 2000
+          gain: 4.0
+          max-exposure-us: 4000
+          max-gain: 12.0
+          target-brightness: 0.4
+        white-balance:
+          mode: DAYLIGHT
+          red-gain: 2.0
+          blue-gain: 1.6
+        fps: 3.0

@@ -24,3 +24,14 @@ Thumbs.db
 .env
 .env.local
 *.local
+
+# Terraform (lock file .terraform.lock.hcl IS committed)
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+*.tfplan
+# Lambda zips built by terraform plan
+.build/
+terraform.tfvars
+*.auto.tfvars

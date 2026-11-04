@@ -1,0 +1,652 @@
+openapi: 3.0.3
+info:
+  title: Device Management Service API
+  version: 0.1.0
+  description: |
+    Control plane of the edge fleet (Views 4 and 5): device configuration, device metrics, presigned image upload
+    URLs, and creating and deleting devices.
+
+    The device is never named in a path. It follows from the caller (docs/identity-and-access.md):
+    - a device (X-Account-Type device) acts on itself: X-Account-Id is its deviceId,
+    - a person (X-Account-Type user) acts on the device of their account, found in the devices table by the account
+      (one device per account for now; a person without a device gets 404 DEVICE_NOT_FOUND).
+    Every response that describes a device carries its deviceId.
+
+    Administration endpoints (/api/v1/admin) are called with AWS Signature V4 by an administrator, never with a token.
+    Creating and deleting a device publish device.paired and device.unpaired (docs/events/device-events.md).
+
+    A request may carry X-Trace-Id (1 to 64 characters from A-Z a-z 0-9 -); otherwise the request id of API Gateway is
+    used. It is returned in the response header X-Trace-Id and as requestId of errors.
+
+    Contract first: controller interfaces and DTOs are generated from this file at build time.
+servers:
+  - url: /
+security:
+  - cognitoJwt: []
+tags:
+  - name: device
+    description: The device of the caller
+  - name: configuration
+    description: View 4 - operating parameters of the device, read by the device and edited by its owner
+  - name: metrics
+    description: View 5 - health metrics sent by the device and charted for its owner
+  - name: images
+    description: Presigned URLs for uploading the photos of detections
+  - name: admin
+    description: Creating and deleting devices (administrator, AWS Signature V4)
+
+paths:
+  /api/v1/device:
+    get:
+      tags: [device]
+      operationId: getDevice
+      summary: The device of the caller
+      description: Called by a person (their device) or by a device (itself).
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeviceResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/device/config:
+    get:
+      tags: [configuration]
+      operationId: getDeviceConfiguration
+      summary: Configuration of the device
+      description: |
+        Called by a person (View 4) or by the device, which polls it with conditional requests: send the last ETag in
+        If-None-Match to get 304 when nothing changed. The ETag follows the version of the configuration.
+      parameters:
+        - name: If-None-Match
+          in: header
+          description: ETag from the previous response
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          headers:
+            ETag:
+              description: Version of the configuration
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeviceConfigurationResponse' }
+        '304':
+          description: Configuration unchanged since the given ETag
+          headers:
+            ETag:
+              description: Current version of the configuration (the same value that was sent)
+              schema: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    put:
+      tags: [configuration]
+      operationId: updateDeviceConfiguration
+      summary: Replace the configuration of the device
+      description: |
+        Called by a person only. Replaces the whole configuration. Optimistic locking - a stale version returns 409
+        CONCURRENT_MODIFICATION. The device picks the change up at its next poll.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateDeviceConfigurationRequest' }
+      responses:
+        '200':
+          description: OK
+          headers:
+            ETag:
+              description: New version of the configuration
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeviceConfigurationResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/ConcurrentModification' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/device/metrics:
+    post:
+      tags: [metrics]
+      operationId: reportDeviceMetrics
+      summary: Report metrics of the device
+      description: |
+        Called by the device only, every intervals.metricsSeconds. Metrics collected while offline are sent later in
+        batches (store-and-forward). A measurement is identified by the device and its recordedAt, so sending it again
+        overwrites it with the same values. Measurements are kept for 7 days; older ones are refused.
+        Validation is atomic: any invalid measurement rejects the whole batch, as does a recordedAt repeated within the
+        batch (field code DUPLICATE_RECORDED_AT; recordedAt is compared to the millisecond).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReportMetricsRequest' }
+      responses:
+        '204': { description: Stored }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    get:
+      tags: [metrics]
+      operationId: listDeviceMetrics
+      summary: Latest metrics of the device, for charts
+      description: |
+        Called by a person (View 5). Returns the `limit` most recent measurements of the last 7 days, or the most recent
+        ones recorded before `before`, ordered by recordedAt ascending. To load older data, pass the recordedAt of the first
+        returned measurement as `before`.
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 100 }
+        - name: before
+          in: query
+          description: Return only measurements recorded before this instant (exclusive)
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeviceMetricsResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/images/presigned-urls:
+    post:
+      tags: [images]
+      operationId: createImageUploadUrls
+      summary: Presigned URLs for uploading frame photos
+      description: |
+        Called by the device only. For each frame the service assigns the S3 key
+        images/{deviceId}/{yyyy}/{MM}/{dd}/{frameId}.jpg (date of capturedAt, UTC) and signs a PUT URL for it.
+        The device uploads the JPEG with an HTTP PUT to uploadUrl with the header Content-Type: image/jpeg, and sends
+        imageKey unchanged in its detections. Asking again for the same frame returns the same key with a new URL.
+        A URL is valid for 30 minutes (expiresAt). capturedAt may be at most 5 minutes in the future and at most 30 days
+        old, the same limits as detectedAt of a detection; validation is atomic.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateImageUploadUrlsRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ImageUploadUrlsResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/admin/devices:
+    post:
+      tags: [admin]
+      operationId: createDevice
+      summary: Create a device and pair it with an account
+      description: |
+        Creates the Cognito user of the device (group devices) with the given username and password, registers the
+        device with the account as its owner, creates its configuration from the service defaults and publishes
+        device.paired. The deviceId is the sub Cognito assigns. The password is never stored or returned.
+
+        The account must be a person (a Cognito user in the group users) without a device. A password that does not meet
+        the password policy of the user pool returns 400 VALIDATION_FAILED (field password, code PASSWORD_POLICY).
+        All or nothing: when a step fails, the steps already done are undone and the request can be repeated.
+      security:
+        - awsSigV4: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateDeviceRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreatedDeviceResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/AdminForbidden' }
+        '404': { $ref: '#/components/responses/AccountNotFound' }
+        '409': { $ref: '#/components/responses/DeviceConflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/admin/devices/{deviceId}:
+    delete:
+      tags: [admin]
+      operationId: deleteDevice
+      summary: Delete a device
+      description: |
+        Deletes the Cognito user of the device (it can no longer sign in or refresh its tokens), publishes
+        device.unpaired, then deletes its registration and its configuration. Metrics expire on their own; detections
+        stay with the account they belong to.
+
+        Safe to repeat after a failure: every step is idempotent and the registration is deleted last, so a repeated
+        request finishes the remaining steps. An access token the device already holds stays valid until it expires,
+        but this service refuses it as soon as the registration is gone.
+      security:
+        - awsSigV4: []
+      parameters:
+        - name: deviceId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Deleted }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/AdminForbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+components:
+  securitySchemes:
+    cognitoJwt:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    awsSigV4:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: AWS Signature Version 4 of an IAM principal allowed to execute-api:Invoke the route
+
+  responses:
+    BadRequest:
+      description: Invalid input (malformed value, constraint violation, malformed path id)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Unauthorized:
+      description: Missing or invalid token - returned by API Gateway before the request reaches the service, so the body is not a Problem object
+    Forbidden:
+      description: The caller is not allowed to call this endpoint (FORBIDDEN), e.g. a person reporting metrics or a device editing its configuration
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    AdminForbidden:
+      description: Missing or invalid AWS signature - returned by API Gateway, so the body is not a Problem object
+    NotFound:
+      description: The device does not exist (DEVICE_NOT_FOUND), e.g. a person whose account has no device or a deleted device
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    AccountNotFound:
+      description: The account does not exist or is not a person (ACCOUNT_NOT_FOUND)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    ConcurrentModification:
+      description: The configuration was changed since it was read (CONCURRENT_MODIFICATION) - read it again and reapply the change
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    DeviceConflict:
+      description: The username is taken (USERNAME_TAKEN) or the account already has a device (ACCOUNT_HAS_DEVICE)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    InternalError:
+      description: Unexpected server error
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+
+  schemas:
+    Problem:
+      type: object
+      description: RFC 9457 problem details with extension fields
+      required: [type, title, status, code, requestId]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        code:
+          type: string
+          description: Stable machine-readable code, e.g. DEVICE_NOT_FOUND, CONCURRENT_MODIFICATION, VALIDATION_FAILED
+        requestId:
+          type: string
+          description: Trace id of the request (also in the response header X-Trace-Id), to find it in the logs
+        fields:
+          type: array
+          items: { $ref: '#/components/schemas/FieldError' }
+
+    FieldError:
+      type: object
+      required: [field, code]
+      properties:
+        index:
+          type: integer
+          description: Position of the item in a batch, absent for errors about the request itself
+        field: { type: string }
+        code: { type: string }
+        message: { type: string }
+
+    # ---------------------------------------------------------------- device
+
+    DeviceResponse:
+      type: object
+      required: [deviceId, username, createdAt, online]
+      properties:
+        deviceId: { type: string, format: uuid }
+        username:
+          type: string
+          description: Login of the device in Cognito
+        createdAt: { type: string, format: date-time }
+        lastMetricsAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: recordedAt of the latest measurement, null if the device never reported
+        online:
+          type: boolean
+          description: |
+            True when the latest measurement is younger than a number of metrics intervals of the device (intervals.metricsSeconds);
+            the number is set in the configuration of the service
+
+    # ---------------------------------------------------------------- configuration
+
+    DeviceConfigurationResponse:
+      type: object
+      required: [deviceId, version, updatedAt, plateCooldownSeconds, batching, ml, intervals, camera]
+      properties:
+        deviceId: { type: string, format: uuid }
+        version:
+          type: integer
+          format: int64
+          description: Changes with every update - send it back in the update (optimistic locking)
+        updatedAt: { type: string, format: date-time }
+        plateCooldownSeconds: { $ref: '#/components/schemas/PlateCooldownSeconds' }
+        batching: { $ref: '#/components/schemas/BatchingConfiguration' }
+        ml: { $ref: '#/components/schemas/MlConfiguration' }
+        intervals: { $ref: '#/components/schemas/IntervalsConfiguration' }
+        camera: { $ref: '#/components/schemas/CameraConfiguration' }
+
+    UpdateDeviceConfigurationRequest:
+      type: object
+      required: [version, plateCooldownSeconds, batching, ml, intervals, camera]
+      properties:
+        version:
+          type: integer
+          format: int64
+          description: Version from the last read - a mismatch returns 409 CONCURRENT_MODIFICATION
+        plateCooldownSeconds: { $ref: '#/components/schemas/PlateCooldownSeconds' }
+        batching: { $ref: '#/components/schemas/BatchingConfiguration' }
+        ml: { $ref: '#/components/schemas/MlConfiguration' }
+        intervals: { $ref: '#/components/schemas/IntervalsConfiguration' }
+        camera: { $ref: '#/components/schemas/CameraConfiguration' }
+
+    PlateCooldownSeconds:
+      type: integer
+      minimum: 0
+      maximum: 3600
+      description: After a plate is sent, the same plate is not sent again for this many seconds
+
+    BatchingConfiguration:
+      type: object
+      description: How the device groups its local queues before sending them
+      required: [detectionsBatchSize, locationsBatchSize, imageUrlsBatchSize, maxBatchDelaySeconds]
+      properties:
+        detectionsBatchSize:
+          type: integer
+          minimum: 1
+          maximum: 100
+          description: Detections per ingest request
+        locationsBatchSize:
+          type: integer
+          minimum: 1
+          maximum: 500
+          description: GPS points per ingest request
+        imageUrlsBatchSize:
+          type: integer
+          minimum: 1
+          maximum: 100
+          description: Frames per presigned URL request
+        maxBatchDelaySeconds:
+          type: integer
+          minimum: 1
+          maximum: 300
+          description: A batch that is not full is sent anyway after this many seconds
+
+    MlConfiguration:
+      type: object
+      description: Thresholds below which the device drops a detection instead of sending it
+      required: [detectorMinConfidence, ocrMinConfidence, minPlateWidthPx]
+      properties:
+        detectorMinConfidence: { type: number, format: double, minimum: 0, maximum: 1 }
+        ocrMinConfidence: { type: number, format: double, minimum: 0, maximum: 1 }
+        minPlateWidthPx:
+          type: integer
+          minimum: 10
+          maximum: 4056
+          description: Plates narrower than this in the frame are ignored
+
+    IntervalsConfiguration:
+      type: object
+      required: [metricsSeconds, configPollSeconds, alertsPollSeconds, locationSampleSeconds]
+      properties:
+        metricsSeconds:
+          type: integer
+          minimum: 3
+          maximum: 3600
+          description: How often the device reports its metrics
+        configPollSeconds:
+          type: integer
+          minimum: 3
+          maximum: 3600
+          description: How often the device polls its configuration
+        alertsPollSeconds:
+          type: integer
+          minimum: 3
+          maximum: 3600
+          description: How often the device polls the alert list
+        locationSampleSeconds:
+          type: integer
+          minimum: 1
+          maximum: 60
+          description: How often the device records a GPS point while moving
+
+    CameraConfiguration:
+      type: object
+      description: Capture settings. The resolution is fixed at 4056x3040, which limits fps to 11.7.
+      required: [exposure, whiteBalance, fps]
+      properties:
+        exposure: { $ref: '#/components/schemas/ExposureConfiguration' }
+        whiteBalance: { $ref: '#/components/schemas/WhiteBalanceConfiguration' }
+        fps: { type: number, format: double, minimum: 0.1, maximum: 11.7 }
+
+    ExposureConfiguration:
+      type: object
+      required: [mode, exposureUs, gain, maxExposureUs, maxGain, targetBrightness]
+      properties:
+        mode:
+          type: string
+          enum: [MANUAL, AUTO, AUTO_GAIN, AUTO_EXPOSURE]
+          description: |
+            MANUAL - exposureUs and gain fixed; AUTO - exposure time first (up to maxExposureUs), then gain (up to maxGain);
+            AUTO_GAIN - exposureUs fixed, gain automatic; AUTO_EXPOSURE - gain fixed, exposure time automatic
+        exposureUs: { type: integer, minimum: 20, maximum: 1000000 }
+        gain: { type: number, format: double, minimum: 1, maximum: 22 }
+        maxExposureUs: { type: integer, minimum: 20, maximum: 1000000 }
+        maxGain: { type: number, format: double, minimum: 1, maximum: 22 }
+        targetBrightness:
+          type: number
+          format: double
+          minimum: 0.1
+          maximum: 0.8
+          description: Mean brightness the automatic modes aim for, 0 to 1
+
+    WhiteBalanceConfiguration:
+      type: object
+      required: [mode, redGain, blueGain]
+      properties:
+        mode:
+          type: string
+          enum: [AUTO, DAYLIGHT, CLOUDY, TUNGSTEN, FLUORESCENT, INDOOR, MANUAL]
+        redGain:
+          type: number
+          format: double
+          minimum: 0.5
+          maximum: 8
+          description: Used in MANUAL mode
+        blueGain:
+          type: number
+          format: double
+          minimum: 0.5
+          maximum: 8
+          description: Used in MANUAL mode
+
+    # ---------------------------------------------------------------- metrics
+
+    ReportMetricsRequest:
+      type: object
+      required: [metrics]
+      properties:
+        metrics:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items: { $ref: '#/components/schemas/DeviceMetric' }
+
+    DeviceMetric:
+      type: object
+      required: [recordedAt, cpuTemperatureC, cpuUsagePercent, ramUsagePercent, processingFps, queues, diskFreeMb, uptimeSeconds, gps]
+      properties:
+        recordedAt:
+          type: string
+          format: date-time
+          description: RFC 3339 UTC; at most 5 minutes in the future and at most 7 days old
+        cpuTemperatureC: { type: number, format: double, minimum: -40, maximum: 125 }
+        cpuUsagePercent: { type: number, format: double, minimum: 0, maximum: 100 }
+        ramUsagePercent: { type: number, format: double, minimum: 0, maximum: 100 }
+        processingFps:
+          type: number
+          format: double
+          minimum: 0
+          description: Frames analysed per second since the previous measurement
+        queues: { $ref: '#/components/schemas/LocalQueues' }
+        diskFreeMb: { type: integer, format: int64, minimum: 0 }
+        uptimeSeconds: { type: integer, format: int64, minimum: 0 }
+        gps: { $ref: '#/components/schemas/GpsState' }
+
+    LocalQueues:
+      type: object
+      description: Items waiting on the device to be sent (store-and-forward)
+      required: [detectionsPending, locationsPending, imagesPending]
+      properties:
+        detectionsPending: { type: integer, minimum: 0 }
+        locationsPending: { type: integer, minimum: 0 }
+        imagesPending: { type: integer, minimum: 0 }
+
+    GpsState:
+      type: object
+      required: [fix, satellites]
+      properties:
+        fix:
+          type: string
+          enum: [NONE, FIX_2D, FIX_3D]
+        satellites: { type: integer, minimum: 0, maximum: 100 }
+
+    DeviceMetricsResponse:
+      type: object
+      required: [deviceId, metrics]
+      properties:
+        deviceId: { type: string, format: uuid }
+        metrics:
+          type: array
+          description: Ordered by recordedAt ascending
+          items: { $ref: '#/components/schemas/DeviceMetric' }
+
+    # ---------------------------------------------------------------- images
+
+    CreateImageUploadUrlsRequest:
+      type: object
+      required: [frames]
+      properties:
+        frames:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items: { $ref: '#/components/schemas/FrameToUpload' }
+
+    FrameToUpload:
+      type: object
+      required: [frameId, capturedAt]
+      properties:
+        frameId:
+          type: string
+          format: uuid
+          description: Id of the frame, the same as frameId of its detections
+        capturedAt:
+          type: string
+          format: date-time
+          description: When the frame was captured (RFC 3339 UTC); its UTC date goes into the key
+
+    ImageUploadUrlsResponse:
+      type: object
+      required: [uploads]
+      properties:
+        uploads:
+          type: array
+          description: One entry per requested frame, in the order of the request
+          items: { $ref: '#/components/schemas/ImageUpload' }
+
+    ImageUpload:
+      type: object
+      required: [frameId, imageKey, uploadUrl, expiresAt]
+      properties:
+        frameId: { type: string, format: uuid }
+        imageKey:
+          type: string
+          description: S3 key of the photo - send it unchanged as imageKey of the detections of this frame
+        uploadUrl:
+          type: string
+          format: uri
+          description: Presigned PUT URL; upload with the header Content-Type image/jpeg
+        expiresAt: { type: string, format: date-time }
+
+    # ---------------------------------------------------------------- admin
+
+    CreateDeviceRequest:
+      type: object
+      required: [accountId, username, password]
+      properties:
+        accountId:
+          type: string
+          format: uuid
+          description: Account (Cognito sub of the person) that becomes the owner
+        username:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9-]{2,62}$'
+          description: Login of the device in Cognito, e.g. rpi-01 - lowercase letters, digits and hyphens
+        password:
+          type: string
+          minLength: 12
+          maxLength: 256
+          description: Must also meet the password policy of the user pool (lower and upper case, digit, symbol)
+
+    CreatedDeviceResponse:
+      type: object
+      required: [deviceId, accountId, username, createdAt]
+      properties:
+        deviceId:
+          type: string
+          format: uuid
+          description: Cognito sub of the device
+        accountId: { type: string, format: uuid }
+        username: { type: string }
+        createdAt: { type: string, format: date-time }

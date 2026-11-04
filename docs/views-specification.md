@@ -115,7 +115,7 @@ Content translated from the architecture diagram `Inżynierka (2).drawio` (as of
 ## Deviations
 
 Proposed deviations of the implementation from the diagram. Status: `proposed` (waiting for team approval) / `agreed`.
-In the OpenAPI contracts they are referenced as `D1`–`D23` (without the `#` sign, which starts a comment in YAML).
+In the OpenAPI contracts they are referenced as `D1`–`D24` (without the `#` sign, which starts a comment in YAML).
 
 | No. | Diagram | Implementation | Justification | Status |
 |---|---|---|---|---|
@@ -142,12 +142,13 @@ In the OpenAPI contracts they are referenced as `D1`–`D23` (without the `#` si
 | D21 | View 5: `connection_status` stored with every status | `online` and `lastMetricsAt` computed in `GET /api/v1/device` from the latest measurement and the metrics interval of the device; measurements add free disk, uptime and the GPS state; kept for 7 days (TTL) | A device that stopped reporting cannot report that it is offline | agreed |
 | D22 | `device_statuses` with SK `datetime` | Table `device-metrics` with SK `recordedAt`, epoch milliseconds of the measurement, the same name as in the API | A number sorts chronologically; the table is named after what it holds | agreed |
 | D23 | No device registry | Table `devices` (PK `deviceId`, index by `accountId`) with the owner, the Cognito username and the ownership version; administrator endpoints create and delete devices (docs/device-management.md) | The source of truth of ownership and of the device events | agreed |
+| D24 | View 6: alert list without filters | Optional filters in `GET /alerts` for people: plate prefix and creation time range (`from` inclusive, `to` exclusive); `to` must be after `from` (400 `INVALID_TIME_RANGE`) | With pagination a client-side filter only searches the current page; finding one alert on a long blacklist needs a server-side filter | proposed |
 
 ---
 
 ## Open questions (to be agreed within the team)
 
-1. Who approves deviations D1–D10? Until approval the contract is a draft version (`0.x`).
+1. Who approves deviations D1–D24? Until approval the contract is a draft version (`0.x`).
 2. Expiry of the photo presigned URLs (D4): cached pages stop working once they expire.
 3. Limit not in the diagram: Live Feed window max 60 min. Do we accept it?
 

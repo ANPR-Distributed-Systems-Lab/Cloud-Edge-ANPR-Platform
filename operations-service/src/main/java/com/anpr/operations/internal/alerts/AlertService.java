@@ -1,5 +1,6 @@
 package com.anpr.operations.internal.alerts;
 
+import com.anpr.operations.shared.error.BadRequestException;
 import com.anpr.operations.shared.error.ConflictException;
 import com.anpr.operations.shared.error.ErrorCodes;
 import com.anpr.operations.shared.error.NotFoundException;
@@ -7,6 +8,7 @@ import com.anpr.operations.shared.security.CurrentAccount;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,6 +19,7 @@ import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
+@Transactional(readOnly = true)
 public class AlertService {
     private final AlertRepository alertRepository;
     private final CurrentAccount currentAccount;
@@ -32,14 +35,27 @@ public class AlertService {
         return alertRepository.save(alert);
     }
 
-    @Transactional(readOnly = true)
     public Alert get(UUID alertId) {
         return findOwned(alertId);
     }
 
-    @Transactional(readOnly = true)
-    public Page<Alert> list(Pageable pageable) {
-        return alertRepository.findByAccountId(currentAccount.id(), pageable);
+    public Page<Alert> list(AlertFilter filters, Pageable pageable) {
+        if (filters.from() != null && filters.to() != null && !filters.from().isBefore(filters.to())) {
+            throw new BadRequestException(ErrorCodes.INVALID_TIME_RANGE, "'to' must be after 'from'");
+        }
+
+        Specification<Alert> spec = AlertSpecification.ofAccount(currentAccount.id());
+        if (filters.plate() != null) {
+            spec = spec.and(AlertSpecification.plateStartWith(filters.plate()));
+        }
+        if (filters.from() != null) {
+            spec = spec.and(AlertSpecification.createAtFrom(filters.from()));
+        }
+        if (filters.to() != null) {
+            spec = spec.and(AlertSpecification.createAtTo(filters.to()));
+        }
+
+        return alertRepository.findAll(spec, pageable);
     }
 
     @Transactional

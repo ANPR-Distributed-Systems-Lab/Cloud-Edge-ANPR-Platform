@@ -10,6 +10,8 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.UUID;
 
 import static org.hamcrest.Matchers.containsInAnyOrder;
@@ -158,6 +160,58 @@ class AlertsControllerIT {
                 .andExpect(jsonPath("$.items.length()").value(2))
                 .andExpect(jsonPath("$.items[*].plate", containsInAnyOrder("WA10001", "WA10002")))
                 .andExpect(jsonPath("$.page.totalElements").value(2));
+    }
+
+    @Test
+    void listFiltersByPlatePrefix() throws Exception {
+        String account = UUID.randomUUID().toString();
+        createAlert(account, "WA10001");
+        createAlert(account, "WA20002");
+        createAlert(account, "KR10003");
+
+        mockMvc.perform(get("/api/v1/alerts")
+                        .param("plate", "WA1")
+                        .header(ACCOUNT_HEADER, account))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[*].plate", containsInAnyOrder("WA10001")))
+                .andExpect(jsonPath("$.page.totalElements").value(1));
+    }
+
+    @Test
+    void listFiltersByCreationTimeRange() throws Exception {
+        String account = UUID.randomUUID().toString();
+        createAlert(account, "GD50005");
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+
+        mockMvc.perform(get("/api/v1/alerts")
+                        .param("from", now.minusHours(1).toString())
+                        .param("to", now.plusHours(1).toString())
+                        .header(ACCOUNT_HEADER, account))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page.totalElements").value(1));
+
+        mockMvc.perform(get("/api/v1/alerts")
+                        .param("from", now.plusHours(1).toString())
+                        .header(ACCOUNT_HEADER, account))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page.totalElements").value(0));
+
+        mockMvc.perform(get("/api/v1/alerts")
+                        .param("to", now.minusHours(1).toString())
+                        .header(ACCOUNT_HEADER, account))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page.totalElements").value(0));
+    }
+
+    @Test
+    void listWithToBeforeFromReturns400() throws Exception {
+        mockMvc.perform(get("/api/v1/alerts")
+                        .param("from", "2026-10-02T00:00:00Z")
+                        .param("to", "2026-10-01T00:00:00Z")
+                        .header(ACCOUNT_HEADER, UUID.randomUUID().toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_TIME_RANGE"))
+                .andExpect(jsonPath("$.requestId").exists());
     }
 
     @Test

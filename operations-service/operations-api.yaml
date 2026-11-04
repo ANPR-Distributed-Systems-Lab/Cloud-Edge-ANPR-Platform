@@ -5,7 +5,7 @@ info:
   description: |
     Microservice 2 (Alerts-And-Views-Service) - Views 1, 2, 3, 6, alert management and the alert list for edge devices.
     Functional source of truth: docs/views-specification.md. Deviations from the architecture diagram are listed there
-    in its deviations table and referenced below as D1..D18.
+    in its deviations table and referenced below as D1..D18 and D24.
     The caller's account always comes from the token (API Gateway headers), never from request parameters (D3).
     One account owns exactly one device (the device id is unique per account in the accounts table).
     Plate numbers are always uppercase letters and digits without spaces - the client normalizes user input before sending.
@@ -199,10 +199,10 @@ paths:
       description: |
         View 6 and the edge device, one endpoint for both for now (D15).
         A person gets one page of the alerts of the account, sortable by creation date and by the date the alert
-        was last triggered.
-        A device gets all alerts of its owner in one response, whatever page, size and sort say, so every device of
-        an account has the same list. It polls with conditional requests: send the last ETag in If-None-Match to get
-        304 when nothing changed. Only devices get an ETag: the list of a person also shows lastDetectedAt, which
+        was last triggered, optionally filtered by plate prefix and creation time range (D24, proposal).
+        A device gets all alerts of its owner in one response, whatever page, size, sort and the filters say, so every
+        device of an account has the same list. It polls with conditional requests: send the last ETag in If-None-Match
+        to get 304 when nothing changed. Only devices get an ETag: the list of a person also shows lastDetectedAt, which
         moves with every detection.
       parameters:
         - $ref: '#/components/parameters/Page'
@@ -211,6 +211,15 @@ paths:
           in: query
           schema: { $ref: '#/components/schemas/AlertSortField' }
         - $ref: '#/components/parameters/Direction'
+        - name: plate
+          in: query
+          description: People only - plate prefix filter, only alerts whose plate starts with this value (D24, proposal)
+          schema:
+            type: string
+            description: Beginning of a plate number - uppercase letters and digits, no spaces
+            pattern: '^[A-Z0-9]{1,10}$'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
         - name: If-None-Match
           in: header
           description: Devices only - ETag from the previous response

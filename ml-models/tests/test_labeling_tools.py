@@ -5,7 +5,7 @@ from PIL import Image
 
 from anpr_ml.frames import dhash, hamming
 from anpr_ml.make_splits import add_new_sessions, make_splits
-from anpr_ml.select_frames import allocate, dedupe, evenly
+from anpr_ml.select_frames import DEFAULT_THRESHOLD, allocate, dedupe, evenly
 from anpr_ml.validate_export import validate_xml
 
 
@@ -23,6 +23,10 @@ def test_dedupe_compares_with_last_kept_frame():
     hashes = [0b0, 0b1, 0b11, 0b1111, 0b11111111]
     assert dedupe(hashes, threshold=4) == [0, 3, 4]
     assert dedupe([5, 5, 5], threshold=1) == [0]
+
+
+def test_default_threshold_drops_distance_4_and_keeps_distance_5():
+    assert dedupe([0b0, 0b1111, 0b11111], threshold=DEFAULT_THRESHOLD) == [0, 2]
 
 
 def test_allocate_and_evenly():

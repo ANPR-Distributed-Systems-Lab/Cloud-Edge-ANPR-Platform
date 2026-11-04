@@ -43,7 +43,9 @@ uv run anpr-select --split test  --batch test_001  --count 150 # test set, label
 
 Frames are hard-linked into `labeling/batches/<batch>/` (no extra disk space) and recorded in
 `labeling/selected.csv`, so a frame is never offered twice. The dedupe threshold is the Hamming distance
-(of 64 bits) to the last kept frame; pick it with `--sweep` and a look at the result.
+(of 64 bits) to the last kept frame: a frame is kept when the distance is at least `--threshold` (default 5,
+so a distance of 4 or less counts as a duplicate). `train_001` was selected with 8, which dropped too many
+frames that differed in content; `--sweep` shows how many frames survive each threshold.
 
 ## Creating the project and tasks in CVAT
 

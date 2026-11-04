@@ -16,7 +16,9 @@ from .frames import hamming, session_frames
 from .make_splits import load_splits
 from .paths import BATCHES_DIR, DATA_DIR, SELECTED_FILE
 
-DEFAULT_THRESHOLD = 8  # Hamming distance (of 64 bits) to the last kept frame; tune with --sweep
+# A frame is kept when its Hamming distance (of 64 bits) to the last kept frame is at least this.
+# Lowered from 8 after a visual review: 8 dropped frames that differed in content (train_001 used 8).
+DEFAULT_THRESHOLD = 5
 
 
 def dedupe(hashes: list[int], threshold: int) -> list[int]:
@@ -87,7 +89,7 @@ def main() -> None:
     already = load_selected()
 
     if args.sweep:
-        for t in (2, 4, 6, 8, 10, 12, 16):
+        for t in (2, 4, 5, 6, 8, 10, 12, 16):
             kept = sum(len(candidates(s, index, already, t)) for s in sessions)
             print(f"threshold {t:2d}: {kept} frames left in {args.split}")
         return

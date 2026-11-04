@@ -56,7 +56,7 @@ ml-models/
 
 ### Frame selection
 - Source: frames recorded by the data-collection app (`rpi-edge`), full resolution 4056x3040 JPEG.
-- Remove near-duplicates with a perceptual hash, for example when the car is stationary. The Hamming-distance threshold is tuned by eye on a sample.
+- Remove near-duplicates with a perceptual hash, for example when the car is stationary. The Hamming-distance threshold was tuned by eye on a sample: a frame is kept when its 64-bit dHash differs from the last kept frame by at least 5 bits (`train_001` was selected with 8, which dropped too many frames that differed in content).
 - From what remains, pick diverse frames (distance, angle, lighting, road type) that contain at least one plate. Frames without plates are kept only as a small share of negatives.
 - Always split by **recording session**, never by frame. Consecutive frames are almost identical, so a random split inflates validation results.
 
@@ -191,5 +191,5 @@ All metrics are computed on the session-split test set and logged to Weights & B
 | 3 | Share of synthetic data for OCR | After the baseline, based on errors on rare characters |
 | 4 | Small-plate threshold (~70 px on the original) | Histogram after the first ~100 labels |
 | 5 | Metric acceptance thresholds | After the first baseline run |
-| 6 | Perceptual-hash distance threshold for deduplication | Tuned by eye on a sample of frames |
+| 6 | Perceptual-hash distance threshold for deduplication | **Decided 2026-11-04: 5** (kept at a distance of 5 or more), after a visual review of kept and dropped frames in 4 train sessions |
 | 7 | Mixed precision on the GTX 1660 Super | Check on the first training run |

@@ -10,3 +10,7 @@ EXPORTS_DIR = LABELING_DIR / "exports"
 FRAME_INDEX = LABELING_DIR / "frame_index.csv"
 SPLITS_FILE = LABELING_DIR / "splits.json"
 SELECTED_FILE = LABELING_DIR / "selected.csv"
+CONFIGS_DIR = ROOT / "configs"
+DATASETS_DIR = ROOT / "datasets"  # generated training datasets, gitignored
+MODELS_DIR = ROOT / "models"  # weights, gitignored (distributed through S3)
+RUNS_DIR = ROOT / "runs"  # training runs, gitignored

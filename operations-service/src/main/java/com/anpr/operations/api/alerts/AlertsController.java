@@ -3,6 +3,7 @@ package com.anpr.operations.api.alerts;
 import com.anpr.operations.api.generated.AlertsApi;
 import com.anpr.operations.api.generated.model.*;
 import com.anpr.operations.internal.alerts.Alert;
+import com.anpr.operations.internal.alerts.AlertFilter;
 import com.anpr.operations.internal.alerts.AlertService;
 import com.anpr.operations.shared.security.CurrentAccount;
 import lombok.RequiredArgsConstructor;
@@ -13,6 +14,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.net.URI;
+import java.time.OffsetDateTime;
 import java.util.UUID;
 
 @RestController
@@ -36,13 +38,14 @@ public class AlertsController implements AlertsApi {
 
     @Override
     public ResponseEntity<AlertPage> listAlerts(Integer page, Integer size, AlertSortField sort, SortDirection direction,
+                                                String plate, OffsetDateTime from, OffsetDateTime to,
                                                 String ifNoneMatch) {
         if (currentAccount.isDevice()) {
             // A device reads the alerts of its owner: full list and ETag, once the devices table exists (next stage).
             return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).build();
         }
         PageRequest pageable = PageRequest.of(page, size, toSort(sort, direction));
-        return ResponseEntity.ok(mapper.toPage(alertService.list(pageable)));
+        return ResponseEntity.ok(mapper.toPage(alertService.list(new AlertFilter(plate, from, to), pageable)));
     }
 
     @Override

@@ -6,6 +6,8 @@ requires-python = ">=3.11"
 dependencies = [
     "numpy>=1.26",
     "pillow>=10.3",
+    "opencv-python>=4.10",
+    "pyyaml>=6",
 ]
 
 [project.scripts]
@@ -13,12 +15,45 @@ anpr-index = "anpr_ml.frame_index:main"
 anpr-splits = "anpr_ml.make_splits:main"
 anpr-select = "anpr_ml.select_frames:main"
 anpr-validate = "anpr_ml.validate_export:main"
+anpr-yolo-dataset = "anpr_ml.yolo_dataset:main"
+anpr-train-detector = "anpr_ml.detector:main"
+anpr-eval-detector = "anpr_ml.evaluate_detector:main"
 
 [dependency-groups]
 dev = [
     "pytest>=8",
     "ruff>=0.6",
 ]
+# Heavy, GPU only: the labeling tools and the unit tests do not need it.
+train = [
+    "torch>=2.13",
+    "torchvision>=0.28",
+    "ultralytics>=8.4",
+    "wandb>=0.21",
+]
+notebook = [
+    "jupyterlab>=4.2",
+    "jupytext>=1.16",
+    "ipykernel>=6.29",
+    "nbstripout>=0.7",
+    "matplotlib>=3.8",
+    "pandas>=2.2",
+]
+
+[tool.uv]
+default-groups = ["dev", "train", "notebook"]
+# The CUDA index has no macOS wheels; locking only for the platforms we run on keeps resolution possible.
+environments = ["sys_platform == 'win32'", "sys_platform == 'linux'"]
+
+# CUDA 12.6 build: the training PC driver (566.14) supports CUDA up to 12.7.
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu126" }
+torchvision = { index = "pytorch-cu126" }
 
 [build-system]
 requires = ["hatchling"]

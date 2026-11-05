@@ -1,8 +1,13 @@
 # Raw recordings (tens of GB, stored locally only)
 data/
 
-# Model weights (distributed through S3, see CLAUDE.md)
+# Model weights (distributed through S3, see CLAUDE.md); Ultralytics may also drop *.pt into the working dir
 models/
+*.pt
+*.onnx
+
+# Generated training datasets (anpr-yolo-dataset), rebuilt from labeling/exports
+datasets/
 
 # Labeling infrastructure: generated or downloaded locally
 labeling/cvat/

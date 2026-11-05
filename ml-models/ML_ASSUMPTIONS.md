@@ -1,7 +1,7 @@
 # ML assumptions: plate detection and OCR
 
 Working assumptions for building the Polish license plate models (detection with 4 corners, then OCR).
-Last updated: 2026-10-11. Items marked **OPEN** are deliberately undecided, see the last section.
+Last updated: 2026-11-05. Items marked **OPEN** are deliberately undecided, see the last section.
 
 ## 1. Decision summary
 
@@ -9,15 +9,16 @@ Last updated: 2026-10-11. Items marked **OPEN** are deliberately undecided, see 
 |---|---|
 | Labeling tool | CVAT, self-hosted (docker) |
 | Pre-labeling | Iterative loop with our own model |
-| Detection model | YOLO-pose, nano size, 1 class, 4 keypoints (plate corners) |
+| Detection model | YOLO11n-pose (Ultralytics), 1 class, 4 keypoints (plate corners); YOLO26n-pose compared at the Pi benchmark |
 | OCR model | `fast-plate-ocr` as baseline. Final model **OPEN** (needs per-position character rules) |
 | Labeling resolution | Original frames, 4056x3040 |
-| Detector input resolution | **OPEN**, decided after a benchmark on the Pi |
+| Detector input resolution | **OPEN**, 1280x960 for detector v0; final after a benchmark on the Pi |
+| Ignore regions in training | Painted gray (114) in the downscaled train and val images |
 | Frame selection | Perceptual-hash deduplication, then diverse frames that contain plates |
 | Test set | ~150 frames from separate sessions, labeled from scratch |
 | Data storage | Local only |
 | Training hardware | Local PC: i5-9600KF, GTX 1660 Super |
-| Experiment tracking | Weights & Biases |
+| Experiment tracking | Weights & Biases, private project; metrics plus validation frames for review |
 | Notebooks | jupytext `.py` + nbstripout + `notebooks/reports/` |
 | Inference runtime on the Pi | ONNX Runtime |
 | Document language | English |
@@ -37,13 +38,15 @@ ml-models/
 ```
 
 - Notebooks are for exploration and visualization. Anything repeated (loading, splitting, metrics, export) lives in `src/anpr_ml/` and is imported.
+- Training runs from a terminal with `anpr-train-detector --config configs/<config>.yaml`, never inside a notebook: a run of an hour or more must not depend on a kernel or an IDE, and the command plus the config make it reproducible. Notebooks analyse finished runs.
 - Per CLAUDE.md, model weights (`.onnx`) are not stored in the repository. The edge node downloads them from S3 at startup.
 
 ### Notebooks in git
 
 - The `.py` file (jupytext percent format) is committed. Plain `.ipynb` working copies are gitignored.
 - Any `.ipynb` that is committed goes through the `nbstripout` git filter (outputs removed).
-- `notebooks/reports/` is excluded from the filter in `.gitattributes`. Notebooks there keep their outputs (plots, confusion matrices, example detections) so GitHub renders them.
+- `notebooks/reports/` is excluded from the filter in `.gitattributes`. Notebooks there keep their outputs (tables, learning curves, histograms, confusion matrices) so GitHub renders them.
+- **No frames or crops in committed notebooks** (decided 2026-11-05): licence plates are personal data. Cells that draw frames run only when `ANPR_SHOW_IMAGES` is not `0`; reports are executed with `ANPR_SHOW_IMAGES=0`.
 - `nbdime` is optional for diffing and merging `.ipynb` files.
 
 ## 3. Data
@@ -52,7 +55,7 @@ ml-models/
 - Images and labels are stored **locally only** (the ML work is owned by one person). There is no cloud copy and no DVC.
 - Keep a second copy of the dataset and of exported CVAT annotations on a separate disk.
 - The repo contains only code, configs and, optionally, a manifest (file name, size, checksum).
-- Experiment tracking must stay consistent with this: log metrics and hyperparameters to W&B, **do not upload dataset images or crops**.
+- Experiment tracking: metrics and hyperparameters go to W&B. **Exception decided on 2026-11-05:** the private W&B project (accessible to the project owner only) also receives the validation frames of each evaluated run, with labels and predictions drawn, as a sortable table for visual error review. No training images, crops or raw data are uploaded, and frames never appear in anything committed to git. Ultralytics' built-in W&B integration stays off (`yolo settings wandb=False`, the default); everything sent is chosen in `anpr_ml.tracking`.
 
 ### Frame selection
 - Source: frames recorded by the data-collection app (`rpi-edge`), full resolution 4056x3040 JPEG.
@@ -132,12 +135,13 @@ Much of the best data is expected to be oncoming cars passing on the left side o
 
 ## 6. Detection model
 
-- **Model:** YOLO-pose, nano size, 1 class (`plate`), 4 keypoints (`kpt_shape: [4, 3]`).
+- **Model:** YOLO11n-pose, 1 class (`plate`), 4 keypoints (`kpt_shape: [4, 3]`), starting from COCO-pose weights (the keypoint head is rebuilt). Chosen for v0 as the mature option; YOLO26n-pose (NMS-free, built for edge CPUs) is compared at the Pi benchmark.
+- **Ignore regions:** Ultralytics has no ignore label, so `plate_ignore` regions and plates below the small-plate threshold are painted gray (114, the letterbox color) with a 3 px margin in the downscaled train and val images; pixels of real plates are never painted. The evaluation on original frames (unpainted) drops detections on those regions instead of counting them as false positives.
 - **Label format:** `0 cx cy w h x1 y1 v1 x2 y2 v2 x3 y3 v3 x4 y4 v4`, all normalized. The box is derived from the 4 corners. `v` is the visibility flag.
 - **Augmentation:** horizontal flip is disabled (`fliplr = 0`), because a mirrored plate is not a real case and would swap the TL/TR corner order.
 - **Input size:** **OPEN**. Candidates 1024x768, 1280x960, 1920x1440. All are divisible by 32.
 - **Licensing:** Ultralytics models are AGPL-3.0. Acceptable for the thesis; reconsider before any commercial use. The label format is model-neutral, so switching to an Apache-2.0 alternative (e.g. RTMPose or RF-DETR based) stays possible.
-- **Hardware caveat:** the GTX 1660 Super has 6 GB VRAM and no tensor cores. The nano model at 1280x960 should fit with a moderate batch size. Mixed precision can be unreliable on 16-series cards (it may fall back to FP32 or produce NaN losses), so check this on the first training run.
+- **Hardware caveat:** the GTX 1660 Super has 6 GB VRAM and no tensor cores. Measured at 1280 in FP32: batch 4 needs 3.6 GB per training step, batch 8 needs 7.2 GB, so v0 trains with batch 4 (gradients accumulate to 64 images). Deterministic cuDNN kernels (`deterministic=True`) need about 10 GB at batch 4 and are 8x slower, so they are off: runs with the same seed are close but not bit-identical. Mixed precision is unreliable on 16-series cards: Ultralytics' AMP check disables it on the GTX 1660 Super, so training runs in FP32 (confirmed on the first run, 2026-11-05).
 - **Export:** ONNX, run with ONNX Runtime on the Pi.
 
 ## 7. OCR model
@@ -192,4 +196,4 @@ All metrics are computed on the session-split test set and logged to Weights & B
 | 4 | Small-plate threshold (~70 px on the original) | Histogram after the first ~100 labels |
 | 5 | Metric acceptance thresholds | After the first baseline run |
 | 6 | Perceptual-hash distance threshold for deduplication | **Decided 2026-11-04: 5** (kept at a distance of 5 or more), after a visual review of kept and dropped frames in 4 train sessions |
-| 7 | Mixed precision on the GTX 1660 Super | Check on the first training run |
+| 7 | Mixed precision on the GTX 1660 Super | **Decided 2026-11-05: off.** Ultralytics disables AMP on this GPU; training is FP32 |

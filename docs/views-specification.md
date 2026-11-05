@@ -115,7 +115,7 @@ Content translated from the architecture diagram `Inżynierka (2).drawio` (as of
 ## Deviations
 
 Proposed deviations of the implementation from the diagram. Status: `proposed` (waiting for team approval) / `agreed`.
-In the OpenAPI contracts they are referenced as `D1`–`D24` (without the `#` sign, which starts a comment in YAML).
+In the OpenAPI contracts they are referenced as `D1`–`D25` (without the `#` sign, which starts a comment in YAML).
 
 | No. | Diagram | Implementation | Justification | Status |
 |---|---|---|---|---|
@@ -143,12 +143,13 @@ In the OpenAPI contracts they are referenced as `D1`–`D24` (without the `#` si
 | D22 | `device_statuses` with SK `datetime` | Table `device-metrics` with SK `recordedAt`, epoch milliseconds of the measurement, the same name as in the API | A number sorts chronologically; the table is named after what it holds | agreed |
 | D23 | No device registry | Table `devices` (PK `deviceId`, index by `accountId`) with the owner, the Cognito username and the ownership version; administrator endpoints create and delete devices (docs/device-management.md) | The source of truth of ownership and of the device events | agreed |
 | D24 | View 6: alert list without filters | Optional filters in `GET /alerts` for people: plate prefix and creation time range (`from` inclusive, `to` exclusive); `to` must be after `from` (400 `INVALID_TIME_RANGE`) | With pagination a client-side filter only searches the current page; finding one alert on a long blacklist needs a server-side filter | proposed |
+| D25 | Table `accounts` in operations: `id_konta` (PK), `id_urządzenia` (UNIQUE), first name, last name, e-mail, creation date | `accounts (account_id)` and a separate `devices (device_id, account_id, version)`, both filled from `device.paired` / `device.unpaired` (docs/identity-and-access.md, section 6); unpairing keeps the device row with no owner | Profile data stays in Cognito; operations never calls device-management, so it keeps its own copy of the owner of a device; events arrive out of order, and the kept `version` makes a late, older pairing ignored | proposed |
 
 ---
 
 ## Open questions (to be agreed within the team)
 
-1. Who approves deviations D1–D24? Until approval the contract is a draft version (`0.x`).
+1. Who approves deviations D1–D25? Until approval the contract is a draft version (`0.x`).
 2. Expiry of the photo presigned URLs (D4): cached pages stop working once they expire.
 3. Limit not in the diagram: Live Feed window max 60 min. Do we accept it?
 

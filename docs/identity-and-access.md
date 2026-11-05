@@ -189,5 +189,5 @@ recreate the pool, a deliberate one-off step that was done on `dev` like this:
 - **Several devices per account.** Drop the uniqueness of `account_id` in `devices` and check the
   authorization rules that assume exactly one device.
 - **Owner lookup cost.** Services may cache `deviceId` → `accountId` for a short time.
-- **Device callers in operations-service.** The contract is aligned with this document, but the service has no
-  `devices` table yet, so `GET /api/v1/alerts` answers 501 to a device until the owner can be resolved.
+- **Device callers in operations-service.** The service fills its `devices` table from the device events, but
+  `GET /api/v1/alerts` does not use it yet and still answers 501 to a device.

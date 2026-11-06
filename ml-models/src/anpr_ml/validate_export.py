@@ -16,6 +16,8 @@ from pathlib import Path
 
 import numpy as np
 
+from .geometry import plate_width_px
+
 PLATE, IGNORE = "plate", "plate_ignore"
 READABLE = {"yes", "no"}
 OCCLUSION = {"none", "partial"}
@@ -106,7 +108,7 @@ def validate_xml(root: ET.Element) -> tuple[Report, list[dict]]:
                 continue
 
             report.plates += 1
-            width_px = float((np.linalg.norm(pts[1] - pts[0]) + np.linalg.norm(pts[2] - pts[3])) / 2)
+            width_px = plate_width_px(pts)
             report.widths.append(width_px)
             text, readable = attrs.get("text", ""), attrs.get("readable", "")
             occlusion, kind = attrs.get("occlusion", ""), attrs.get("type", "")

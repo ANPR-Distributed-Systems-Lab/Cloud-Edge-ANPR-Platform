@@ -1,0 +1,6 @@
+# Profile "test" (the *IT classes): PostgreSQL from Testcontainers, SQS is never reached.
+# The listeners are off in this profile; the queue URL only satisfies the validation of AwsProperties.
+app:
+  aws:
+    sqs:
+      device-events-queue-url: https://sqs.eu-central-1.amazonaws.com/000000000000/operations-device-events

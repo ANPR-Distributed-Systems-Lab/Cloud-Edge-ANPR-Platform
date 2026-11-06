@@ -1,26 +1,35 @@
 package com.anpr.operations.internal.alerts;
 
+import com.anpr.operations.internal.devices.DeviceRepository;
+import com.anpr.operations.shared.error.BadRequestException;
 import com.anpr.operations.shared.error.ConflictException;
 import com.anpr.operations.shared.error.ErrorCodes;
+import com.anpr.operations.shared.error.ForbiddenException;
 import com.anpr.operations.shared.error.NotFoundException;
 import com.anpr.operations.shared.security.CurrentAccount;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
+@Transactional(readOnly = true)
 public class AlertService {
     private final AlertRepository alertRepository;
     private final CurrentAccount currentAccount;
     private final Clock clock;
+    private final DeviceRepository deviceRepository;
 
     @Transactional
     public Alert create(String plate, String alertText) {
@@ -32,14 +41,27 @@ public class AlertService {
         return alertRepository.save(alert);
     }
 
-    @Transactional(readOnly = true)
     public Alert get(UUID alertId) {
         return findOwned(alertId);
     }
 
-    @Transactional(readOnly = true)
-    public Page<Alert> list(Pageable pageable) {
-        return alertRepository.findByAccountId(currentAccount.id(), pageable);
+    public Page<Alert> list(AlertFilter filters, Pageable pageable) {
+        if (filters.from() != null && filters.to() != null && !filters.from().isBefore(filters.to())) {
+            throw new BadRequestException(ErrorCodes.INVALID_TIME_RANGE, "'to' must be after 'from'");
+        }
+
+        Specification<Alert> spec = AlertSpecification.ofAccount(currentAccount.id());
+        if (filters.plate() != null) {
+            spec = spec.and(AlertSpecification.plateStartWith(filters.plate()));
+        }
+        if (filters.from() != null) {
+            spec = spec.and(AlertSpecification.createAtFrom(filters.from()));
+        }
+        if (filters.to() != null) {
+            spec = spec.and(AlertSpecification.createAtTo(filters.to()));
+        }
+
+        return alertRepository.findAll(spec, pageable);
     }
 
     @Transactional
@@ -56,6 +78,15 @@ public class AlertService {
     @Transactional
     public void delete(UUID alertId) {
         alertRepository.delete(findOwned(alertId));
+    }
+
+    public List<Alert> listForDevice() {
+        UUID deviceId = currentAccount.id();
+        UUID ownerId = deviceRepository.findOwnerById(deviceId).orElseThrow(() -> {
+            log.warn("Device {} asked for alerts but has no owner", deviceId);
+            return new ForbiddenException(ErrorCodes.DEVICE_NOT_PAIRED, "The device is not paired with an account");
+        });
+        return alertRepository.findAllByAccountIdOrderByCreatedAtAsc(ownerId);
     }
 
     private Alert findOwned(UUID alertId) {

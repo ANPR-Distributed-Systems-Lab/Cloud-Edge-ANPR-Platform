@@ -189,5 +189,6 @@ recreate the pool, a deliberate one-off step that was done on `dev` like this:
 - **Several devices per account.** Drop the uniqueness of `account_id` in `devices` and check the
   authorization rules that assume exactly one device.
 - **Owner lookup cost.** Services may cache `deviceId` → `accountId` for a short time.
-- **Device callers in operations-service.** The contract is aligned with this document, but the service has no
-  `devices` table yet, so `GET /api/v1/alerts` answers 501 to a device until the owner can be resolved.
+- **Device with no owner.** `GET /api/v1/alerts` answers 403 `DEVICE_NOT_PAIRED` to a device that operations knows
+  no owner of (its `device.paired` has not arrived yet, or it was unpaired). How the Raspberry Pi reacts (keep its
+  last list, retry later) is not decided yet.

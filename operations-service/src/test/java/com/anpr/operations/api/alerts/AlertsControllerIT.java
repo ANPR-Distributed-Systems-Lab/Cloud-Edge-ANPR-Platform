@@ -1,6 +1,7 @@
 package com.anpr.operations.api.alerts;
 
 import com.anpr.operations.TestcontainersConfiguration;
+import com.anpr.operations.internal.devices.DevicePairingService;
 import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -10,16 +11,20 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.UUID;
 
 import static org.hamcrest.Matchers.containsInAnyOrder;
+import static org.hamcrest.Matchers.matchesPattern;
+import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -35,6 +40,9 @@ class AlertsControllerIT {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private DevicePairingService pairingService;
 
     @Test
     void createAlertReturns201() throws Exception {
@@ -134,11 +142,72 @@ class AlertsControllerIT {
     }
 
     @Test
-    void deviceCallerOfTheAlertListIsNotImplementedYet() throws Exception {
-        mockMvc.perform(get("/api/v1/alerts")
-                        .header(ACCOUNT_HEADER, UUID.randomUUID().toString())
-                        .header(ACCOUNT_TYPE_HEADER, "device"))
-                .andExpect(status().isNotImplemented());
+    void deviceGetsAllAlertsOfItsOwnerWithAnETag() throws Exception {
+        String owner = UUID.randomUUID().toString();
+        String device = pairedDevice(owner);
+        // More than the default page size of a person, so a device must get them all at once.
+        for (int i = 0; i < 25; i++) {
+            createAlert(owner, "DV%05d".formatted(i));
+        }
+        createAlert(UUID.randomUUID().toString(), "DV99999");
+
+        mockMvc.perform(alertsOfDevice(device))
+                .andExpect(status().isOk())
+                .andExpect(header().string("ETag", matchesPattern("W/\"[0-9a-f]{32}\"")))
+                .andExpect(jsonPath("$.items.length()").value(25))
+                .andExpect(jsonPath("$.page.totalElements").value(25));
+    }
+
+    @Test
+    void deviceGetsNotModifiedWhileTheListIsUnchanged() throws Exception {
+        String owner = UUID.randomUUID().toString();
+        String device = pairedDevice(owner);
+        createAlert(owner, "NM10001");
+        String eTag = mockMvc.perform(alertsOfDevice(device))
+                .andReturn().getResponse().getHeader("ETag");
+
+        mockMvc.perform(alertsOfDevice(device).header("If-None-Match", eTag))
+                .andExpect(status().isNotModified())
+                .andExpect(header().string("ETag", eTag))
+                .andExpect(content().string(""));
+    }
+
+    @Test
+    void updatedAlertGivesTheDeviceANewList() throws Exception {
+        String owner = UUID.randomUUID().toString();
+        String device = pairedDevice(owner);
+        String alertId = createAlert(owner, "UP10001");
+        String eTag = mockMvc.perform(alertsOfDevice(device))
+                .andReturn().getResponse().getHeader("ETag");
+
+        mockMvc.perform(put("/api/v1/alerts/{id}", alertId)
+                        .header(ACCOUNT_HEADER, owner)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "alertText": "Changed", "version": 0 }
+                                """))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(alertsOfDevice(device).header("If-None-Match", eTag))
+                .andExpect(status().isOk())
+                .andExpect(header().string("ETag", not(eTag)))
+                .andExpect(jsonPath("$.items[0].alertText").value("Changed"));
+    }
+
+    @Test
+    void deviceWithNoOwnerReturns403() throws Exception {
+        mockMvc.perform(alertsOfDevice(UUID.randomUUID().toString()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("DEVICE_NOT_PAIRED"))
+                .andExpect(jsonPath("$.requestId").exists());
+
+        String owner = UUID.randomUUID().toString();
+        String device = pairedDevice(owner);
+        pairingService.unpair(UUID.fromString(device), 2);
+
+        mockMvc.perform(alertsOfDevice(device))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("DEVICE_NOT_PAIRED"));
     }
 
     @Test
@@ -161,7 +230,8 @@ class AlertsControllerIT {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.items.length()").value(2))
                 .andExpect(jsonPath("$.items[*].plate", containsInAnyOrder("WA10001", "WA10002")))
-                .andExpect(jsonPath("$.page.totalElements").value(2));
+                .andExpect(jsonPath("$.page.totalElements").value(2))
+                .andExpect(header().doesNotExist("ETag"));
     }
 
     @Test
@@ -267,5 +337,17 @@ class AlertsControllerIT {
                 .andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString();
         return JsonPath.read(body, "$.alertId");
+    }
+
+    private String pairedDevice(String owner) {
+        UUID device = UUID.randomUUID();
+        pairingService.pair(device, UUID.fromString(owner), 1);
+        return device.toString();
+    }
+
+    private static MockHttpServletRequestBuilder alertsOfDevice(String device) {
+        return get("/api/v1/alerts")
+                .header(ACCOUNT_HEADER, device)
+                .header(ACCOUNT_TYPE_HEADER, "device");
     }
 }

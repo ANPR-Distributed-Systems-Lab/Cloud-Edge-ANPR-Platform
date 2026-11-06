@@ -4,6 +4,7 @@ import com.anpr.operations.shared.error.BadRequestException;
 import com.anpr.operations.shared.error.ConflictException;
 import com.anpr.operations.shared.error.ErrorCodes;
 import com.anpr.operations.shared.error.FieldCodes;
+import com.anpr.operations.shared.error.ForbiddenException;
 import com.anpr.operations.shared.error.NotFoundException;
 import com.anpr.operations.shared.error.UnauthorizedException;
 import com.anpr.operations.shared.tracing.TraceId;
@@ -58,6 +59,11 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(UnauthorizedException.class)
     ProblemDetail handleUnauthorized(UnauthorizedException ex) {
         return problem(HttpStatus.UNAUTHORIZED, ex.getCode(), ex.getMessage());
+    }
+
+    @ExceptionHandler(ForbiddenException.class)
+    ProblemDetail handleForbidden(ForbiddenException ex) {
+        return problem(HttpStatus.FORBIDDEN, ex.getCode(), ex.getMessage());
     }
 
     @ExceptionHandler(ObjectOptimisticLockingFailureException.class)

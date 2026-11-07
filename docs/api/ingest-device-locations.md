@@ -130,7 +130,8 @@ consumers resolve it from their pairing table. Subscriptions use raw message del
 
 Each consumer reads the batch, deduplicates by `locationId` and stores what it needs. Individual points
 carry no Trace ID of their own (too many, too little business value): logs use the request-level `traceId`
-and `batchId`.
+and `batchId`. The consumer of operations-service is described in
+[ingest-detections.md](ingest-detections.md#8-implementation-status).
 
 Devices that have no owner yet behave as described in
 [ingest-detections.md](ingest-detections.md#6-unpaired-devices).

@@ -24,3 +24,4 @@ app:
     region: ${AWS_REGION:eu-central-1}
     sqs:
       device-events-queue-url: ${DEVICE_EVENTS_QUEUE_URL:}
+      events-queue-url: ${EVENTS_QUEUE_URL:}

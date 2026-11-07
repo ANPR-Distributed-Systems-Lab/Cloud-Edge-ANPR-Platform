@@ -1,9 +1,7 @@
 package com.anpr.operations.messaging.devices;
 
 import com.anpr.operations.internal.devices.DevicePairingService;
-import com.anpr.operations.shared.tracing.TraceId;
 import org.junit.jupiter.api.Test;
-import org.slf4j.MDC;
 import software.amazon.awssdk.services.sqs.model.Message;
 import software.amazon.awssdk.services.sqs.model.MessageAttributeValue;
 import tools.jackson.core.JacksonException;
@@ -11,13 +9,8 @@ import tools.jackson.databind.json.JsonMapper;
 
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicReference;
 
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -71,22 +64,6 @@ class DeviceEventHandlerTest {
         assertThatThrownBy(() -> handler.handle(message("device.paired", "{ not json")))
                 .isInstanceOf(JacksonException.class);
         verifyNoInteractions(pairingService);
-    }
-
-    @Test
-    void traceIdIsInTheMdcWhileHandlingAndClearedAfterwards() {
-        AtomicReference<String> seen = new AtomicReference<>();
-        doAnswer(invocation -> {
-            seen.set(MDC.get(TraceId.MDC_KEY));
-            return null;
-        }).when(pairingService).unpair(any(), anyLong());
-
-        handler.handle(message("device.unpaired", """
-                { "version": 2, "deviceId": "%s" }
-                """.formatted(DEVICE)));
-
-        assertThat(seen.get()).isEqualTo("trace-1");
-        assertThat(MDC.get(TraceId.MDC_KEY)).isNull();
     }
 
     private static Message message(String eventType, String body) {

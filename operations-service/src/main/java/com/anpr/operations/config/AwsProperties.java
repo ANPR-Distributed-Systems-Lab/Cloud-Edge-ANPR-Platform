@@ -17,7 +17,10 @@ import org.springframework.validation.annotation.Validated;
 @ConfigurationProperties(prefix = "app.aws")
 public record AwsProperties(@NotBlank String region, @Valid @NotNull Sqs sqs) {
 
-    /** @param deviceEventsQueueUrl queue of the device.paired / device.unpaired events (docs/events/device-events.md) */
-    public record Sqs(@NotBlank String deviceEventsQueueUrl) {
+    /**
+     * @param deviceEventsQueueUrl queue of the device.paired / device.unpaired events (docs/events/device-events.md)
+     * @param eventsQueueUrl       queue of the edge events: detections and device locations (docs/api/ingest-*.md)
+     */
+    public record Sqs(@NotBlank String deviceEventsQueueUrl, @NotBlank String eventsQueueUrl) {
     }
 }

@@ -192,6 +192,10 @@ The Lambda lives in `infrastructure/lambdas/event_ingest` and implements this do
 [ingest-device-locations.md](ingest-device-locations.md): identity, content type, size, the atomic validation
 with `fields[]` and the `202` body. Unit tests next to it cover every rule.
 
+operations-service consumes both event types from its queue (`messaging/edge`) and stores them in `detections`
+and `device_locations` with the owner resolved from its `devices` table. A batch is stored in one transaction,
+deduplicated by `detectionId` / `locationId`. Tested locally, not deployed.
+
 ## 9. Open points
 
 - Proposed defaults to confirm: max 100 detections, 250 KiB body, 5-minute future and 30-day past limits for

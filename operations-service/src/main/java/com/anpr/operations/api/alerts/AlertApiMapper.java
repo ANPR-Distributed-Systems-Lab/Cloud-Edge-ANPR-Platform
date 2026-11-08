@@ -6,7 +6,7 @@ import org.springframework.data.domain.Page;
 import com.anpr.operations.api.generated.model.AlertPage;
 import com.anpr.operations.api.generated.model.AlertResponse;
 import com.anpr.operations.api.generated.model.PageMeta;
-import com.anpr.operations.internal.alerts.Alert;
+import com.anpr.operations.internal.alerts.model.Alert;
 
 import java.util.List;
 

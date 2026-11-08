@@ -1,5 +1,6 @@
-package com.anpr.operations.internal.devices;
+package com.anpr.operations.internal.devices.repository;
 
+import com.anpr.operations.internal.devices.model.Device;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 

@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: ANPR Operations API (Alerts-And-Views-Service)
-  version: 0.4.0
+  version: 0.4.1
   description: |
     Microservice 2 (Alerts-And-Views-Service) - Views 1, 2, 3, 6, alert management and the alert list for edge devices.
     Functional source of truth: docs/views-specification.md. Deviations from the architecture diagram are listed there
@@ -185,7 +185,7 @@ paths:
           description: OK
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Detection' }
+              schema: { $ref: '#/components/schemas/DetectionResponse' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -456,7 +456,7 @@ components:
         lat: { type: number, format: double }
         lon: { type: number, format: double }
 
-    Detection:
+    DetectionResponse:
       type: object
       description: |
         One ANPR detection. Diagram payload: device id, plate number, detection time, GPS coordinates, S3 key, alert id.
@@ -515,7 +515,7 @@ components:
       properties:
         items:
           type: array
-          items: { $ref: '#/components/schemas/Detection' }
+          items: { $ref: '#/components/schemas/DetectionResponse' }
         page: { $ref: '#/components/schemas/PageMeta' }
 
     PlateSuggestion:
@@ -568,7 +568,7 @@ components:
           type: array
           maxItems: 5000
           description: Detections within the radius and time range, ordered by detectedAt ascending. When more than 5000 matched, the 5000 most recent.
-          items: { $ref: '#/components/schemas/Detection' }
+          items: { $ref: '#/components/schemas/DetectionResponse' }
         tracks:
           type: array
           description: Device route for the whole time range, not clipped to the radius. One element per device (currently one device per account).
@@ -612,7 +612,7 @@ components:
           description: |
             Detections stored after the cursor and at least 2 seconds before the request (on a first call, the 50 most
             recently stored of those), in the order they were stored, at most 50.
-          items: { $ref: '#/components/schemas/Detection' }
+          items: { $ref: '#/components/schemas/DetectionResponse' }
         devices:
           type: array
           description: Current position and recent route of each device (currently one device per account). Empty when no position is known yet.

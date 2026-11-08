@@ -1,5 +1,7 @@
 package com.anpr.operations.internal.detections;
 
+import com.anpr.operations.internal.detections.model.Detection;
+import com.anpr.operations.internal.detections.repository.DetectionRepository;
 import com.anpr.operations.internal.devices.DeviceOwners;
 import com.anpr.operations.shared.geo.Wgs84;
 import lombok.RequiredArgsConstructor;

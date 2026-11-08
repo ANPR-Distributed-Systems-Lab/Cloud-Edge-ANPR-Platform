@@ -8,6 +8,7 @@ import com.anpr.operations.shared.error.ForbiddenException;
 import com.anpr.operations.shared.error.NotFoundException;
 import com.anpr.operations.shared.error.UnauthorizedException;
 import com.anpr.operations.shared.tracing.TraceId;
+import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -86,6 +87,7 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler({
+            ConstraintViolationException.class,
             HandlerMethodValidationException.class,
             MethodArgumentTypeMismatchException.class,
             MissingServletRequestParameterException.class,

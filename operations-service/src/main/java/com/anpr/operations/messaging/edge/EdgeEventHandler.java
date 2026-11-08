@@ -1,9 +1,9 @@
 package com.anpr.operations.messaging.edge;
 
-import com.anpr.operations.internal.detections.DetectionService;
 import com.anpr.operations.internal.detections.DetectionService.NewDetection;
-import com.anpr.operations.internal.locations.DeviceLocationService;
+import com.anpr.operations.internal.detections.DetectionService;
 import com.anpr.operations.internal.locations.DeviceLocationService.NewDeviceLocation;
+import com.anpr.operations.internal.locations.DeviceLocationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import software.amazon.awssdk.services.sqs.model.Message;

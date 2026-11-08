@@ -1,12 +1,16 @@
-package com.anpr.operations.internal.detections;
+package com.anpr.operations.internal.detections.repository;
 
+import com.anpr.operations.internal.detections.model.Detection;
+import org.springframework.data.domain.Limit;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 
+import java.util.List;
 import java.util.UUID;
 
-public interface DetectionRepository extends JpaRepository<Detection, UUID> {
+public interface DetectionRepository extends JpaRepository<Detection, UUID>, JpaSpecificationExecutor<Detection> {
 
     /** Returns 0 when the detection is already stored (a redelivered message), 1 when it was inserted. */
     @Modifying
@@ -19,4 +23,14 @@ public interface DetectionRepository extends JpaRepository<Detection, UUID> {
             ON CONFLICT (detection_id) DO NOTHING
             """, nativeQuery = true)
     int insertIfAbsent(Detection detection);
+
+    /** Distinct plates of the account starting with the prefix, most recently detected first. */
+    @Query("""
+            SELECT d.plate AS plate, MAX(d.detectedAt) AS lastDetectedAt
+            FROM Detection d
+            WHERE d.accountId = :accountId AND d.plate LIKE CONCAT(:prefix, '%')
+            GROUP BY d.plate
+            ORDER BY MAX(d.detectedAt) DESC
+            """)
+    List<PlateSuggestionRow> findPlateSuggestions(UUID accountId, String prefix, Limit limit);
 }

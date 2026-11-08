@@ -1,4 +1,4 @@
-package com.anpr.operations.internal.locations;
+package com.anpr.operations.internal.locations.model;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;

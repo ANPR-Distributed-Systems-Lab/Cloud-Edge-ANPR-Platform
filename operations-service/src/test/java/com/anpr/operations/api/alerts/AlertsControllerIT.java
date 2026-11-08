@@ -329,6 +329,14 @@ class AlertsControllerIT {
                 .andExpect(status().isNotFound());
     }
 
+    @Test
+    void pageSizeAboveTheLimitReturns400() throws Exception {
+        mockMvc.perform(get("/api/v1/alerts").param("size", "101")
+                        .header(ACCOUNT_HEADER, UUID.randomUUID().toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+    }
+
     private String createAlert(String account, String plate) throws Exception {
         String body = mockMvc.perform(post("/api/v1/alerts")
                         .header(ACCOUNT_HEADER, account)

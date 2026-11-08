@@ -1,4 +1,4 @@
-package com.anpr.operations.internal.alerts;
+package com.anpr.operations.internal.alerts.model;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;

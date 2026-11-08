@@ -1,6 +1,9 @@
 package com.anpr.operations.internal.alerts;
 
-import com.anpr.operations.internal.devices.DeviceRepository;
+import com.anpr.operations.internal.alerts.model.Alert;
+import com.anpr.operations.internal.alerts.model.AlertFilter;
+import com.anpr.operations.internal.alerts.repository.AlertRepository;
+import com.anpr.operations.internal.devices.repository.DeviceRepository;
 import com.anpr.operations.shared.error.BadRequestException;
 import com.anpr.operations.shared.error.ConflictException;
 import com.anpr.operations.shared.error.ErrorCodes;

@@ -1,6 +1,8 @@
 package com.anpr.operations.internal.devices;
 
-import com.anpr.operations.internal.accounts.AccountRepository;
+import com.anpr.operations.internal.accounts.repository.AccountRepository;
+import com.anpr.operations.internal.devices.model.Device;
+import com.anpr.operations.internal.devices.repository.DeviceRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;

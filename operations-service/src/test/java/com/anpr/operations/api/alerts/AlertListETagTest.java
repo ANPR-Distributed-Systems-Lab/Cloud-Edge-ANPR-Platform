@@ -1,6 +1,6 @@
 package com.anpr.operations.api.alerts;
 
-import com.anpr.operations.internal.alerts.Alert;
+import com.anpr.operations.internal.alerts.model.Alert;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;

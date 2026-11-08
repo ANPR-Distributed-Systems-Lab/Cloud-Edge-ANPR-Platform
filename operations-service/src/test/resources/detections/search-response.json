@@ -1,0 +1,16 @@
+{
+  "items": [
+    {
+      "detectionId": "5e1c0000-0000-4000-8000-000000000003",
+      "deviceId": "5e1c0000-0000-4000-8000-000000000002",
+      "plate": "WA12345",
+      "detectedAt": "2026-10-30T09:14:22.381Z",
+      "position": { "lat": 52.229676, "lon": 21.012229 },
+      "ocrConfidence": 0.94,
+      "detectorConfidence": 0.88,
+      "imageUrl": null,
+      "alertId": null
+    }
+  ],
+  "page": { "page": 0, "size": 20, "totalElements": 1, "totalPages": 1 }
+}

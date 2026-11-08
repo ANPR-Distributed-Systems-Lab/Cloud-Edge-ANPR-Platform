@@ -1,6 +1,8 @@
 package com.anpr.operations.internal.locations;
 
 import com.anpr.operations.internal.devices.DeviceOwners;
+import com.anpr.operations.internal.locations.model.DeviceLocation;
+import com.anpr.operations.internal.locations.repository.DeviceLocationRepository;
 import com.anpr.operations.shared.geo.Wgs84;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

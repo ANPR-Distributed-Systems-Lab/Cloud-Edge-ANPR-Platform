@@ -42,6 +42,7 @@ com.anpr.operations
 Areas: `search` (View 1), `radial` (View 2), `livefeed` (View 3), `alerts` (View 6 + device alert list), `detections`, `locations`.
 
 - Split by business area, not by class kind.
+- Inside an `internal/<area>/`: services and exceptions (what other areas use) in the area root, entities and value records in `model/`, repositories, specifications and query projections in `repository/`.
 - `internal/` never imports from `api/` or `messaging/`. Message DTOs and generated API DTOs are converted at the boundary.
 - Entities never leave `internal/`. Responses are always generated OpenAPI models, mapped with MapStruct (`@Mapper`), never field by field in a service.
 - Controller = take request, call one facade/service method, return. No business conditions.

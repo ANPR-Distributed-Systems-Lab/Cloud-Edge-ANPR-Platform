@@ -1,6 +1,6 @@
 package com.anpr.operations.api.alerts;
 
-import com.anpr.operations.internal.alerts.Alert;
+import com.anpr.operations.internal.alerts.model.Alert;
 import lombok.NoArgsConstructor;
 
 import java.nio.charset.StandardCharsets;

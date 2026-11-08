@@ -1,5 +1,6 @@
-package com.anpr.operations.internal.locations;
+package com.anpr.operations.internal.locations.repository;
 
+import com.anpr.operations.internal.locations.model.DeviceLocation;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;

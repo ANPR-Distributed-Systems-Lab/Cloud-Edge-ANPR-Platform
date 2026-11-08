@@ -1,5 +1,6 @@
-package com.anpr.operations.internal.accounts;
+package com.anpr.operations.internal.accounts.repository;
 
+import com.anpr.operations.internal.accounts.model.Account;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;

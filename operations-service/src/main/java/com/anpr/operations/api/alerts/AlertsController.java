@@ -2,9 +2,9 @@ package com.anpr.operations.api.alerts;
 
 import com.anpr.operations.api.generated.AlertsApi;
 import com.anpr.operations.api.generated.model.*;
-import com.anpr.operations.internal.alerts.Alert;
-import com.anpr.operations.internal.alerts.AlertFilter;
 import com.anpr.operations.internal.alerts.AlertService;
+import com.anpr.operations.internal.alerts.model.Alert;
+import com.anpr.operations.internal.alerts.model.AlertFilter;
 import com.anpr.operations.shared.security.CurrentAccount;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;

@@ -1,6 +1,8 @@
 package com.anpr.operations.internal.devices;
 
-import com.anpr.operations.internal.accounts.AccountRepository;
+import com.anpr.operations.internal.accounts.repository.AccountRepository;
+import com.anpr.operations.internal.devices.model.Device;
+import com.anpr.operations.internal.devices.repository.DeviceRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;

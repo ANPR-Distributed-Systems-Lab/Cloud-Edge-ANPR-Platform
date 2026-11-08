@@ -1,4 +1,4 @@
-package com.anpr.operations.internal.alerts;
+package com.anpr.operations.internal.alerts.model;
 
 import java.time.OffsetDateTime;
 

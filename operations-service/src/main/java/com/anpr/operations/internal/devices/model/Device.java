@@ -1,4 +1,4 @@
-package com.anpr.operations.internal.devices;
+package com.anpr.operations.internal.devices.model;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;

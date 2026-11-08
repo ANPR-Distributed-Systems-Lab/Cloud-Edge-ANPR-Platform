@@ -1,4 +1,4 @@
-package com.anpr.operations.internal.accounts;
+package com.anpr.operations.internal.accounts.model;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;

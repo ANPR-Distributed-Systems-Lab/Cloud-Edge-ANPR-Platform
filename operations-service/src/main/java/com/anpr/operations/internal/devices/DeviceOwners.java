@@ -1,5 +1,6 @@
 package com.anpr.operations.internal.devices;
 
+import com.anpr.operations.internal.devices.repository.DeviceRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 

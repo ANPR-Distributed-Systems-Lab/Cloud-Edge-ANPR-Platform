@@ -1,4 +1,4 @@
-package com.anpr.operations.internal.detections;
+package com.anpr.operations.internal.detections.model;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;

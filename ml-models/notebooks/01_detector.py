@@ -14,46 +14,51 @@
 # ---
 
 # %% [markdown]
-# # Detector v0: YOLO11n-pose, licence plates with 4 corners
+# # Detector analysis: YOLO-pose, licence plates with 4 corners
 #
-# **Goal.** The first plate detector. It bootstraps the pre-labeling loop (ML_ASSUMPTIONS section 4) and is the
-# baseline every later detector is compared against. It is not the model that will be deployed.
+# Analyses one finished detector run and compares it with a baseline run. **To switch versions, change `VERSION`
+# (and optionally `BASELINE`) in the first code cell and run all cells.** A version `vN` means the config
+# `configs/detector_vN.yaml` and the run directory `runs/detector/vN/`.
 #
-# **Decisions for this run** (2026-11-05):
-# - YOLO11n-pose, 1 class, 4 keypoints in the order TL, TR, BR, BL, starting from COCO-pose weights.
-# - Input 1280x960. Frames are downscaled offline with `resize_for_detector()` (INTER_AREA), the function the
-#   Pi will use, so training never resamples them again.
-# - `plate_ignore` regions and plates narrower than 70 px on the original are painted gray (114), so the model
-#   is neither trained to find them nor penalized for finding them.
+# **Pipeline shared by all versions** (decided 2026-11-05):
+# - YOLO-pose, 1 class, 4 keypoints in the order TL, TR, BR, BL, starting from COCO-pose weights.
+# - Frames are downscaled offline with `resize_for_detector()` (INTER_AREA), the function the Pi will use, so
+#   training never resamples them again.
+# - `plate_ignore` regions and plates narrower than `min_plate_px` on the original are painted gray (114), so the
+#   model is neither trained to find them nor penalized for finding them.
 # - Horizontal flip off: a mirrored plate is not a real case and would swap TL and TR.
 #
-# **Data.** `train_001` (train split) and `val_001` (val split). Every frame gets its split from
-# `labeling/splits.json` by session. The test split is not touched here.
+# What a version changes is written in the header of its config and listed in section 0.
 #
 # **Privacy.** The frames show licence plates, which are personal data. Cells that draw frames run only when
-# `SHOW_IMAGES` is on. The committed report in `notebooks/reports/` is executed with `ANPR_SHOW_IMAGES=0` and holds
+# `SHOW_IMAGES` is on. Committed reports in `notebooks/reports/` are executed with `ANPR_SHOW_IMAGES=0` and hold
 # metrics and plots only. Validation frames go only to the private W&B project (`anpr_ml.tracking`).
 #
 # **Running it.** This notebook analyses a finished run; it does not train. Train first from a terminal in
 # `ml-models/` (the same command resumes an interrupted run):
 #
 # ```powershell
-# uv run anpr-train-detector --config configs/detector_v0.yaml
+# uv run anpr-train-detector --config configs/detector_v1.yaml
 # ```
 #
 # Then open the notebook in JupyterLab (`uv run jupyter lab`, *Open With -> Notebook*) or the paired `.ipynb` in
-# PyCharm (after `uv run jupytext --sync notebooks/01_detector_v0.py`). The report:
+# PyCharm (after `uv run jupytext --sync notebooks/01_detector.py`). A report for one version, without editing the
+# notebook (the environment variables override the first cell):
 #
 # ```powershell
-# $env:ANPR_SHOW_IMAGES = "0"
-# uv run jupytext --to ipynb --output notebooks/reports/01_detector_v0.ipynb notebooks/01_detector_v0.py
-# uv run jupyter nbconvert --to notebook --execute --inplace notebooks/reports/01_detector_v0.ipynb
+# $env:ANPR_SHOW_IMAGES = "0"; $env:ANPR_DETECTOR_VERSION = "v1"; $env:ANPR_DETECTOR_BASELINE = "v0"
+# uv run jupytext --to ipynb --output notebooks/reports/01_detector_v1.ipynb notebooks/01_detector.py
+# uv run jupyter nbconvert --to notebook --execute --inplace notebooks/reports/01_detector_v1.ipynb
 # ```
 
+# %% tags=["parameters"]
+VERSION = "v1"   # the analysed run: configs/detector_<VERSION>.yaml
+BASELINE = "v0"  # the run it is compared against; None for no comparison
+
 # %%
+import json
 import os
 import platform
-from pathlib import Path
 
 import cv2
 import matplotlib.pyplot as plt
@@ -61,25 +66,47 @@ import numpy as np
 import pandas as pd
 import torch
 import ultralytics
+from IPython.display import Markdown, display
 
 from anpr_ml.common.labels import export_paths, load_records, load_splits, plate_width_px, split_records
 from anpr_ml.common.preprocess import read_image
 from anpr_ml.detector.config import dataset_dir, load_config, run_dir, run_state
 from anpr_ml.detector.dataset import ensure_dataset
 from anpr_ml.detector.evaluate import evaluate_run
+from anpr_ml.detector.evaluate import val_records as load_val_records
 from anpr_ml.detector.metrics import frame_results
-from anpr_ml.paths import BATCHES_DIR, ROOT
+from anpr_ml.paths import BATCHES_DIR, CONFIGS_DIR, ROOT
 
 os.chdir(ROOT)  # Ultralytics downloads helper weights into the working directory; *.pt is gitignored there
+
+
+def from_env(name, value):
+    """Report generation sets the versions through the environment; say so, since the cell above then lies."""
+    env = os.environ.get(name)
+    if env is None:
+        return value
+    print(f"{name}={env} overrides the value {value!r} of the first cell")
+    return env or None
+
+
+def config_path(version):
+    return CONFIGS_DIR / f"detector_{version}.yaml"
+
+
+VERSION = from_env("ANPR_DETECTOR_VERSION", VERSION)
+BASELINE = from_env("ANPR_DETECTOR_BASELINE", BASELINE)
+if BASELINE == VERSION:
+    BASELINE = None
 SHOW_IMAGES = os.environ.get("ANPR_SHOW_IMAGES", "1") == "1"
-CONFIG = Path(os.environ.get("ANPR_DETECTOR_CONFIG", ROOT / "configs" / "detector_v0.yaml"))
-cfg = load_config(CONFIG)
+
+cfg = load_config(config_path(VERSION))
+base_cfg = load_config(config_path(BASELINE)) if BASELINE else None
 SIZE = cfg["dataset"]["size"]
 MIN_PLATE_PX = cfg["dataset"]["min_plate_px"]
 
-# Reference palette, fixed order: train/precision = blue, val/recall = orange, F1 = aqua.
+# Reference palette, fixed order: train/precision = blue, val/recall = orange, F1 = aqua; the baseline is gray.
 BLUE, ORANGE, AQUA = "#2a78d6", "#eb6834", "#1baf7a"
-INK, INK_2, GRID = "#0b0b0b", "#52514e", "#e4e3df"
+INK, INK_2, GRID, BASE = "#0b0b0b", "#52514e", "#e4e3df", "#8f8d87"
 plt.rcParams.update({
     "figure.facecolor": "#fcfcfb", "axes.facecolor": "#fcfcfb", "axes.edgecolor": INK_2,
     "axes.labelcolor": INK, "text.color": INK, "xtick.color": INK_2, "ytick.color": INK_2,
@@ -89,15 +116,55 @@ plt.rcParams.update({
 pd.set_option("display.precision", 3)
 
 pd.Series({
+    "version": VERSION,
+    "baseline": BASELINE or "none",
     "python": platform.python_version(),
     "torch": torch.__version__,
     "cuda": torch.version.cuda,
     "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "none",
     "ultralytics": ultralytics.__version__,
     "opencv": cv2.__version__,
-    "config": CONFIG.name,
     "show images": SHOW_IMAGES,
 }, name="environment").to_frame()
+
+# %% [markdown]
+# ## 0. Experiment
+#
+# All detector configs and the state of their runs; any finished one can be put in `VERSION` or `BASELINE`.
+
+# %%
+pd.DataFrame([
+    {"version": p.stem.removeprefix("detector_"), "state": run_state(run_dir(load_config(p))),
+     "exports": ", ".join(load_config(p)["dataset"]["exports"])}
+    for p in sorted(CONFIGS_DIR.glob("detector_*.yaml"))
+]).set_index("version")
+
+
+# %%
+def config_header(version):
+    """The comment block at the top of a config, which states what the version is for."""
+    lines = []
+    for line in config_path(version).read_text(encoding="utf-8").splitlines():
+        if not line.startswith("#"):
+            break
+        lines.append(line.lstrip("# "))
+    return " ".join(lines)
+
+
+def flatten(d, prefix=""):
+    out = {}
+    for k, v in d.items():
+        out.update(flatten(v, f"{prefix}{k}.") if isinstance(v, dict) else {f"{prefix}{k}": v})
+    return out
+
+
+display(Markdown(f"**{VERSION}.** {config_header(VERSION)}"))
+if base_cfg:
+    a, b = flatten(base_cfg), flatten(cfg)
+    diff = [{"setting": k, BASELINE: str(a.get(k, "-")), VERSION: str(b.get(k, "-"))}
+            for k in sorted(a.keys() | b.keys()) if a.get(k) != b.get(k)]
+    display(Markdown(f"Settings that differ from {BASELINE}:"))
+    display(pd.DataFrame(diff).set_index("setting"))
 
 # %% [markdown]
 # ## 1. Labeled data
@@ -154,7 +221,7 @@ pd.DataFrame(manifest["counts"]).T.fillna(0).astype(int)
 # %% [markdown]
 # Frames without any plate to learn (`negatives`) are a large share: frames with no plate at all plus frames that
 # only contain painted ignore regions. YOLO uses them as background. Their share is a candidate knob for later
-# runs (ML_ASSUMPTIONS asks for a small share); v0 keeps every frame so the validation distribution stays real.
+# runs (ML_ASSUMPTIONS asks for a small share); so far every frame is kept so the validation distribution stays real.
 
 # %% [markdown]
 # ### Visual check of the training images (private)
@@ -193,16 +260,16 @@ else:
 # %% [markdown]
 # ## 3. Training run
 #
-# Trained by `uv run anpr-train-detector --config configs/<config>.yaml` (see the top). Hyperparameters are in the
-# config and passed to Ultralytics unchanged; everything else is the Ultralytics default. On the GTX 1660 Super
-# Ultralytics disables mixed precision (FP32). The first run of v0 died after 7 epochs when the PC ran out of
-# memory (CVAT's Docker VM, 4 dataloader workers) and was resumed from `last.pt`.
+# Trained by `uv run anpr-train-detector --config configs/detector_<VERSION>.yaml` (see the top). Hyperparameters
+# are in the config and passed to Ultralytics unchanged; everything else is the Ultralytics default. On the
+# GTX 1660 Super Ultralytics disables mixed precision (FP32).
 
 # %%
 RUN = run_dir(cfg)
 state = run_state(RUN)
 if state != "finished":
-    raise RuntimeError(f"{RUN} is {state}: run `uv run anpr-train-detector --config {CONFIG}` in a terminal first")
+    raise RuntimeError(f"{RUN} is {state}: run `uv run anpr-train-detector --config "
+                       f"configs/detector_{VERSION}.yaml` in a terminal first")
 BEST = RUN / "weights" / "best.pt"
 print(f"analysing {BEST}")
 
@@ -211,20 +278,35 @@ print(f"analysing {BEST}")
 #
 # `(B)` is the box, `(P)` the pose (keypoints). For a custom keypoint layout Ultralytics computes OKS with the
 # same sigma for every keypoint, so pose mAP is comparable between our runs but not to published COCO numbers.
+# The baseline's val curves are drawn dashed in gray; they are comparable only when both runs use the same val set
+# (section 6 checks that).
+
 
 # %%
-hist = pd.read_csv(RUN / "results.csv")
-hist.columns = [c.strip() for c in hist.columns]
+def history(run):
+    hist = pd.read_csv(run / "results.csv")
+    hist.columns = [c.strip() for c in hist.columns]
+    return hist
+
+
+hist = history(RUN)
+base_hist = history(run_dir(base_cfg)) if base_cfg and (run_dir(base_cfg) / "results.csv").exists() else None
 fig, axes = plt.subplots(1, 3, figsize=(15, 3.6))
 for ax, loss in zip(axes[:2], ("box_loss", "pose_loss")):
     ax.plot(hist["epoch"], hist[f"train/{loss}"], color=BLUE, label="train")
     ax.plot(hist["epoch"], hist[f"val/{loss}"], color=ORANGE, label="val")
+    if base_hist is not None:
+        ax.plot(base_hist["epoch"], base_hist[f"val/{loss}"], color=BASE, linestyle="--", linewidth=1.2,
+                label=f"val {BASELINE}")
     ax.set_title(loss, loc="left")
     ax.set_xlabel("epoch")
     ax.legend()
-axes[2].plot(hist["epoch"], hist["metrics/mAP50-95(B)"], color=BLUE, label="box mAP50-95")
-axes[2].plot(hist["epoch"], hist["metrics/mAP50-95(P)"], color=ORANGE, label="pose mAP50-95")
-axes[2].set_title("val mAP50-95", loc="left")
+for col, color in (("metrics/mAP50-95(B)", BLUE), ("metrics/mAP50-95(P)", ORANGE)):
+    label = "box mAP50-95" if "(B)" in col else "pose mAP50-95"
+    axes[2].plot(hist["epoch"], hist[col], color=color, label=label)
+    if base_hist is not None:
+        axes[2].plot(base_hist["epoch"], base_hist[col], color=BASE, linestyle="--", linewidth=1.2)
+axes[2].set_title(f"val mAP50-95{f'; dashed: {BASELINE}' if base_hist is not None else ''}", loc="left")
 axes[2].set_xlabel("epoch")
 axes[2].set_ylim(0, 1)
 axes[2].legend()
@@ -253,14 +335,23 @@ val_records, preds, res = evaluation.records, evaluation.predictions, evaluation
 pd.DataFrame([res["best"]]).set_index("conf")
 
 # %%
+# The baseline is read from its saved eval_val.json rather than evaluated again.
+base_eval_file = run_dir(base_cfg) / "eval_val.json" if base_cfg else None
+base_res = json.loads(base_eval_file.read_text()) if base_eval_file and base_eval_file.exists() else None
+if base_cfg and base_res is None:
+    print(f"{base_eval_file} is missing: run `uv run anpr-eval-detector --config configs/detector_{BASELINE}.yaml`")
+
 curve = pd.DataFrame(res["curve"])
 fig, ax = plt.subplots(figsize=(7, 3.6))
 for col, color in (("precision", BLUE), ("recall", ORANGE), ("f1", AQUA)):
     ax.plot(curve["conf"], curve[col], color=color, label=col)
+if base_res:
+    base_curve = pd.DataFrame(base_res["curve"])
+    ax.plot(base_curve["conf"], base_curve["f1"], color=BASE, linestyle="--", linewidth=1.2, label=f"f1 {BASELINE}")
 ax.axvline(res["best"]["conf"], color=INK_2, linewidth=1, linestyle="--")
 ax.set_xlabel("confidence threshold")
 ax.set_ylim(0, 1.02)
-ax.set_title(f"val, {res['plates']} plates; dashed: best F1", loc="left")
+ax.set_title(f"{VERSION} on val, {res['plates']} plates; vertical line: best F1", loc="left")
 ax.legend()
 fig.tight_layout()
 
@@ -271,10 +362,56 @@ pd.DataFrame(res["by_width"]).set_index("width_px")
 pd.Series(res["corner_error"], name="corner error at best F1").to_frame()
 
 # %% [markdown]
+# ## 6. Comparison with the baseline
+#
+# The difference between two runs means something only when they are measured on the same val frames with the
+# same labels; the check below compares them frame by frame. With a perfect score on both sides the val set is too
+# small or too easy to separate them and the comparison needs a larger val set.
+
+
+# %%
+def summary(ev):
+    b, c = ev["best"], ev["corner_error"]
+    return {
+        **ev["ultralytics"],
+        "best F1 conf": b["conf"], "precision @best": b["precision"], "recall @best": b["recall"],
+        "F1 @best": b["f1"], "false positives @best": b["fp"], "missed @best": b["fn"],
+        "corner error median px": c["median_px"], "corner error p90 px": c["p90_px"],
+        "corner error p90 / width": c["p90_rel_width"],
+    }
+
+
+current = {"ultralytics": ultra, **res}
+if base_res is None:
+    print("no baseline to compare with")
+else:
+    def frames(recs):
+        return sorted(json.dumps([r["image"], r["plates"], r["ignore"]], sort_keys=True) for r in recs)
+
+    same_val = frames(val_records) == frames(load_val_records(base_cfg))
+    print(f"val set: {'identical' if same_val else 'DIFFERENT, the numbers below are not directly comparable'}")
+    cmp = pd.DataFrame({BASELINE: summary(base_res), VERSION: summary(current)})
+    cmp["change"] = cmp[VERSION] - cmp[BASELINE]
+    display(cmp)
+
+# %%
+if base_res is not None:
+    widths = pd.DataFrame(res["by_width"]).set_index("width_px")
+    base_widths = pd.DataFrame(base_res["by_width"]).set_index("width_px")
+    display(pd.DataFrame({
+        "plates": widths["plates"],
+        f"detected {BASELINE}": base_widths["detected"],
+        f"detected {VERSION}": widths["detected"],
+        f"recall {BASELINE}": base_widths["recall"],
+        f"recall {VERSION}": widths["recall"],
+    }))
+
+# %% [markdown]
 # ### Error analysis (private)
 #
 # Crops from the original frame at the best-F1 threshold: missed plates, false positives and the largest corner
 # errors. Ground-truth corners green, predicted red, corner 0 (TL) drawn larger.
+
 
 # %%
 def crop_with_corners(record, gt=None, pred=None, pad=0.6):
@@ -324,29 +461,14 @@ else:
     print("SHOW_IMAGES is off: frames are not shown.")
 
 # %% [markdown]
-# ## 6. Summary
+# ## 7. Summary and conclusions
 #
-# The numbers below are what later runs are compared against (also saved to `runs/detector/<run>/eval_val.json`).
-# The written conclusions are added after the run has been reviewed.
+# The numbers later runs are compared against (also saved to `runs/detector/<run>/eval_val.json`). The written
+# conclusions of a version live in `notebooks/conclusions/detector_<VERSION>.md`, so every version keeps its own
+# and this notebook stays the same for all of them.
 
 # %%
-pd.Series({
-    **ultra,
-    "best F1 conf": res["best"]["conf"],
-    "precision @best": res["best"]["precision"],
-    "recall @best": res["best"]["recall"],
-    "corner error median px": res["corner_error"]["median_px"],
-    "corner error p90 px": res["corner_error"]["p90_px"],
-    "corner error p90 / width": res["corner_error"]["p90_rel_width"],
-}, name="detector v0, val").to_frame()
-
-# %% [markdown]
-# ### Conclusions
-#
-# _Written after reviewing the run._
-#
-# ### Next steps
-#
-# 1. Pre-label the next train batch with this model (predictions -> CVAT for images 1.1 XML), correct by hand.
-# 2. Use the detections to pick frames with large plates on the left for training batches (never for test).
-# 3. Label `test_001` from scratch, without this model.
+display(pd.Series(summary(current), name=f"detector {VERSION}, val").to_frame())
+conclusions = ROOT / "notebooks" / "conclusions" / f"detector_{VERSION}.md"
+display(Markdown(conclusions.read_text(encoding="utf-8")) if conclusions.exists()
+        else Markdown(f"_No conclusions yet: write them in `notebooks/conclusions/{conclusions.name}`._"))

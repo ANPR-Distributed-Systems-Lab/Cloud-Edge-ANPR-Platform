@@ -66,14 +66,12 @@ When a decision changes, update those documents in the same change, so they neve
 - W&B: `uv run wandb login` once per machine (the account owner enters the API key). wandb 0.31 logs tables as
   artifacts and stages their images locally before upload; `anpr_ml.tracking` points `WANDB_DATA_DIR`,
   `WANDB_CACHE_DIR` and `WANDB_ARTIFACT_DIR` to `runs/wandb-local/` so nothing lands on C:.
-- Training PC: i5-9600KF, 16 GB RAM, **GTX 1660 Super** (6 GB, no tensor cores), NVIDIA driver 566.14.
+- Training PC: i5-9600KF, 32 GB RAM, **GTX 1660 Super** (6 GB, no tensor cores), NVIDIA driver 566.14.
   Ultralytics disables AMP on it (FP32). At 1280 px batch 4 fits (3.6 GB), batch 8 does not, and
   `deterministic=True` needs ~10 GB. Beyond 6 GB Windows silently spills into system RAM and training becomes
   10x slower: watch `GPU_mem` in the log.
-- System RAM is the other limit: on Windows every dataloader worker is a full process with torch + CUDA, and
-  Ultralytics validation uses twice the train workers. The first v0 run (workers 4, CVAT's Docker VM at 8.6 GB,
-  training inside a Jupyter kernel) died after 7 epochs with "Unable to allocate" (Windows event 2004).
-  Train with `workers: 2`, from a terminal, with CVAT and Docker Desktop stopped.
+- Training is GPU-bound: more dataloader workers or `cache: ram` do not speed it up, so configs keep `workers: 2`.
+  CVAT can run during training; leave its heavy operations (task creation, imports, exports) for before or after.
 - PyCharm keeps a paired `.ipynb` open and saves it over jupytext's sync: close the tab before
   `uv run jupytext --sync notebooks/<nb>.py`.
 
@@ -115,8 +113,7 @@ These refine the documents above (which are already updated):
   plate width min 71, median 122, p90 205, max 515 px.
 - **Dataset `pose_1280x960_v0`** built from train_001 + val_001 (train 300 frames / 178 plates, 2 plates of 69.x px
   demoted to ignore; val 150 / 103). Negatives (no plate to learn) are 59 % of train and 55 % of val.
-- **Detector v0** (`configs/detector_v0.yaml`, `runs/detector/v0`): finished, 150 epochs in 0.85 h (resumed once
-  after running out of system RAM at epoch 7), best epoch 122. On val_001 (103 plates, unpainted frames, best F1
+- **Detector v0** (`configs/detector_v0.yaml`, `runs/detector/v0`): finished, 150 epochs in 0.85 h, best epoch 122. On val_001 (103 plates, unpainted frames, best F1
   at conf 0.45): precision 0.971, recall 0.981 (3 FP, 2 FN, both misses at 90-110 px), corner error median 2.8 px
   / p90 6.3 px on the original (p90 4.6 % of plate width); box mAP50-95 0.764, pose mAP50-95 0.984. Reported to
   W&B (`anpr-detector`, run `v0`, with the val frames table). The written conclusions in the notebook and the

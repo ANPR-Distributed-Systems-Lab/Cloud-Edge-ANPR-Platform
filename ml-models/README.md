@@ -53,8 +53,7 @@ All commands run from `ml-models/` with `uv run <command>`; each has `--help`.
 | `anpr-eval-detector --config CONFIG` | Re-evaluates a finished run and reports it to W&B. |
 
 Training always runs from a terminal, not from a notebook: a run takes an hour or more and must not depend on a
-kernel or an IDE. Before a long run, stop CVAT and Docker Desktop; on a 16 GB machine they leave too little
-memory for the dataloader workers.
+kernel or an IDE.
 
 A new experiment gets a new config: copy `configs/detector_v0.yaml`, change `run_name` and, when the data
 changes, `dataset.name` and `dataset.exports`. Existing runs and datasets are never overwritten.
@@ -88,7 +87,7 @@ ml-models/
 │       └── report.py               evaluation report in W&B (metrics, validation frames table)
 ├── tests/                          pytest; no GPU, network or real data needed
 ├── configs/                        one YAML per training run
-├── notebooks/                      jupytext .py notebooks; reports/ holds executed reports
+├── notebooks/                      jupytext .py notebooks; reports/ executed reports, conclusions/ per version
 ├── labeling/
 │   ├── README.md                   labeling guide
 │   ├── cvat.ps1, compose.share.yml the only supported way to run CVAT
@@ -108,13 +107,18 @@ Notebooks are [jupytext](https://jupytext.readthedocs.io/) percent-format `.py` 
 `.ipynb` in PyCharm and sync afterwards with `uv run jupytext --sync notebooks/<name>.py` (with the notebook
 closed in the IDE, which otherwise saves over the sync).
 
+`notebooks/01_detector.py` analyses any finished detector run: `VERSION` and `BASELINE` in its first code cell
+select the run (`configs/detector_<version>.yaml`) and the run it is compared against. The written conclusions of
+each version are kept in `notebooks/conclusions/detector_<version>.md` and shown at the end of the notebook.
+
 Frames show license plates, which are personal data. Cells that draw frames run only when `ANPR_SHOW_IMAGES` is
-not `0`, and reports in `notebooks/reports/` are executed with `ANPR_SHOW_IMAGES=0`:
+not `0`, and reports in `notebooks/reports/` are executed with `ANPR_SHOW_IMAGES=0`. The version environment
+variables override the first cell, so a report needs no edit of the notebook:
 
 ```powershell
-$env:ANPR_SHOW_IMAGES = "0"
-uv run jupytext --to ipynb --output notebooks/reports/01_detector_v0.ipynb notebooks/01_detector_v0.py
-uv run jupyter nbconvert --to notebook --execute --inplace notebooks/reports/01_detector_v0.ipynb
+$env:ANPR_SHOW_IMAGES = "0"; $env:ANPR_DETECTOR_VERSION = "v1"; $env:ANPR_DETECTOR_BASELINE = "v0"
+uv run jupytext --to ipynb --output notebooks/reports/01_detector_v1.ipynb notebooks/01_detector.py
+uv run jupyter nbconvert --to notebook --execute --inplace notebooks/reports/01_detector_v1.ipynb
 ```
 
 ## Experiment tracking

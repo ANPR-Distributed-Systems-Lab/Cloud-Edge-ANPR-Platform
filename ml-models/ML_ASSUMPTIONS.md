@@ -1,7 +1,7 @@
 # ML assumptions: plate detection and OCR
 
 Working assumptions for building the Polish license plate models (detection with 4 corners, then OCR).
-Last updated: 2026-11-05. Items marked **OPEN** are deliberately undecided, see the last section.
+Last updated: 2026-11-06. Items marked **OPEN** are deliberately undecided, see the last section.
 
 ## 1. Decision summary
 
@@ -19,35 +19,23 @@ Last updated: 2026-11-05. Items marked **OPEN** are deliberately undecided, see 
 | Data storage | Local only |
 | Training hardware | Local PC: i5-9600KF, GTX 1660 Super |
 | Experiment tracking | Weights & Biases, private project; metrics plus validation frames for review |
-| Notebooks | jupytext `.py` + nbstripout + `notebooks/reports/` |
+| Notebooks | jupytext `.py` committed, outputs in a gitignored `.ipynb`; reports in `notebooks/reports/` without frames |
 | Inference runtime on the Pi | ONNX Runtime |
 | Document language | English |
 
-## 2. Repository layout
+## 2. Code organization
 
-```
-ml-models/
-├── pyproject.toml, uv.lock       # separate environment from rpi-edge (torch etc. are heavy)
-├── ML_ASSUMPTIONS.md             # this file
-├── notebooks/                    # jupytext percent-format .py files
-│   └── reports/                  # final notebooks, committed WITH outputs
-├── src/anpr_ml/                  # reusable logic: data, train, eval, export
-├── configs/                      # hyperparameters (YAML)
-├── data/                         # gitignored
-└── models/                       # gitignored
-```
+The directory layout and every command are described in [README.md](README.md).
 
-- Notebooks are for exploration and visualization. Anything repeated (loading, splitting, metrics, export) lives in `src/anpr_ml/` and is imported.
-- Training runs from a terminal with `anpr-train-detector --config configs/<config>.yaml`, never inside a notebook: a run of an hour or more must not depend on a kernel or an IDE, and the command plus the config make it reproducible. Notebooks analyse finished runs.
-- Per CLAUDE.md, model weights (`.onnx`) are not stored in the repository. The edge node downloads them from S3 at startup.
+- The environment is separate from `rpi-edge` (torch and Ultralytics are heavy). Reusable logic lives in the `anpr_ml` package (`common`, `labeling`, `detector`); notebooks import it and never reimplement it.
+- Training runs from a terminal with `anpr-train-detector --config configs/<config>.yaml`, never inside a notebook: a run of an hour or more must not depend on a kernel or an IDE, and the command plus the config make it reproducible. One config per run; finished runs and built datasets are never overwritten.
+- Per the repository-wide standards, model weights (`.onnx`) are not stored in the repository. The edge node downloads them from S3 at startup.
 
 ### Notebooks in git
 
-- The `.py` file (jupytext percent format) is committed. Plain `.ipynb` working copies are gitignored.
-- Any `.ipynb` that is committed goes through the `nbstripout` git filter (outputs removed).
-- `notebooks/reports/` is excluded from the filter in `.gitattributes`. Notebooks there keep their outputs (tables, learning curves, histograms, confusion matrices) so GitHub renders them.
-- **No frames or crops in committed notebooks** (decided 2026-11-05): licence plates are personal data. Cells that draw frames run only when `ANPR_SHOW_IMAGES` is not `0`; reports are executed with `ANPR_SHOW_IMAGES=0`.
-- `nbdime` is optional for diffing and merging `.ipynb` files.
+- The `.py` file (jupytext percent format) is committed. The paired `.ipynb` working copy, which holds the outputs, is gitignored, so no output-stripping filter is needed.
+- `notebooks/reports/` holds executed reports, committed with their outputs (tables, learning curves, histograms) so GitHub renders them.
+- **No frames or crops in committed notebooks** (decided 2026-11-05): license plates are personal data. Cells that draw frames run only when `ANPR_SHOW_IMAGES` is not `0`; reports are executed with `ANPR_SHOW_IMAGES=0`.
 
 ## 3. Data
 
@@ -176,12 +164,12 @@ Thresholds (acceptance criteria) are set after the first baseline run. Until the
 **End to end**
 - plate read correctly from frame to text, on the test set, split by distance/size bucket.
 
-All metrics are computed on the session-split test set and logged to Weights & Biases (metrics and hyperparameters only).
+Development decisions (checkpoints, thresholds, model variants) are made on the val split; the reported numbers are computed once on the session-split test set, which no decision has seen. Metrics are logged to Weights & Biases as described in section 3.
 
 ## 9. Deployment on the Pi
 
 - Runtime: ONNX Runtime for both models.
-- Models are downloaded from S3 at startup (CLAUDE.md, edge MLOps standard).
+- Models are downloaded from S3 at startup (repository-wide edge MLOps standard).
 - Pipeline: full-resolution frame from the `main` stream, `resize_for_detector()`, detector, corners scaled back to the original, perspective crop, OCR.
 - Logging: structured JSON, per project convention.
 - Benchmark to run before fixing the detector input size: a nano model at 1024x768, 1280x960 and 1920x1440 on the Pi 5, measuring latency. Required frame rate in the car is the deciding input (2-3 fps is assumed to be enough).

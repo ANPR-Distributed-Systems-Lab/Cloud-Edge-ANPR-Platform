@@ -1,67 +1,75 @@
 """Detector metrics on the original frame that Ultralytics does not report (ML_ASSUMPTIONS section 8).
 
-Predictions are matched greedily by confidence to ground-truth plates (box IoU). A prediction that matches
-no plate but lies mostly inside a plate_ignore region, or on a plate demoted as too small, is dropped
+Predictions are matched greedily, in order of confidence, to ground-truth plates by box IoU. A prediction that
+matches no plate but lies mostly inside a plate_ignore region, or on a plate demoted as too small, is dropped
 instead of counted as a false positive, mirroring how those regions are treated in training.
 """
 from dataclasses import dataclass, field
 
 import numpy as np
 
-from .geometry import box_area, box_intersection, box_iou, plate_width_px, quad_box
+from ..common.geometry import box_area, box_intersection, box_iou, quad_box
+from ..common.labels import frame_size, plate_width_px
+from .predict import Prediction
 
 IOU_MATCH = 0.5
-IGNORE_IOA = 0.5  # share of a prediction's box inside an ignore region that makes it "don't care"
-WIDTH_BUCKETS = ((70, 90), (90, 110), (110, 140), (140, 200), (200, float("inf")))
+IGNORE_IOA = 0.5  # share of a prediction's box inside a don't-care region that makes it "don't care" too
+WIDTH_BUCKETS = ((70, 90), (90, 110), (110, 140), (140, 200), (200, float("inf")))  # px on the original
 CONF_GRID = tuple(round(t, 2) for t in np.arange(0.05, 0.96, 0.05))
 
 
 @dataclass
-class Prediction:
-    conf: float
-    corners: np.ndarray  # (4, 2) normalized TL, TR, BR, BL
-    box: np.ndarray | None = None  # normalized x1, y1, x2, y2; derived from the corners if missing
-
-    def __post_init__(self):
-        self.corners = np.asarray(self.corners, dtype=float)
-        self.box = quad_box(self.corners) if self.box is None else np.asarray(self.box, dtype=float)
-
-
-@dataclass
 class Match:
+    """A kept prediction: matched to ground-truth plate `gt`, or a false positive when `gt` is None."""
     conf: float
-    gt: int | None  # index into the image's plates, None for a false positive
-    corner_error_px: float | None = None  # mean over the 4 corners, on the original frame
-    width_px: float | None = None  # ground-truth plate width on the original frame
+    gt: int | None
+    corner_error_px: float | None = None  # mean distance of the 4 corners on the original frame
+    width_px: float | None = None  # width of the matched plate on the original frame
     pred: Prediction | None = None
 
 
 @dataclass
-class ImageResult:
-    matches: list[Match] = field(default_factory=list)
+class FrameResult:
+    """Outcome on one frame. `plates` are the ground-truth plates at or above the small-plate threshold."""
+    plates: list[np.ndarray] = field(default_factory=list)
     gt_widths: list[float] = field(default_factory=list)
+    matches: list[Match] = field(default_factory=list)
+
+    @property
+    def hits(self) -> list[Match]:
+        return [m for m in self.matches if m.gt is not None]
+
+    @property
+    def missed(self) -> list[int]:
+        """Indices into `plates` that no prediction matched."""
+        found = {m.gt for m in self.hits}
+        return [i for i in range(len(self.plates)) if i not in found]
+
+    @property
+    def false_positives(self) -> list[Prediction]:
+        return [m.pred for m in self.matches if m.gt is None]
 
 
 def match_image(
     record: dict, preds: list[Prediction], min_plate_px: float, iou_thr: float = IOU_MATCH
-) -> ImageResult:
-    orig = np.array([record["width"], record["height"]], dtype=float)
+) -> FrameResult:
+    size = frame_size(record)
     plates, dont_care = [], []
     for p in record["plates"]:
         corners = np.array(p["corners"])
-        (plates if plate_width_px(corners * orig) >= min_plate_px else dont_care).append(corners)
+        (plates if plate_width_px(corners, record) >= min_plate_px else dont_care).append(corners)
     dont_care += [np.array(r["corners"]) for r in record["ignore"]]
     gt_boxes = [quad_box(c) for c in plates]
     dc_boxes = [quad_box(c) for c in dont_care]
 
-    result = ImageResult(gt_widths=[plate_width_px(c * orig) for c in plates])
+    result = FrameResult(plates=plates, gt_widths=[plate_width_px(c, record) for c in plates])
     taken: set[int] = set()
     for pred in sorted(preds, key=lambda p: p.conf, reverse=True):
         ious = [(box_iou(pred.box, b), i) for i, b in enumerate(gt_boxes) if i not in taken]
         best_iou, best = max(ious, default=(0.0, None))
         if best is not None and best_iou >= iou_thr:
             taken.add(best)
-            err = np.linalg.norm((pred.corners - plates[best]) * orig, axis=1).mean()
+            err = np.linalg.norm((pred.corners - plates[best]) * size, axis=1).mean()
             result.matches.append(Match(pred.conf, best, float(err), result.gt_widths[best], pred))
             continue
         area = box_area(pred.box)
@@ -71,13 +79,24 @@ def match_image(
     return result
 
 
+def frame_results(
+    records: list[dict], predictions: dict[str, list[Prediction]], min_plate_px: float, conf: float
+) -> list[FrameResult]:
+    """Per-frame outcome at one operating threshold: what an error review looks at."""
+    return [match_image(r, [p for p in predictions.get(r["image"], []) if p.conf >= conf], min_plate_px)
+            for r in records]
+
+
 def evaluate(
     records: list[dict],
     predictions: dict[str, list[Prediction]],
     min_plate_px: float,
     conf_grid: tuple[float, ...] = CONF_GRID,
 ) -> dict:
-    """Precision / recall / F1 over a confidence grid, plus size buckets and corner error at the best F1."""
+    """Precision / recall / F1 over a confidence grid; recall by plate width and corner error at the best F1.
+
+    Matching is done once with all predictions; a threshold then only cuts the list, as in COCO-style AP.
+    """
     results = [match_image(r, predictions.get(r["image"], []), min_plate_px) for r in records]
     n_gt = sum(len(r.gt_widths) for r in results)
     matches = [m for r in results for m in r.matches]
@@ -105,12 +124,16 @@ def evaluate(
 
     err = np.array([m.corner_error_px for m in hits])
     rel = np.array([m.corner_error_px / m.width_px for m in hits])
+
+    def stat(fn, values):
+        return float(fn(values)) if len(values) else float("nan")
+
     corner = {
         "matched": len(hits),
-        "mean_px": float(err.mean()) if len(err) else float("nan"),
-        "median_px": float(np.median(err)) if len(err) else float("nan"),
-        "p90_px": float(np.percentile(err, 90)) if len(err) else float("nan"),
-        "mean_rel_width": float(rel.mean()) if len(rel) else float("nan"),
-        "p90_rel_width": float(np.percentile(rel, 90)) if len(rel) else float("nan"),
+        "mean_px": stat(np.mean, err),
+        "median_px": stat(np.median, err),
+        "p90_px": stat(lambda v: np.percentile(v, 90), err),
+        "mean_rel_width": stat(np.mean, rel),
+        "p90_rel_width": stat(lambda v: np.percentile(v, 90), rel),
     }
     return {"plates": n_gt, "best": best, "curve": curve, "by_width": buckets, "corner_error": corner}

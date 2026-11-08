@@ -1,7 +1,7 @@
 # Raw recordings (tens of GB, stored locally only)
 data/
 
-# Model weights (distributed through S3, see CLAUDE.md); Ultralytics may also drop *.pt into the working dir
+# Model weights (distributed through S3, see ML_ASSUMPTIONS.md); Ultralytics may also drop *.pt into the working dir
 models/
 *.pt
 *.onnx
@@ -20,7 +20,7 @@ labeling/frame_index.csv
 !notebooks/reports/*.ipynb
 .ipynb_checkpoints/
 
-# Experiment tracking
+# Training runs and W&B's local files (runs/wandb/, runs/wandb-local/)
 wandb/
 runs/
 

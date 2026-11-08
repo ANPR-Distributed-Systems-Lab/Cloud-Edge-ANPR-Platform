@@ -3,10 +3,10 @@ import xml.etree.ElementTree as ET
 import numpy as np
 from PIL import Image
 
-from anpr_ml.frames import dhash, hamming
-from anpr_ml.make_splits import add_new_sessions, make_splits
-from anpr_ml.select_frames import DEFAULT_THRESHOLD, allocate, dedupe, evenly
-from anpr_ml.validate_export import validate_xml
+from anpr_ml.labeling.frames import dhash, hamming
+from anpr_ml.labeling.selection import DEFAULT_THRESHOLD, allocate, dedupe, evenly
+from anpr_ml.labeling.splits import add_new_sessions, make_splits
+from anpr_ml.labeling.validation import validate_xml
 
 
 def test_dhash_same_image_matches_and_different_differs(tmp_path):
@@ -41,8 +41,9 @@ def test_splits_are_deterministic_disjoint_and_mix_days():
     sessions = [f"session_2026100{d}_{h:02d}0000" for d in (4, 5, 6) for h in range(6)]
     one = make_splits(sessions, 3, 3, seed=1)
     assert one == make_splits(sessions, 3, 3, seed=1)
-    groups = [set(one[k]) for k in ("train", "val", "test")]
-    assert sum(len(g) for g in groups) == len(sessions) and not (groups[0] & groups[1] or groups[0] & groups[2] or groups[1] & groups[2])
+    train, val, test = (set(one[k]) for k in ("train", "val", "test"))
+    assert len(train) + len(val) + len(test) == len(sessions)
+    assert not (train & val or train & test or val & test)
     assert len({s.split("_")[1] for s in one["test"]}) == 3  # one test session per day
 
 

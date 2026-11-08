@@ -11,20 +11,22 @@ dependencies = [
 ]
 
 [project.scripts]
-anpr-index = "anpr_ml.frame_index:main"
-anpr-splits = "anpr_ml.make_splits:main"
-anpr-select = "anpr_ml.select_frames:main"
-anpr-validate = "anpr_ml.validate_export:main"
-anpr-yolo-dataset = "anpr_ml.yolo_dataset:main"
-anpr-train-detector = "anpr_ml.detector:main"
-anpr-eval-detector = "anpr_ml.evaluate_detector:main"
+# Labeling pipeline
+anpr-index = "anpr_ml.labeling.frame_index:main"
+anpr-splits = "anpr_ml.labeling.splits:main"
+anpr-select = "anpr_ml.labeling.selection:main"
+anpr-validate = "anpr_ml.labeling.validation:main"
+# Detector
+anpr-yolo-dataset = "anpr_ml.detector.dataset:main"
+anpr-train-detector = "anpr_ml.detector.train:main"
+anpr-eval-detector = "anpr_ml.detector.evaluate:main"
 
 [dependency-groups]
 dev = [
     "pytest>=8",
     "ruff>=0.6",
 ]
-# Heavy, GPU only: the labeling tools and the unit tests do not need it.
+# Heavy and GPU-bound; the labeling tools and the unit tests import none of it.
 train = [
     "torch>=2.13",
     "torchvision>=0.28",
@@ -35,7 +37,6 @@ notebook = [
     "jupyterlab>=4.2",
     "jupytext>=1.16",
     "ipykernel>=6.29",
-    "nbstripout>=0.7",
     "matplotlib>=3.8",
     "pandas>=2.2",
 ]

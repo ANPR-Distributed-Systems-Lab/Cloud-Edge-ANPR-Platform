@@ -1,8 +1,11 @@
-"""Picks frames for a labeling batch: drops near-duplicates, spreads the pick over the sessions.
+"""anpr-select: picks the frames of a new labeling batch.
 
-The chosen frames are hard-linked (copied if that fails) into labeling/batches/<batch>/, which is the
-folder CVAT sees as its file share. Every pick is recorded in labeling/selected.csv, and frames that
-were already picked for an earlier batch are never offered again.
+Per session, near-duplicates are dropped (a frame is kept only if its dHash differs enough from the last kept
+frame), frames already in any batch are skipped, the requested count is spread over the sessions in proportion
+to what is left, and frames are picked evenly in time. The content is not inspected.
+
+The frames are hard-linked (copied if linking fails) into labeling/batches/<batch>/, the folder CVAT reads as
+its file share, and every pick is appended to labeling/selected.csv, so a frame is never offered twice.
 """
 import argparse
 import csv
@@ -11,18 +14,19 @@ import shutil
 
 import numpy as np
 
+from ..common.labels import SPLITS, batch_file_name, load_splits
+from ..paths import BATCHES_DIR, DATA_DIR, SELECTED_FILE
 from .frame_index import load_index
 from .frames import hamming, session_frames
-from .make_splits import load_splits
-from .paths import BATCHES_DIR, DATA_DIR, SELECTED_FILE
 
-# A frame is kept when its Hamming distance (of 64 bits) to the last kept frame is at least this.
-# Lowered from 8 after a visual review: 8 dropped frames that differed in content (train_001 used 8).
+# Minimum Hamming distance (of 64 bits) to the last kept frame. Lowered from 8 after a visual review of kept
+# and dropped frames: 8 dropped frames that differed in content (train_001 was selected with 8).
 DEFAULT_THRESHOLD = 5
+SWEEP_THRESHOLDS = (2, 4, 5, 6, 8, 10, 12, 16)
 
 
 def dedupe(hashes: list[int], threshold: int) -> list[int]:
-    """Indices of the frames to keep: a frame is kept if it differs enough from the last kept one."""
+    """Indices of the frames to keep: each kept frame differs from the previous kept one by >= threshold."""
     kept: list[int] = []
     for i, h in enumerate(hashes):
         if not kept or hamming(h, hashes[kept[-1]]) >= threshold:
@@ -31,7 +35,7 @@ def dedupe(hashes: list[int], threshold: int) -> list[int]:
 
 
 def allocate(sizes: list[int], count: int) -> list[int]:
-    """Splits `count` over the sessions proportionally to their size (largest remainder), capped by size."""
+    """Splits `count` over pools proportionally to their size (largest remainder), never above a pool's size."""
     total = sum(sizes)
     if total == 0:
         return [0] * len(sizes)
@@ -39,7 +43,7 @@ def allocate(sizes: list[int], count: int) -> list[int]:
     raw = [count * s / total for s in sizes]
     alloc = [min(int(r), s) for r, s in zip(raw, sizes)]
     by_remainder = sorted(range(len(sizes)), key=lambda i: raw[i] - int(raw[i]), reverse=True)
-    for i in by_remainder * 2:
+    for i in by_remainder * 2:  # a second pass when capped pools leave part of the count unassigned
         if sum(alloc) >= count:
             break
         if alloc[i] < sizes[i]:
@@ -48,6 +52,7 @@ def allocate(sizes: list[int], count: int) -> list[int]:
 
 
 def evenly(items: list, n: int) -> list:
+    """n items spread evenly over the list, first and last included."""
     if n >= len(items):
         return list(items)
     if n <= 0:
@@ -57,6 +62,7 @@ def evenly(items: list, n: int) -> list:
 
 
 def load_selected() -> set[tuple[str, str]]:
+    """(session, file) of every frame already in a batch."""
     if not SELECTED_FILE.is_file():
         return set()
     with open(SELECTED_FILE, newline="") as f:
@@ -69,14 +75,10 @@ def candidates(session: str, index: dict, already: set, threshold: int) -> list[
     return [files[i] for i in kept if (session, files[i]) not in already]
 
 
-def batch_name(session: str, file: str) -> str:
-    return f"{session}__{file.replace('/', '__')}"
-
-
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--split", choices=["train", "val", "test"], default="train")
-    parser.add_argument("--batch", help="batch name, e.g. train_001")
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--split", choices=SPLITS, default="train")
+    parser.add_argument("--batch", help="batch name, e.g. train_002")
     parser.add_argument("--count", type=int, default=300)
     parser.add_argument("--threshold", type=int, default=DEFAULT_THRESHOLD)
     parser.add_argument("--sweep", action="store_true", help="only print how many frames survive each threshold")
@@ -89,7 +91,7 @@ def main() -> None:
     already = load_selected()
 
     if args.sweep:
-        for t in (2, 4, 5, 6, 8, 10, 12, 16):
+        for t in SWEEP_THRESHOLDS:
             kept = sum(len(candidates(s, index, already, t)) for s in sessions)
             print(f"threshold {t:2d}: {kept} frames left in {args.split}")
         return
@@ -109,9 +111,9 @@ def main() -> None:
         if new_file:
             writer.writerow(["batch", "split", "session", "file"])
         for session, file in picks:
-            src, dst = DATA_DIR / session / file, out_dir / batch_name(session, file)
+            src, dst = DATA_DIR / session / file, out_dir / batch_file_name(session, file)
             try:
-                os.link(src, dst)
+                os.link(src, dst)  # same volume: no extra disk space
             except OSError:
                 shutil.copy2(src, dst)
             writer.writerow([args.batch, args.split, session, file])

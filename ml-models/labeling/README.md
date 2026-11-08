@@ -11,11 +11,20 @@ uv sync
 uv run anpr-index                 # perceptual hash of every frame (a few minutes, incremental)
 uv run anpr-splits                # assigns whole sessions to train / val / test, writes labeling/splits.json
 .\labeling\cvat.ps1 up            # needs Docker Desktop running; first start pulls several GB
-.\labeling\cvat.ps1 superuser     # create your admin account (you type the password)
+.\labeling\cvat.ps1 superuser     # create the admin account (the password is typed interactively)
 ```
 
 CVAT opens at http://localhost:8080. `cvat.ps1` always uses the `desktop-linux` Docker context. Do not start
-CVAT with the default context, which points at the Raspberry Pi.
+CVAT with the default context, which points at the Raspberry Pi. Other commands: `.\labeling\cvat.ps1 status`,
+`logs` and `down`.
+
+Rules that keep the labels safe:
+
+- Start CVAT only through `cvat.ps1`. A plain `docker compose up` in `labeling/cvat/` does not mount the batch
+  folders: jobs then show "Could not receive image data" (`FileNotFoundError` under `/home/django/share` in the
+  server logs).
+- Never delete or rename a batch folder while its task exists: CVAT reads the images from it every time.
+- Never run `docker compose down -v`: the `cvat_*` volumes hold the database with all annotations.
 
 `splits.json` must not change once labeling started (`--force` is needed to overwrite it): it is what keeps
 the test sessions out of training.
@@ -78,8 +87,8 @@ frames that differed in content; `--sweep` shows how many frames survive each th
     data and is dropped for OCR; leave `text` empty).
   - `occlusion`: `none` or `partial` (part of the plate hidden, the corners are still estimated).
   - `type`: `standard`, `two-line`, `motorcycle` or `other`.
-- **Pre-annotations** (later, when a model exists): correct them, do not just accept them. The test batches are
-  always labeled without any model suggestion.
+- **Pre-annotations** (detector predictions imported into a task): correct them, do not just accept them. Test
+  batches are always labeled without any model suggestion.
 
 ## Export and validation
 
@@ -92,4 +101,8 @@ uv run anpr-validate labeling\exports\train_001.zip --out labeling\exports\train
 
 The validator checks the point count, corner order, convexity, the image bounds, the attributes and the
 text, and prints the plate width distribution on the original frame. It exits non-zero on errors, and only
-writes the `.jsonl` (corners normalized to 0-1) when there are none.
+writes the `.jsonl` (corners normalized to 0-1) when there are none. When reporting a problem, use the frame
+number CVAT shows: it is the `id` of the `<image>` element in `annotations.xml` (0-based).
+
+The validated `.jsonl` files are what the training steps read; see the [README](../README.md) for building the
+dataset and training the detector.

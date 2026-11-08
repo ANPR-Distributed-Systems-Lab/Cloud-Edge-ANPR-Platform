@@ -3,7 +3,7 @@
 run_name: v0
 
 dataset:
-  name: pose_1280x960_v0          # datasets/<name>/, built by anpr_ml.yolo_dataset
+  name: pose_1280x960_v0          # datasets/<name>/, built by anpr_ml.detector.dataset
   exports: [train_001, val_001]   # labeling/exports/<batch>.jsonl; the split comes from splits.json
   size: [1280, 960]               # detector input (width, height); OPEN, final after the Pi benchmark
   min_plate_px: 70                # narrower plates (on the original) are painted like plate_ignore

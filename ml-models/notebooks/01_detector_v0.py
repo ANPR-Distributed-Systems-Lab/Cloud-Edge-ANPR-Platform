@@ -62,14 +62,13 @@ import pandas as pd
 import torch
 import ultralytics
 
-from anpr_ml.detector import dataset_dir, ensure_dataset, load_config, run_dir, run_state
-from anpr_ml.detector_eval import match_image
-from anpr_ml.evaluate_detector import evaluate_run
-from anpr_ml.geometry import plate_width_px
-from anpr_ml.make_splits import load_splits
-from anpr_ml.paths import BATCHES_DIR, EXPORTS_DIR, ROOT
-from anpr_ml.preprocess import read_image
-from anpr_ml.yolo_dataset import load_records, split_records
+from anpr_ml.common.labels import export_paths, load_records, load_splits, plate_width_px, split_records
+from anpr_ml.common.preprocess import read_image
+from anpr_ml.detector.config import dataset_dir, load_config, run_dir, run_state
+from anpr_ml.detector.dataset import ensure_dataset
+from anpr_ml.detector.evaluate import evaluate_run
+from anpr_ml.detector.metrics import frame_results
+from anpr_ml.paths import BATCHES_DIR, ROOT
 
 os.chdir(ROOT)  # Ultralytics downloads helper weights into the working directory; *.pt is gitignored there
 SHOW_IMAGES = os.environ.get("ANPR_SHOW_IMAGES", "1") == "1"
@@ -107,13 +106,12 @@ pd.Series({
 # 1280x960 detector input a plate is about 3.17 times narrower (70 px becomes about 22 px).
 
 # %%
-exports = [EXPORTS_DIR / f"{b}.jsonl" for b in cfg["dataset"]["exports"]]
-by_split = {k: v for k, v in split_records(load_records(exports), load_splits()).items() if v}
+records = load_records(export_paths(cfg["dataset"]["exports"]))
+by_split = {k: v for k, v in split_records(records, load_splits()).items() if v}
 
 
 def widths_of(records):
-    return np.array([plate_width_px(np.array(p["corners"]) * [r["width"], r["height"]])
-                     for r in records for p in r["plates"]])
+    return np.array([plate_width_px(p["corners"], r) for r in records for p in r["plates"]])
 
 
 pd.DataFrame([
@@ -144,7 +142,7 @@ fig.tight_layout()
 # %% [markdown]
 # ## 2. YOLO-pose dataset
 #
-# Built once by `anpr_ml.yolo_dataset` into `datasets/<name>/` and reused. The manifest records the label files
+# Built once by `anpr_ml.detector.dataset` into `datasets/<name>/` and reused. The manifest records the label files
 # (by checksum) and parameters it was built from; `ensure_dataset` refuses a dataset that no longer matches the
 # config, so a relabeled batch never trains silently on stale data. To rebuild, give the dataset a new name.
 
@@ -240,7 +238,7 @@ fig.tight_layout()
 
 # %%
 evaluation = evaluate_run(cfg)
-ultra = evaluation["ultralytics"]
+ultra = evaluation.ultralytics
 pd.Series(ultra, name="val").to_frame()
 
 # %% [markdown]
@@ -251,7 +249,7 @@ pd.Series(ultra, name="val").to_frame()
 # box IoU >= 0.5. Corner error is the mean distance of the 4 corners on the original 4056x3040 frame.
 
 # %%
-val_records, preds, res = evaluation["records"], evaluation["predictions"], evaluation["result"]
+val_records, preds, res = evaluation.records, evaluation.predictions, evaluation.result
 pd.DataFrame([res["best"]]).set_index("conf")
 
 # %%
@@ -310,22 +308,11 @@ def show_crops(title, items):
 
 
 if SHOW_IMAGES:
-    t = res["best"]["conf"]
     missed, false_pos, worst = [], [], []
-    for r in val_records:
-        kept = [p for p in preds.get(r["image"], []) if p.conf >= t]
-        result = match_image(r, kept, MIN_PLATE_PX)
-        hit = {m.gt for m in result.matches if m.gt is not None}
-        big = [p for p in r["plates"]
-               if plate_width_px(np.array(p["corners"]) * [r["width"], r["height"]]) >= MIN_PLATE_PX]
-        for i, p in enumerate(big):
-            if i not in hit:
-                missed.append((r, np.array(p["corners"]), result.gt_widths[i]))
-        for m in result.matches:
-            if m.gt is None:
-                false_pos.append((r, m.pred))
-            else:
-                worst.append((m.corner_error_px, r, np.array(big[m.gt]["corners"]), m.pred))
+    for r, fr in zip(val_records, frame_results(val_records, preds, MIN_PLATE_PX, res["best"]["conf"])):
+        missed += [(r, fr.plates[i], fr.gt_widths[i]) for i in fr.missed]
+        false_pos += [(r, p) for p in fr.false_positives]
+        worst += [(m.corner_error_px, r, fr.plates[m.gt], m.pred) for m in fr.hits]
     show_crops(f"missed plates ({len(missed)})",
                [(crop_with_corners(r, gt=c), f"{w:.0f} px") for r, c, w in missed[:8]])
     show_crops(f"false positives ({len(false_pos)})",
@@ -344,7 +331,7 @@ else:
 
 # %%
 pd.Series({
-    **{k: v for k, v in ultra.items()},
+    **ultra,
     "best F1 conf": res["best"]["conf"],
     "precision @best": res["best"]["precision"],
     "recall @best": res["best"]["recall"],

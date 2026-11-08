@@ -1,9 +1,12 @@
-"""Validates a CVAT export ("CVAT for images 1.1", .zip or annotations.xml) against the labeling guide.
+"""anpr-validate: checks a CVAT export ("CVAT for images 1.1", .zip or annotations.xml) against the labeling guide.
 
-Checks every plate polygon (4 points, TL-TR-BR-BL clockwise order, convex, inside the image, attributes,
-text) and prints plate width statistics on the original frame, which is what the small-plate threshold is
-decided from. With --out it also writes the validated annotations as JSON lines with corners normalized
-to 0-1, the resolution-independent form all later steps read.
+Every plate polygon must have 4 points in TL, TR, BR, BL order (clockwise on screen), be convex, lie inside the
+frame and carry valid attributes; a readable plate needs its text. Errors fail the run; warnings (e.g. a plate
+narrower than the small-plate threshold) do not. The plate width distribution on the original frame is printed,
+which is what the small-plate threshold is decided from.
+
+With --out and no errors, the labels are written as JSON lines with normalized corners (see common.labels), the
+resolution-independent form every later step reads.
 """
 import argparse
 import json
@@ -16,15 +19,15 @@ from pathlib import Path
 
 import numpy as np
 
-from .geometry import plate_width_px
+from ..common.geometry import plate_width
+from ..common.labels import SMALL_PLATE_PX
 
 PLATE, IGNORE = "plate", "plate_ignore"
 READABLE = {"yes", "no"}
 OCCLUSION = {"none", "partial"}
 TYPES = {"standard", "two-line", "motorcycle", "other"}
 TEXT_RE = re.compile(r"[A-Z0-9]{3,8}")  # generic charset; the per-position Polish rules come with the OCR model
-IGNORE_WIDTH_PX = 70  # plates narrower than this on the original belong in plate_ignore
-EDGE_TOLERANCE_PX = 2
+EDGE_TOLERANCE_PX = 2  # CVAT lets a corner land a pixel or two outside the image
 
 
 @dataclass
@@ -50,6 +53,7 @@ def _convex(pts: np.ndarray) -> bool:
 
 
 def parse_points(text: str) -> np.ndarray:
+    """CVAT's "x1,y1;x2,y2;..." -> (n, 2) array in pixels."""
     return np.array([[float(v) for v in p.split(",")] for p in text.split(";")])
 
 
@@ -58,7 +62,7 @@ def check_quad(pts: np.ndarray, width: int, height: int, where: str, report: Rep
         report.errors.append(f"{where}: {len(pts)} points instead of 4")
         return False
     ok = True
-    # Image coordinates have y pointing down, so a positive signed area is clockwise on screen.
+    # Image y points down, so a positive signed area means clockwise on screen.
     if _signed_area(pts) <= 0:
         report.errors.append(f"{where}: corners are not clockwise (expected TL, TR, BR, BL)")
         ok = False
@@ -85,7 +89,7 @@ def validate_xml(root: ET.Element) -> tuple[Report, list[dict]]:
         report.images += 1
         record = {"image": name, "width": w, "height": h, "plates": [], "ignore": []}
         for shape in image:
-            if shape.tag == "attribute" or shape.tag == "tag":
+            if shape.tag in ("attribute", "tag"):
                 continue
             where = f"{name} [{shape.get('label')}]"
             if shape.tag != "polygon":
@@ -108,7 +112,7 @@ def validate_xml(root: ET.Element) -> tuple[Report, list[dict]]:
                 continue
 
             report.plates += 1
-            width_px = plate_width_px(pts)
+            width_px = plate_width(pts)
             report.widths.append(width_px)
             text, readable = attrs.get("text", ""), attrs.get("readable", "")
             occlusion, kind = attrs.get("occlusion", ""), attrs.get("type", "")
@@ -122,8 +126,8 @@ def validate_xml(root: ET.Element) -> tuple[Report, list[dict]]:
                 report.errors.append(f"{where}: readable plate needs text matching {TEXT_RE.pattern}, got '{text}'")
             if readable == "no" and text:
                 report.warnings.append(f"{where}: unreadable plate has text '{text}'")
-            if width_px < IGNORE_WIDTH_PX:
-                report.warnings.append(f"{where}: {width_px:.0f}px wide, below {IGNORE_WIDTH_PX}px; should it be {IGNORE}?")
+            if width_px < SMALL_PLATE_PX:
+                report.warnings.append(f"{where}: {width_px:.0f}px wide, below {SMALL_PLATE_PX}px; should it be {IGNORE}?")
             record["plates"].append(
                 {"corners": norm, "text": text, "readable": readable == "yes", "occlusion": occlusion, "type": kind}
             )
@@ -143,8 +147,9 @@ def print_report(report: Report) -> None:
     if report.widths:
         w = np.array(report.widths)
         q = np.percentile(w, [0, 10, 25, 50, 75, 90, 100])
-        print("plate width on the original (px): min {:.0f}, p10 {:.0f}, p25 {:.0f}, median {:.0f}, p75 {:.0f}, p90 {:.0f}, max {:.0f}".format(*q))
-        print(f"plates narrower than {IGNORE_WIDTH_PX}px: {int((w < IGNORE_WIDTH_PX).sum())}")
+        print("plate width on the original (px): min {:.0f}, p10 {:.0f}, p25 {:.0f}, median {:.0f}, "
+              "p75 {:.0f}, p90 {:.0f}, max {:.0f}".format(*q))
+        print(f"plates narrower than {SMALL_PLATE_PX}px: {int((w < SMALL_PLATE_PX).sum())}")
     for line in report.warnings:
         print("WARNING", line)
     for line in report.errors:
@@ -153,9 +158,9 @@ def print_report(report: Report) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("export", type=Path, help="CVAT export (.zip or annotations.xml)")
-    parser.add_argument("--out", type=Path, help="write validated annotations as JSON lines")
+    parser.add_argument("--out", type=Path, help="write the validated labels as JSON lines")
     args = parser.parse_args()
 
     report, records = validate_xml(load_xml(args.export))

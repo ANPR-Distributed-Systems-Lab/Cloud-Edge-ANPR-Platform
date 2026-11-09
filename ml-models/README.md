@@ -55,8 +55,100 @@ All commands run from `ml-models/` with `uv run <command>`; each has `--help`.
 Training always runs from a terminal, not from a notebook: a run takes an hour or more and must not depend on a
 kernel or an IDE.
 
-A new experiment gets a new config: copy `configs/detector_v0.yaml`, change `run_name` and, when the data
-changes, `dataset.name` and `dataset.exports`. Existing runs and datasets are never overwritten.
+## Recipes
+
+Ready-to-paste PowerShell for the usual tasks. Only the variables in the first line of each block change.
+
+### Every new terminal
+
+```powershell
+cd ml-models                          # from the repository root
+$env:UV_CACHE_DIR = "G:\uv-cache"     # skip if UV_CACHE_DIR is set as a user environment variable
+```
+
+### What exists already
+
+```powershell
+Import-Csv labeling\selected.csv | Group-Object batch | Select-Object Name, Count   # frames per batch
+Get-ChildItem labeling\exports                 # <batch>.zip from CVAT, <batch>.jsonl once validated
+Get-ChildItem configs\detector_*.yaml          # detector versions
+Get-ChildItem runs\detector                    # their training runs
+```
+
+### New recordings
+
+After the new `session_*` folders are copied into `data/`:
+
+```powershell
+$test = 1; $val = 1                            # how many of the NEW sessions go to test and to val (~1 in 7 each)
+uv run anpr-index                              # hashes only the new frames
+uv run anpr-splits --add --test $test --val $val
+```
+
+### New labeling batch
+
+Batches are named `<split>_<NNN>`, numbered per split. A test batch is always labeled from scratch, never with
+model suggestions.
+
+```powershell
+$split = "train"; $batch = "train_003"; $count = 300     # val: "val", "val_002", 150; test: "test", "test_001", 150
+uv run anpr-select --split $split --sweep                # optional: frames left per dedupe threshold
+uv run anpr-select --split $split --batch $batch --count $count
+.\labeling\cvat.ps1 up                                   # Docker Desktop must be running
+```
+
+In CVAT (http://localhost:8080): *Tasks -> Create*, project `plates`, tab *Connected file share*, folder `<batch>`,
+image quality 100 ([details](labeling/README.md#creating-the-project-and-tasks-in-cvat)). After labeling:
+*Actions -> Export task dataset*, format **CVAT for images 1.1**, "Save images" off, saved as
+`labeling\exports\<batch>.zip`. Then, with the same `$batch`:
+
+```powershell
+uv run anpr-validate "labeling\exports\$batch.zip" --out "labeling\exports\$batch.jsonl"
+.\labeling\cvat.ps1 down                                 # keeps every annotation (never add -v)
+```
+
+The `.jsonl` is written only when there are no errors; fix the reported frames in CVAT, export again and rerun.
+
+### New detector version
+
+Copy the previous config and edit the copy:
+
+```powershell
+$prev = "v1"; $new = "v2"
+Copy-Item "configs\detector_$prev.yaml" "configs\detector_$new.yaml"
+```
+
+In `configs\detector_<new>.yaml` change:
+
+- the header comment: what this version changes and why;
+- `run_name: v2`;
+- when the data changes: `dataset.name: pose_1280x960_v2` (a new name, datasets are never overwritten) and
+  `dataset.exports: [train_001, train_002, train_003, val_001]`;
+- any training setting under test.
+
+Then train. The dataset is built automatically; the same command resumes an interrupted run, and evaluates and
+reports the run to W&B when it finishes:
+
+```powershell
+uv run anpr-train-detector --config "configs\detector_$new.yaml"
+uv run anpr-eval-detector --config "configs\detector_$new.yaml"   # only to re-evaluate a finished run
+```
+
+Adding a val batch changes the val set: the notebook then flags the comparison with older versions as not
+directly comparable.
+
+### Analysis of a version
+
+```powershell
+uv run jupyter lab                    # open notebooks/01_detector.py with Open With -> Notebook
+```
+
+Set `VERSION = "v2"` and `BASELINE = "v1"` in the first code cell and run all cells. For PyCharm, create or
+refresh the paired `.ipynb` first (with its tab closed):
+
+```powershell
+uv run jupytext --sync notebooks/01_detector.py
+```
 
 ## Layout
 

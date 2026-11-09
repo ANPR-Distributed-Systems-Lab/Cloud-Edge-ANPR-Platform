@@ -25,3 +25,7 @@ app:
     sqs:
       device-events-queue-url: ${DEVICE_EVENTS_QUEUE_URL:}
       events-queue-url: ${EVENTS_QUEUE_URL:}
+    s3:
+      images-bucket: ${IMAGES_BUCKET:}
+      # Long enough to look at a page of results, short enough that a copied link soon stops working.
+      image-url-validity: 15m

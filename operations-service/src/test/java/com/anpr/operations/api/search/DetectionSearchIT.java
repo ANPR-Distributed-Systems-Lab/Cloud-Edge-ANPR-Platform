@@ -4,6 +4,7 @@ import com.anpr.operations.TestcontainersConfiguration;
 import com.anpr.operations.internal.detections.DetectionService;
 import com.anpr.operations.internal.detections.DetectionService.NewDetection;
 import com.anpr.operations.internal.devices.DevicePairingService;
+import com.anpr.operations.shared.storage.ImageUrlSigner;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -12,9 +13,11 @@ import org.springframework.context.annotation.Import;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -23,6 +26,8 @@ import java.util.UUID;
 
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.nullValue;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -40,6 +45,8 @@ class DetectionSearchIT {
     @Autowired private MockMvc mockMvc;
     @Autowired private DevicePairingService pairingService;
     @Autowired private DetectionService detectionService;
+    // Real signatures change every second; the contract test needs a stable URL. ImageUrlSignerTest covers signing.
+    @MockitoBean private ImageUrlSigner imageUrlSigner;
 
     @Test
     void returnsOnlyDetectionsOfTheCallerAccount() throws Exception {
@@ -119,6 +126,7 @@ class DetectionSearchIT {
 
     @Test
     void responseHasTheShapeOfTheContract() throws Exception {
+        when(imageUrlSigner.urlOf(anyString())).thenAnswer(call -> URI.create("https://images.test/" + call.getArgument(0)));
         UUID account = UUID.fromString("5e1c0000-0000-4000-8000-000000000001");
         UUID device = UUID.fromString("5e1c0000-0000-4000-8000-000000000002");
         pairingService.pair(device, account, 1);

@@ -9,6 +9,7 @@ import com.anpr.operations.api.generated.model.PlateSuggestionList;
 import com.anpr.operations.internal.detections.model.Detection;
 import com.anpr.operations.internal.detections.model.DetectionWithAlert;
 import com.anpr.operations.internal.detections.repository.PlateSuggestionRow;
+import com.anpr.operations.shared.storage.ImageUrlSigner;
 import org.locationtech.jts.geom.Point;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
@@ -17,20 +18,19 @@ import org.springframework.data.domain.Page;
 
 import java.util.List;
 
-@Mapper(componentModel = "spring", unmappedTargetPolicy = ReportingPolicy.ERROR)
+@Mapper(componentModel = "spring", uses = ImageUrlSigner.class, unmappedTargetPolicy = ReportingPolicy.ERROR)
 public interface DetectionApiMapper {
-    // Presigned photo URLs come in a separate change; the contract allows null.
-    @Mapping(target = "imageUrl", ignore = true)
+    @Mapping(target = "imageUrl", source = "imageKey", qualifiedByName = "imageUrl")
     @Mapping(target = "alertId", ignore = true)
-    DetectionResponse toDetection(Detection detection);
+    DetectionResponse toResponse(Detection detection);
 
-    default DetectionResponse toResponse(DetectionWithAlert found) {
-        return toDetection(found.detection()).alertId(found.alertId());
+    default DetectionResponse toResponseWithAlert(DetectionWithAlert found) {
+        return toResponse(found.detection()).alertId(found.alertId());
     }
 
     default DetectionPage toPage(Page<DetectionWithAlert> page){
         return new DetectionPage()
-                .items(page.map(this::toResponse).getContent())
+                .items(page.map(this::toResponseWithAlert).getContent())
                 .page(new PageMeta()
                         .page(page.getNumber())
                         .size(page.getSize())
@@ -48,4 +48,6 @@ public interface DetectionApiMapper {
     default PlateSuggestionList toSuggestions(List<PlateSuggestionRow> rows){
         return new PlateSuggestionList().items(rows.stream().map(this::toSuggestion).toList());
     }
+
+
 }

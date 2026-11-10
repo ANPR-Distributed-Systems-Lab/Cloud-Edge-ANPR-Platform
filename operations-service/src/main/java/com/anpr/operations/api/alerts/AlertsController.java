@@ -66,6 +66,8 @@ public class AlertsController implements AlertsApi {
             case CREATED_AT -> "createdAt";
             case LAST_DETECTED_AT -> "lastDetectedAt";
         };
-        return Sort.by(Sort.Direction.valueOf(direction.name()), property);
+        Sort.Order order = new Sort.Order(Sort.Direction.valueOf(direction.name()), property).nullsLast();
+        // Never detected plates go last in both directions; the id keeps the order stable between pages.
+        return Sort.by(order).and(Sort.by("alertId"));
     }
 }

@@ -20,6 +20,12 @@ anpr-validate = "anpr_ml.labeling.validation:main"
 anpr-yolo-dataset = "anpr_ml.detector.dataset:main"
 anpr-train-detector = "anpr_ml.detector.train:main"
 anpr-eval-detector = "anpr_ml.detector.evaluate:main"
+# OCR
+anpr-ocr-dataset = "anpr_ml.ocr.dataset:main"
+anpr-train-ocr = "anpr_ml.ocr.train:main"
+anpr-eval-ocr = "anpr_ml.ocr.evaluate:main"
+# Detector + OCR
+anpr-eval-pipeline = "anpr_ml.pipeline:main"
 
 [dependency-groups]
 dev = [
@@ -33,6 +39,17 @@ train = [
     "ultralytics>=8.4",
     "wandb>=0.21",
 ]
+# OCR on Keras 3 with the torch backend (torch comes from `train`); TensorFlow is deliberately not installed.
+# fast-plate-ocr is pinned exactly because the ONNX export reuses two of its internal helpers.
+ocr = [
+    "fast-plate-ocr[onnx]==1.1.0",
+    "keras>=3.10,<4",
+    "albumentations>=2",
+    "pydantic>=2.5,<3",
+    "click>=8",
+    "onnx>=1.17",
+    "onnxscript>=0.5",
+]
 notebook = [
     "jupyterlab>=4.2",
     "jupytext>=1.16",
@@ -42,9 +59,12 @@ notebook = [
 ]
 
 [tool.uv]
-default-groups = ["dev", "train", "notebook"]
+default-groups = ["dev", "train", "ocr", "notebook"]
 # The CUDA index has no macOS wheels; locking only for the platforms we run on keeps resolution possible.
 environments = ["sys_platform == 'win32'", "sys_platform == 'linux'"]
+# fast-plate-ocr and albumentations ask for opencv-python-headless, Ultralytics for opencv-python. Both ship the
+# same cv2 package into one folder and would overwrite each other, so only opencv-python is installed.
+override-dependencies = ["opencv-python-headless; sys_platform == 'never'"]
 
 # CUDA 12.6 build: the training PC driver (566.14) supports CUDA up to 12.7.
 [[tool.uv.index]]

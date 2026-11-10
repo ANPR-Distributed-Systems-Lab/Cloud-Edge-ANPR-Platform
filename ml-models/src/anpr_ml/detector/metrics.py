@@ -9,12 +9,11 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from ..common.geometry import box_area, box_intersection, box_iou, quad_box
-from ..common.labels import frame_size, plate_width_px
+from ..common.labels import WIDTH_BUCKETS, frame_size, plate_width_px, width_bucket_name
 from .predict import Prediction
 
 IOU_MATCH = 0.5
 IGNORE_IOA = 0.5  # share of a prediction's box inside a don't-care region that makes it "don't care" too
-WIDTH_BUCKETS = ((70, 90), (90, 110), (110, 140), (140, 200), (200, float("inf")))  # px on the original
 CONF_GRID = tuple(round(t, 2) for t in np.arange(0.05, 0.96, 0.05))
 
 
@@ -119,7 +118,7 @@ def evaluate(
     for lo, hi in WIDTH_BUCKETS:
         n = int(((widths >= lo) & (widths < hi)).sum())
         k = int(((hit_widths >= lo) & (hit_widths < hi)).sum())
-        buckets.append({"width_px": f"{lo}-{'' if hi == float('inf') else int(hi)}", "plates": n,
+        buckets.append({"width_px": width_bucket_name(lo, hi), "plates": n,
                         "detected": k, "recall": k / n if n else float("nan")})
 
     err = np.array([m.corner_error_px for m in hits])

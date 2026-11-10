@@ -24,6 +24,18 @@ SPLITS = ("train", "val", "test")
 # Labeling rule: a plate narrower than this on the original frame is labeled plate_ignore. Raising it later is
 # lossless (plates become ignored); lowering it needs relabeling, because plate_ignore carries no attributes.
 SMALL_PLATE_PX = 70
+# Plate width buckets (px on the original) shared by every metric reported per plate size.
+WIDTH_BUCKETS = ((70, 90), (90, 110), (110, 140), (140, 200), (200, float("inf")))
+
+
+def width_bucket_name(lo: float, hi: float) -> str:
+    """"70-90"; the open last bucket is "200-"."""
+    return f"{lo:g}-" if hi == float("inf") else f"{lo:g}-{hi:g}"
+
+
+def width_bucket_of(width: float) -> str | None:
+    """Name of the bucket a width falls into; None below the first bucket."""
+    return next((width_bucket_name(lo, hi) for lo, hi in WIDTH_BUCKETS if lo <= width < hi), None)
 
 
 def batch_file_name(session: str, file: str) -> str:

@@ -1,7 +1,7 @@
 # ML assumptions: plate detection and OCR
 
 Working assumptions for building the Polish license plate models (detection with 4 corners, then OCR).
-Last updated: 2026-11-06. Items marked **OPEN** are deliberately undecided, see the last section.
+Last updated: 2026-11-09. Items marked **OPEN** are deliberately undecided, see the last section.
 
 ## 1. Decision summary
 
@@ -10,7 +10,7 @@ Last updated: 2026-11-06. Items marked **OPEN** are deliberately undecided, see 
 | Labeling tool | CVAT, self-hosted (docker) |
 | Pre-labeling | Iterative loop with our own model |
 | Detection model | YOLO11n-pose (Ultralytics), 1 class, 4 keypoints (plate corners); YOLO26n-pose compared at the Pi benchmark |
-| OCR model | `fast-plate-ocr` as baseline. Final model **OPEN** (needs per-position character rules) |
+| OCR model | `fast-plate-ocr` `cct-s-v2-global`, fine-tuned with Keras 3 on the torch backend (no TensorFlow); input 128x64 RGB, rectified with an 8 % margin. Final model **OPEN** (needs per-position character rules) |
 | Labeling resolution | Original frames, 4056x3040 |
 | Detector input resolution | **OPEN**, 1280x960 for detector v0; final after a benchmark on the Pi |
 | Ignore regions in training | Painted gray (114) in the downscaled train and val images |
@@ -18,7 +18,7 @@ Last updated: 2026-11-06. Items marked **OPEN** are deliberately undecided, see 
 | Test set | ~150 frames from separate sessions, labeled from scratch |
 | Data storage | Local only |
 | Training hardware | Local PC: i5-9600KF, GTX 1660 Super |
-| Experiment tracking | Weights & Biases, private project; metrics plus validation frames for review |
+| Experiment tracking | Weights & Biases, private projects; metrics plus validation frames (detector) and validation plate crops (OCR) for review |
 | Notebooks | jupytext `.py` committed, outputs in a gitignored `.ipynb`; reports in `notebooks/reports/` without frames |
 | Inference runtime on the Pi | ONNX Runtime |
 | Document language | English |
@@ -27,15 +27,16 @@ Last updated: 2026-11-06. Items marked **OPEN** are deliberately undecided, see 
 
 The directory layout and every command are described in [README.md](README.md).
 
-- The environment is separate from `rpi-edge` (torch and Ultralytics are heavy). Reusable logic lives in the `anpr_ml` package (`common`, `labeling`, `detector`); notebooks import it and never reimplement it.
-- Training runs from a terminal with `anpr-train-detector --config configs/<config>.yaml`, never inside a notebook: a run of an hour or more must not depend on a kernel or an IDE, and the command plus the config make it reproducible. One config per run; finished runs and built datasets are never overwritten.
+- The environment is separate from `rpi-edge` (torch and Ultralytics are heavy). Reusable logic lives in the `anpr_ml` package (`common`, `labeling`, `detector`, `ocr`, plus `pipeline` for both models together); notebooks import it and never reimplement it.
+- Training runs from a terminal with `anpr-train-detector` / `anpr-train-ocr --config configs/<config>.yaml`, never inside a notebook: a run must not depend on a kernel or an IDE, and the command plus the config make it reproducible. One config per run; finished runs and built datasets are never overwritten.
+- Each model has its own analysis notebook (`01_detector.py`, `02_ocr.py`) and the pair has one (`03_pipeline.py`); the analysed versions are variables in the first cell.
 - Per the repository-wide standards, model weights (`.onnx`) are not stored in the repository. The edge node downloads them from S3 at startup.
 
 ### Notebooks in git
 
 - The `.py` file (jupytext percent format) is committed. The paired `.ipynb` working copy, which holds the outputs, is gitignored, so no output-stripping filter is needed.
 - `notebooks/reports/` holds executed reports, committed with their outputs (tables, learning curves, histograms) so GitHub renders them.
-- **No frames or crops in committed notebooks** (decided 2026-11-05): license plates are personal data. Cells that draw frames run only when `ANPR_SHOW_IMAGES` is not `0`; reports are executed with `ANPR_SHOW_IMAGES=0`.
+- **No frames, crops or plate texts in committed notebooks** (decided 2026-11-05): license plates are personal data. Cells that draw frames or crops run only when `ANPR_SHOW_IMAGES` is not `0`; reports are executed with `ANPR_SHOW_IMAGES=0`, and tables that reach a report identify errors by frame and width, not by plate text.
 
 ## 3. Data
 
@@ -43,7 +44,7 @@ The directory layout and every command are described in [README.md](README.md).
 - Images and labels are stored **locally only** (the ML work is owned by one person). There is no cloud copy and no DVC.
 - Keep a second copy of the dataset and of exported CVAT annotations on a separate disk.
 - The repo contains only code, configs and, optionally, a manifest (file name, size, checksum).
-- Experiment tracking: metrics and hyperparameters go to W&B. **Exception decided on 2026-11-05:** the private W&B project (accessible to the project owner only) also receives the validation frames of each evaluated run, with labels and predictions drawn, as a sortable table for visual error review. No training images, crops or raw data are uploaded, and frames never appear in anything committed to git. Ultralytics' built-in W&B integration stays off (`yolo settings wandb=False`, the default); everything sent is chosen in `anpr_ml.tracking`.
+- Experiment tracking: metrics and hyperparameters go to W&B. **Exceptions:** the private W&B projects (accessible to the project owner only) also receive, as sortable tables for visual error review, the validation frames of each evaluated detector run with labels and predictions drawn (decided 2026-11-05) and the validation plate crops of each evaluated OCR run with their true and read text (decided 2026-11-09; the same val frames are already in the detector project, so the crops show nothing new). No training images, training crops or raw data are uploaded, and frames never appear in anything committed to git. Ultralytics' built-in W&B integration stays off (`yolo settings wandb=False`, the default); everything sent is chosen in `anpr_ml.tracking`.
 
 ### Frame selection
 - Source: frames recorded by the data-collection app (`rpi-edge`), full resolution 4056x3040 JPEG.
@@ -134,16 +135,18 @@ Much of the best data is expected to be oncoming cars passing on the left side o
 
 ## 7. OCR model
 
-- **Input:** the plate rectified with a perspective transform from the 4 corners to a fixed size. The aspect ratio of a standard plate is about 4.5:1 (520x114 mm), so about **256x56 px** is the working size (final value depends on the model).
-- **Baseline:** `fast-plate-ocr` (MIT), fine-tuned on Polish plates, ONNX.
+- **Input (decided 2026-11-09):** the plate rectified with a perspective transform from the 4 corners (`rectify_plate()`, shared with the Pi), **128x64 RGB**, the input of the pretrained model, whose weights a different size would not fit. The quad is first widened by an **8 % margin** about its center: the pretrained model saw plates with surroundings, and on val_001 it read 0.918 of tight crops, 0.986 with the margin and 0.973 of axis-aligned boxes with 10 % margin. Rectifying keeps oblique close-range plates undistorted. The 4.5:1 plate is stretched to 2:1; the model is trained that way.
+- **Model (decided 2026-11-09):** `fast-plate-ocr` `cct-s-v2-global` (MIT; trained on plates of about 70 countries, Poland included, 98.4 % plate accuracy on its own Polish val set), fine-tuned on our crops. Output: 10 fixed slots over 36 characters plus padding, each with its probability, which suits per-position rules; the region head is kept and trained on "Poland" only.
+- **Training stack (decided 2026-11-09):** Keras 3 on the **torch backend**, for training and for the ONNX export; TensorFlow is not installed. fast-plate-ocr's own export fails on Windows and needs a dynamic batch that the torch exporter cannot convert, so `anpr_ml.ocr.export` exports with **batch size 1** and names the outputs `plate` / `region` like the official models. Verified: the export of the pretrained weights reads exactly like the official ONNX (largest probability difference 1e-6).
+- **Baseline (OCR v0):** the pretrained model without fine-tuning: exact 0.945 (137 of 145) on the val_001 + val_002 crops; behind detector v2, 134 of 143 readable val plates read right.
 - **Final model: OPEN.** The target model should encode Polish plate rules, e.g. which characters may appear in the district code and in which positions of the registration number. Candidate approaches:
   - generic model plus rule-based post-processing (regex or per-position masks),
   - constrained decoding (per-slot output heads or masked CTC),
   - alternatives to `fast-plate-ocr`: PaddleOCR PP-OCRv5 recognition model, or a custom CRNN/CTC in PyTorch.
 - **Rules document:** the exact character rules per position must be written down and verified against official sources before they are used.
 - **Training data:**
-  - rectified real crops from verified labels (only `readable = yes`),
-  - **corner jitter** (a few pixels) when rectifying during training, so OCR tolerates detector inaccuracy,
+  - rectified real crops from verified labels (only `readable = yes`), split by session like everything else,
+  - **corner jitter (decided 2026-11-09):** 8 crops per train plate, built offline, each from corners displaced at random (normal, per corner and axis, sigma = 1.5 % of the plate width, the order of detector v1's corner error), so OCR tolerates detector inaccuracy; val crops come from the labeled corners. fast-plate-ocr's default augmentation runs on top,
   - synthetic Polish plates (layout, EU strip, random characters, perspective, blur, noise) are likely and mixed with real data. Exact ratio decided after the baseline.
 - **Export:** ONNX.
 
@@ -161,8 +164,9 @@ Thresholds (acceptance criteria) are set after the first baseline run. Until the
 - character error rate (CER),
 - confusion matrix (e.g. 0/O, 1/I, 8/B), and errors per position.
 
-**End to end**
-- plate read correctly from frame to text, on the test set, split by distance/size bucket.
+**End to end** (`anpr-eval-pipeline`)
+- plate read correctly from frame to text, on the test set, split by distance/size bucket,
+- every detection is read, as on the Pi, and classified: correct, wrong, unreadable plate, don't-care region, background; precision of the reads that pass and share of readable plates read right, over the OCR confidence threshold.
 
 Development decisions (checkpoints, thresholds, model variants) are made on the val split; the reported numbers are computed once on the session-split test set, which no decision has seen. Metrics are logged to Weights & Biases as described in section 3.
 
@@ -170,7 +174,7 @@ Development decisions (checkpoints, thresholds, model variants) are made on the 
 
 - Runtime: ONNX Runtime for both models.
 - Models are downloaded from S3 at startup (repository-wide edge MLOps standard).
-- Pipeline: full-resolution frame from the `main` stream, `resize_for_detector()`, detector, corners scaled back to the original, perspective crop, OCR.
+- Pipeline: full-resolution frame from the `main` stream, `resize_for_detector()`, detector, corners scaled back to the original, `rectify_plate()` (128x64, 8 % margin), OCR. Both preprocessing functions are covered by golden checksums in `tests/test_common.py`, which the Pi implementation has to match.
 - Logging: structured JSON, per project convention.
 - Benchmark to run before fixing the detector input size: a nano model at 1024x768, 1280x960 and 1920x1440 on the Pi 5, measuring latency. Required frame rate in the car is the deciding input (2-3 fps is assumed to be enough).
 
@@ -185,3 +189,4 @@ Development decisions (checkpoints, thresholds, model variants) are made on the 
 | 5 | Metric acceptance thresholds | After the first baseline run |
 | 6 | Perceptual-hash distance threshold for deduplication | **Decided 2026-11-04: 5** (kept at a distance of 5 or more), after a visual review of kept and dropped frames in 4 train sessions |
 | 7 | Mixed precision on the GTX 1660 Super | **Decided 2026-11-05: off.** Ultralytics disables AMP on this GPU; training is FP32 |
+| 8 | OCR model, input and training data | **Decided 2026-11-09:** fast-plate-ocr `cct-s-v2-global` fine-tuned with Keras 3 on torch, 128x64 rectified with an 8 % margin, 8 jittered crops per train plate; see section 7 |

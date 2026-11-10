@@ -1,8 +1,9 @@
 """Experiment tracking in Weights & Biases.
 
-The W&B project is private and only its owner has access (decided 2026-11-05). It receives hyperparameters,
-scalar metrics and, for visual review, validation frames with labels and predictions drawn on them (see
-anpr_ml.detector.report). Frames go nowhere else; reports committed to git stay without them. Ultralytics'
+The W&B projects are private and only their owner has access (decided 2026-11-05). They receive
+hyperparameters, scalar metrics and, for visual review, the validation frames with labels and predictions
+drawn on them (anpr_ml.detector.report) and the validation plate crops with their readings
+(anpr_ml.ocr.report). Images go nowhere else; reports committed to git stay without them. Ultralytics'
 built-in W&B integration stays off, so everything sent is chosen in this package.
 
 One W&B run belongs to one training run: its id is kept in <run dir>/wandb_id.txt, so training, resuming and
@@ -84,6 +85,26 @@ def training_callbacks(cfg: dict, manifest: dict) -> dict:
             state["wandb"].finish()
 
     return {"on_train_start": on_train_start, "on_fit_epoch_end": on_fit_epoch_end, "on_train_end": on_train_end}
+
+
+def keras_callback(keras, cfg: dict, run: Path, config: dict):
+    """Keras callback for OCR training: the run config at the start, every logged metric and the learning
+    rate after each epoch, under the same epoch steps as the detector. `keras` is the caller's module, already
+    imported with its backend."""
+
+    class WandbLogger(keras.callbacks.Callback):
+        def on_train_begin(self, logs=None):
+            self.wandb = start(cfg, run, config)
+
+        def on_epoch_end(self, epoch, logs=None):
+            values = dict(logs or {})
+            values["lr"] = float(keras.ops.convert_to_numpy(self.model.optimizer.learning_rate))
+            self.wandb.log({**scalars(values), "epoch": epoch + 1}, step=epoch + 1)
+
+        def on_train_end(self, logs=None):
+            self.wandb.finish()
+
+    return WandbLogger()
 
 
 def log_history(wandb, run: Path) -> None:

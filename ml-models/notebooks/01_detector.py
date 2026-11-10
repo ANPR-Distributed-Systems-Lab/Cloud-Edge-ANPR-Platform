@@ -68,6 +68,16 @@ import torch
 import ultralytics
 from IPython.display import Markdown, display
 
+from anpr_ml.analysis import (
+    COLORS,
+    config_diff,
+    config_header,
+    config_path,
+    from_env,
+    plot_style,
+    show_images,
+)
+from anpr_ml.analysis import versions as config_versions
 from anpr_ml.common.labels import export_paths, load_records, load_splits, plate_width_px, split_records
 from anpr_ml.common.preprocess import read_image
 from anpr_ml.detector.config import dataset_dir, load_config, run_dir, run_state
@@ -75,45 +85,23 @@ from anpr_ml.detector.dataset import ensure_dataset
 from anpr_ml.detector.evaluate import evaluate_run
 from anpr_ml.detector.evaluate import val_records as load_val_records
 from anpr_ml.detector.metrics import frame_results
-from anpr_ml.paths import BATCHES_DIR, CONFIGS_DIR, ROOT
+from anpr_ml.paths import BATCHES_DIR, ROOT
 
 os.chdir(ROOT)  # Ultralytics downloads helper weights into the working directory; *.pt is gitignored there
-
-
-def from_env(name, value):
-    """Report generation sets the versions through the environment; say so, since the cell above then lies."""
-    env = os.environ.get(name)
-    if env is None:
-        return value
-    print(f"{name}={env} overrides the value {value!r} of the first cell")
-    return env or None
-
-
-def config_path(version):
-    return CONFIGS_DIR / f"detector_{version}.yaml"
-
 
 VERSION = from_env("ANPR_DETECTOR_VERSION", VERSION)
 BASELINE = from_env("ANPR_DETECTOR_BASELINE", BASELINE)
 if BASELINE == VERSION:
     BASELINE = None
-SHOW_IMAGES = os.environ.get("ANPR_SHOW_IMAGES", "1") == "1"
+SHOW_IMAGES = show_images()
 
-cfg = load_config(config_path(VERSION))
-base_cfg = load_config(config_path(BASELINE)) if BASELINE else None
+cfg = load_config(config_path("detector", VERSION))
+base_cfg = load_config(config_path("detector", BASELINE)) if BASELINE else None
 SIZE = cfg["dataset"]["size"]
 MIN_PLATE_PX = cfg["dataset"]["min_plate_px"]
 
-# Reference palette, fixed order: train/precision = blue, val/recall = orange, F1 = aqua; the baseline is gray.
-BLUE, ORANGE, AQUA = "#2a78d6", "#eb6834", "#1baf7a"
-INK, INK_2, GRID, BASE = "#0b0b0b", "#52514e", "#e4e3df", "#8f8d87"
-plt.rcParams.update({
-    "figure.facecolor": "#fcfcfb", "axes.facecolor": "#fcfcfb", "axes.edgecolor": INK_2,
-    "axes.labelcolor": INK, "text.color": INK, "xtick.color": INK_2, "ytick.color": INK_2,
-    "axes.grid": True, "grid.color": GRID, "grid.linewidth": 0.8, "axes.spines.top": False,
-    "axes.spines.right": False, "lines.linewidth": 2, "font.size": 10, "legend.frameon": False,
-})
-pd.set_option("display.precision", 3)
+plot_style()
+BLUE, ORANGE, AQUA, INK_2, BASE = (COLORS[k] for k in ("blue", "orange", "aqua", "ink_2", "base"))
 
 pd.Series({
     "version": VERSION,
@@ -134,37 +122,15 @@ pd.Series({
 
 # %%
 pd.DataFrame([
-    {"version": p.stem.removeprefix("detector_"), "state": run_state(run_dir(load_config(p))),
-     "exports": ", ".join(load_config(p)["dataset"]["exports"])}
-    for p in sorted(CONFIGS_DIR.glob("detector_*.yaml"))
+    {"version": v, "state": run_state(run_dir(c)), "exports": ", ".join(c["dataset"]["exports"])}
+    for v, c in ((v, load_config(config_path("detector", v))) for v in config_versions("detector"))
 ]).set_index("version")
 
-
 # %%
-def config_header(version):
-    """The comment block at the top of a config, which states what the version is for."""
-    lines = []
-    for line in config_path(version).read_text(encoding="utf-8").splitlines():
-        if not line.startswith("#"):
-            break
-        lines.append(line.lstrip("# "))
-    return " ".join(lines)
-
-
-def flatten(d, prefix=""):
-    out = {}
-    for k, v in d.items():
-        out.update(flatten(v, f"{prefix}{k}.") if isinstance(v, dict) else {f"{prefix}{k}": v})
-    return out
-
-
-display(Markdown(f"**{VERSION}.** {config_header(VERSION)}"))
+display(Markdown(f"**{VERSION}.** {config_header(config_path('detector', VERSION))}"))
 if base_cfg:
-    a, b = flatten(base_cfg), flatten(cfg)
-    diff = [{"setting": k, BASELINE: str(a.get(k, "-")), VERSION: str(b.get(k, "-"))}
-            for k in sorted(a.keys() | b.keys()) if a.get(k) != b.get(k)]
     display(Markdown(f"Settings that differ from {BASELINE}:"))
-    display(pd.DataFrame(diff).set_index("setting"))
+    display(pd.DataFrame(config_diff(base_cfg, cfg, BASELINE, VERSION)).set_index("setting"))
 
 # %% [markdown]
 # ## 1. Labeled data

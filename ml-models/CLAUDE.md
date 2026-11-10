@@ -33,21 +33,27 @@ When a decision changes, update those documents in the same change, so they neve
 - CVAT runs only through `labeling/cvat.ps1`, which pins the `desktop-linux` Docker context. **Never start CVAT
   or any heavy container on the `rpi` context.** Never `docker compose down -v`.
 - The test split is never enriched, never labeled with model suggestions and never used for a decision.
-- Datasets (`datasets/<name>/`) and runs (`runs/detector/<run>/`) are never overwritten: a change gets a new name.
-- Frames leave the PC only as the validation frames table in the private W&B project (decided 2026-11-05).
-  No training images, raw data or crops are uploaded, and no frame appears in anything committed to git.
+- Datasets (`datasets/<name>/`) and runs (`runs/detector/<run>/`, `runs/ocr/<run>/`) are never overwritten: a
+  change gets a new name.
+- Images leave the PC only as the validation frames table (`anpr-detector`, decided 2026-11-05) and the
+  validation crops table (`anpr-ocr`, decided 2026-11-09) in the private W&B projects. No training images,
+  training crops or raw data are uploaded, and no frame, crop or plate text appears in anything committed to git.
 
 ## Code conventions
 
-- `anpr_ml` is split by stage: `common` (geometry, preprocessing, label files), `labeling`, `detector`, plus
-  `tracking` (W&B) and `paths`. The OCR gets its own subpackage mirroring `detector` (config, dataset, train,
-  predict, metrics, evaluate, report).
+- `anpr_ml` is split by stage: `common` (geometry, preprocessing, label files), `labeling`, `detector`, `ocr`
+  (mirrors `detector`: config, dataset, train, export, predict, metrics, evaluate, report), `pipeline` (both
+  models together), plus `tracking` (W&B), `analysis` (notebook helpers) and `paths`.
 - Each command is a module with a `main()` registered as an `anpr-*` entry point in `pyproject.toml`; its module
   docstring is the `--help` text.
-- torch, Ultralytics and wandb are imported inside functions, so the labeling tools and the unit tests run
-  without them.
-- Training always runs from a terminal (`anpr-train-detector`), never in a notebook; notebooks analyse finished
-  runs through the same functions the commands use.
+- torch, Ultralytics, Keras, fast-plate-ocr and wandb are imported inside functions, so the labeling tools and the
+  unit tests run without them. Keras is only ever imported through `anpr_ml.ocr.backend.keras_torch()`, which
+  selects the torch backend first (Keras defaults to TensorFlow, which is not installed).
+- The OCR export reuses two internal helpers of fast-plate-ocr, so its version is pinned exactly; check
+  `anpr_ml.ocr.export` before upgrading it.
+- Training always runs from a terminal (`anpr-train-detector`, `anpr-train-ocr`), never in a notebook; notebooks
+  analyse finished runs through the same functions the commands use. One notebook per model plus
+  `03_pipeline.py` for the pair; versions are variables in the first cell.
 - Unit tests in `tests/` use synthetic data only (`tests/samples.py`): no GPU, network or real frames.
 - Quality checks for code changes: `uv run pytest` and `uv run ruff check src tests notebooks`.
 
@@ -56,8 +62,10 @@ When a decision changes, update those documents in the same change, so they neve
 - Windows 10, PowerShell (Git Bash is also available). Paths are relative to `ml-models/`.
 - Python 3.11, environment managed by **uv**, separate from `rpi-edge`. Groups `dev` (pytest, ruff), `train`
   (torch 2.14 + CUDA 12.6 from the PyTorch index pinned in `pyproject.toml`, torchvision, ultralytics 8.4, wandb)
-  and `notebook` (jupyterlab, jupytext, ipykernel, matplotlib, pandas); all installed by default. ONNX and
-  onnxruntime are not installed yet.
+  `ocr` (fast-plate-ocr 1.1.0, keras 3, albumentations, onnx, onnxscript, onnxruntime; no TensorFlow) and
+  `notebook` (jupyterlab, jupytext, ipykernel, matplotlib, pandas); all installed by default. Only `opencv-python`
+  is installed: the `opencv-python-headless` that fast-plate-ocr and albumentations ask for is overridden away in
+  `pyproject.toml`, because both ship the same `cv2` package.
 - The uv cache defaults to C: (too small for torch). Run uv with `$env:UV_CACHE_DIR = "G:\uv-cache"`, or set it
   as a user environment variable.
 - Disk C: is almost full (around 10 GB free). The data lives on G:. Do not put large temporary files on C:.
@@ -104,7 +112,7 @@ These refine the documents above (which are already updated):
   now: no enrichment. Later, use detector v0 predictions to pick such frames for training batches. Never enrich
   the test set; it must reflect the real distribution.
 
-## Current state (2026-11-06)
+## Current state (2026-11-09)
 
 - **train_001**: 300 frames from the train split, labeled by hand, validated with 0 errors. 180 `plate`,
   186 `plate_ignore`; plate width min 70, median 121, p90 236, max 525 px.
@@ -118,17 +126,30 @@ These refine the documents above (which are already updated):
   / p90 6.3 px on the original (p90 4.6 % of plate width); box mAP50-95 0.764, pose mAP50-95 0.984. Reported to
   W&B (`anpr-detector`, run `v0`, with the val frames table). The written conclusions in the notebook and the
   report in `notebooks/reports/` are still to do; the 3 false positives and 2 misses are not reviewed yet.
+- **train_002**: 300 more train frames, validated. **Detector v1** (`configs/detector_v1.yaml`: v0 plus
+  train_002, 600 frames / 400 plates, otherwise unchanged): finished; on val_001 precision and recall 1.000 at
+  conf 0.40, corner error median 2.2 px / p90 4.8 px. val_001 no longer separates detectors: a larger val set
+  (val_002) is needed for the next comparisons.
+- **OCR**: readable plates train 270 (183 texts), val 145 (val_001 + val_002, 65 texts), all `standard`. Dataset
+  `ocr_128x64_v0` (train 2160 jittered crops, val 145). **OCR v0** (pretrained, `configs/ocr_v0.yaml`): finished,
+  val exact 0.945 (137 of 145), CER 0.011, reported to W&B `anpr-ocr`. **OCR v1** (`configs/ocr_v1.yaml`,
+  fine-tuning): configured and smoke-tested, not trained yet. **Pipeline detector v2 + OCR v0**: 134 of 143
+  readable val plates (at or above 70 px) read right; every detection is read, so 61 reads of unreadable plates,
+  92 of don't-care regions and 2 of background come out too, and OCR confidence alone does not remove them
+  (precision of sent reads 0.93 at conf 0.95, 0.97 at 0.99 with recall 0.67).
 - **test_001 does not exist yet**: ~150 frames from the test split, labeled from scratch, never with
   model suggestions.
-- The detector v0 work, the W&B tracking and the dataset definition (`splits.json`, `selected.csv`) are
-  committed. Uncommitted: the package restructuring (`common` / `labeling` / `detector`, README.md) and this file,
-  which is not tracked yet.
+- **val_002** is labeled (150 frames, 72 readable plates) and `configs/detector_v2.yaml` (v1 plus val_002 for
+  validation) is committed; detector v2 on val_001 + val_002 (207 plates): precision and recall 0.986 at conf
+  0.40 (3 FP, 3 FN). The OCR configs and the pipeline validate on val_001 + val_002 too.
+- Committed: the package restructuring, detector v1 and v2 configs, the version-agnostic detector notebook.
+  Uncommitted: the OCR and pipeline code, `anpr_ml.analysis`, notebooks 02 / 03 and the related doc updates.
 
 ## Roadmap
 
 The order agreed so far; confirm each step with the project owner before starting it.
 
-1. Commit the package restructuring.
+1. **Done (2026-11-08):** commit the package restructuring.
 2. Create and label `test_001` (test split, ~150 frames, from scratch). More train batches as needed (`train_002`).
 3. **Done (2026-11-05):** converter `anpr-yolo-dataset` (`.jsonl` -> YOLO-pose, offline `resize_for_detector()`,
    `plate_ignore` painted gray, small-plate threshold applied). The Pi must reproduce `resize_for_detector()`
@@ -137,7 +158,9 @@ The order agreed so far; confirm each step with the project owner before startin
    `anpr-train-detector` and tracked in W&B. Left: review of its errors, written conclusions, report.
 5. Pre-labeling loop: predictions exported as CVAT for images 1.1 XML, imported as pre-annotations, corrected.
 6. Pi 5 latency benchmark at 1024x768 / 1280x960 / 1920x1440 to close the detector input size.
-7. OCR: rectified crops (about 256x56) cut from the full-resolution frame with corner jitter, `fast-plate-ocr`
-   baseline, a written and verified document of the Polish per-position character rules, then the final model.
-8. Export both models to ONNX. The S3 bucket for model distribution does not exist in `infrastructure/` yet; that
+7. OCR. **Done (2026-11-09):** rectified 128x64 crops with an 8 % margin and corner jitter (`anpr-ocr-dataset`),
+   fast-plate-ocr `cct-s-v2-global` on Keras 3 + torch with ONNX export (`anpr-train-ocr`), baseline v0, the
+   end-to-end evaluation (`anpr-eval-pipeline`) and notebooks 02 / 03. Left: train v1, a written and verified
+   document of the Polish per-position character rules, then the final model.
+8. Export both models to ONNX (OCR: done by `anpr-train-ocr`). The S3 bucket for model distribution does not exist in `infrastructure/` yet; that
    belongs to the infrastructure session.

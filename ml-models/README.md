@@ -1,7 +1,8 @@
 # ml-models
 
 License plate models for the ANPR edge node (Raspberry Pi 5): dataset preparation, labeling tools, the plate
-detector (YOLO-pose with the 4 plate corners as keypoints) and, next, the OCR.
+detector (YOLO-pose with the 4 plate corners as keypoints) and the OCR (fast-plate-ocr, fine-tuned on rectified
+plate crops).
 
 - [ML_ASSUMPTIONS.md](ML_ASSUMPTIONS.md): the decisions (models, resolutions, metrics, deployment) and what is
   still open.
@@ -18,21 +19,26 @@ data/session_*/                        recordings from the data-collection app (
   ▼                                                                             labeling/selected.csv
 CVAT (labeling/cvat.ps1)               4 corners per plate, attributes       -> labeling/exports/<batch>.zip
   │ anpr-validate                      checks the export                     -> labeling/exports/<batch>.jsonl
+  ├──────────────────────────────────────┐
+  │ anpr-yolo-dataset                    │ anpr-ocr-dataset  rectified crops of readable plates
+  │   YOLO-pose dataset at detector size │     (train: jittered copies)      -> datasets/<name>/
+  │ anpr-train-detector                  │ anpr-train-ocr    fine-tunes fast-plate-ocr, exports ONNX
+  │   -> runs/detector/<run>/            │     -> runs/ocr/<run>/
+  │ anpr-eval-detector  (val, W&B)       │ anpr-eval-ocr     (val crops, W&B)
+  ├──────────────────────────────────────┘
+  │ anpr-eval-pipeline                 detector + OCR on the val frames      -> runs/pipeline/<det>__<ocr>/
   ▼
-  │ anpr-yolo-dataset                  YOLO-pose dataset at detector size    -> datasets/<name>/
-  │ anpr-train-detector                training run from configs/<name>.yaml -> runs/detector/<run>/
-  │ anpr-eval-detector                 metrics on the val split              -> eval_val.json, W&B
-  ▼
-notebooks/                             analysis of finished runs
+notebooks/                             01 detector, 02 OCR, 03 both together
 ```
 
 ## Setup
 
 Python environment managed by [uv](https://docs.astral.sh/uv/), separate from `rpi-edge`. Torch is installed
-with CUDA 12.6 from the PyTorch index pinned in `pyproject.toml`.
+with CUDA 12.6 from the PyTorch index pinned in `pyproject.toml`. The OCR runs on Keras 3 with the torch backend;
+TensorFlow is not installed, and the OCR code selects the backend itself before Keras is first imported.
 
 ```powershell
-uv sync                      # all dependency groups: dev, train, notebook
+uv sync                      # all dependency groups: dev, train, ocr, notebook
 uv run wandb login           # once per machine, for experiment tracking
 ```
 
@@ -51,9 +57,14 @@ All commands run from `ml-models/` with `uv run <command>`; each has `--help`.
 | `anpr-yolo-dataset --name NAME --exports B1 B2` | Builds a YOLO-pose dataset from validated labels. |
 | `anpr-train-detector --config CONFIG` | Trains a detector run; resumes it if interrupted; evaluates and reports it when finished. |
 | `anpr-eval-detector --config CONFIG` | Re-evaluates a finished run and reports it to W&B. |
+| `anpr-ocr-dataset --name NAME --exports B1 B2` | Builds an OCR crop dataset from validated labels. |
+| `anpr-train-ocr --config CONFIG` | Fine-tunes an OCR run (or exports the pretrained model for a baseline config), exports `model.onnx`, evaluates and reports it. |
+| `anpr-eval-ocr --config CONFIG` | Re-evaluates a finished OCR run on the val crops and reports it to W&B. |
+| `anpr-eval-pipeline --detector CONFIG --ocr CONFIG` | Runs detector and OCR together on the val frames and classifies every read. |
 
-Training always runs from a terminal, not from a notebook: a run takes an hour or more and must not depend on a
-kernel or an IDE.
+Training always runs from a terminal, not from a notebook: a run must not depend on a kernel or an IDE. Detector
+runs can be resumed; OCR runs take minutes and are not resumable (an interrupted one is reported and has to be
+removed by hand).
 
 ## Recipes
 
@@ -137,17 +148,53 @@ uv run anpr-eval-detector --config "configs\detector_$new.yaml"   # only to re-e
 Adding a val batch changes the val set: the notebook then flags the comparison with older versions as not
 directly comparable.
 
+### New OCR version
+
+The same way, from the OCR configs (`configs\ocr_v0.yaml` is the pretrained baseline, `ocr_v1.yaml` the first
+fine-tuning):
+
+```powershell
+$prev = "v1"; $new = "v2"
+Copy-Item "configs\ocr_$prev.yaml" "configs\ocr_$new.yaml"
+```
+
+In `configs\ocr_<new>.yaml` change the header comment, `run_name`, and when the data or the crops change
+(new batches, margin, jitter) `dataset.name` to a new name such as `ocr_128x64_v2`. Then:
+
+```powershell
+uv run anpr-train-ocr --config "configs\ocr_$new.yaml"
+uv run anpr-eval-ocr --config "configs\ocr_$new.yaml"     # only to re-evaluate a finished run
+```
+
+A run takes about half an hour. If one is interrupted, delete its `runs\ocr\<run>` folder (after a look) and run
+the training command again.
+
+### Detector and OCR together
+
+```powershell
+$det = "v2"; $ocr = "v1"
+uv run anpr-eval-pipeline --detector "configs\detector_$det.yaml" --ocr "configs\ocr_$ocr.yaml"
+```
+
+The detector run must have been evaluated (`anpr-eval-detector`), since its operating threshold comes from there.
+
 ### Analysis of a version
 
 ```powershell
-uv run jupyter lab                    # open notebooks/01_detector.py with Open With -> Notebook
+uv run jupyter lab                    # open a notebook with Open With -> Notebook
 ```
 
-Set `VERSION = "v2"` and `BASELINE = "v1"` in the first code cell and run all cells. For PyCharm, create or
-refresh the paired `.ipynb` first (with its tab closed):
+| Notebook | First cell |
+|---|---|
+| `notebooks/01_detector.py` | `VERSION = "v2"`, `BASELINE = "v1"` (detector) |
+| `notebooks/02_ocr.py` | `VERSION = "v2"`, `BASELINE = "v1"` (OCR) |
+| `notebooks/03_pipeline.py` | `DETECTOR = "v2"`, `OCR = "v2"`, `BASELINE_DETECTOR = "v2"`, `BASELINE_OCR = "v1"` |
+
+Set the versions and run all cells. For PyCharm, create or refresh the paired `.ipynb` first (with its tab
+closed):
 
 ```powershell
-uv run jupytext --sync notebooks/01_detector.py
+uv run jupytext --sync notebooks/02_ocr.py
 ```
 
 ## Layout
@@ -159,10 +206,12 @@ ml-models/
 ├── src/anpr_ml/
 │   ├── paths.py                    every location the tooling reads or writes
 │   ├── tracking.py                 Weights & Biases: one W&B run per training run
+│   ├── pipeline.py                 anpr-eval-pipeline: detector + OCR on the val frames
+│   ├── analysis.py                 notebook helpers: plot style, version selection, config comparison
 │   ├── common/
 │   │   ├── geometry.py             plate width, boxes from corners, IoU
-│   │   ├── preprocess.py           resize_for_detector(): must give the same pixels on the Pi
-│   │   └── labels.py               splits.json, the validated .jsonl labels, batch file names
+│   │   ├── preprocess.py           resize_for_detector(), rectify_plate(): same pixels on the Pi
+│   │   └── labels.py               splits.json, the validated .jsonl labels, batch names, width buckets
 │   ├── labeling/
 │   │   ├── frames.py               sessions on disk, perceptual hash (dHash)
 │   │   ├── frame_index.py          anpr-index
@@ -177,6 +226,16 @@ ml-models/
 │       ├── metrics.py              P / R / F1, recall by plate width, corner error
 │       ├── evaluate.py             anpr-eval-detector
 │       └── report.py               evaluation report in W&B (metrics, validation frames table)
+│   └── ocr/
+│       ├── backend.py              Keras 3 on the torch backend
+│       ├── config.py               run config, pretrained model files (pinned checksums), run state
+│       ├── dataset.py              anpr-ocr-dataset
+│       ├── train.py                anpr-train-ocr
+│       ├── export.py               ONNX export without TensorFlow
+│       ├── predict.py              ONNX Runtime inference, as on the Pi
+│       ├── metrics.py              exact match, CER, per position, confusions, confidence coverage
+│       ├── evaluate.py             anpr-eval-ocr
+│       └── report.py               evaluation report in W&B (metrics, val crops table)
 ├── tests/                          pytest; no GPU, network or real data needed
 ├── configs/                        one YAML per training run
 ├── notebooks/                      jupytext .py notebooks; reports/ executed reports, conclusions/ per version
@@ -199,13 +258,20 @@ Notebooks are [jupytext](https://jupytext.readthedocs.io/) percent-format `.py` 
 `.ipynb` in PyCharm and sync afterwards with `uv run jupytext --sync notebooks/<name>.py` (with the notebook
 closed in the IDE, which otherwise saves over the sync).
 
-`notebooks/01_detector.py` analyses any finished detector run: `VERSION` and `BASELINE` in its first code cell
-select the run (`configs/detector_<version>.yaml`) and the run it is compared against. The written conclusions of
-each version are kept in `notebooks/conclusions/detector_<version>.md` and shown at the end of the notebook.
+| Notebook | Analyses | Versions in the first cell | Environment overrides |
+|---|---|---|---|
+| `01_detector.py` | one detector run against a baseline run | `VERSION`, `BASELINE` | `ANPR_DETECTOR_VERSION`, `ANPR_DETECTOR_BASELINE` |
+| `02_ocr.py` | one OCR run on the val crops against a baseline run | `VERSION`, `BASELINE` | `ANPR_OCR_VERSION`, `ANPR_OCR_BASELINE` |
+| `03_pipeline.py` | a detector + OCR pair end to end against a baseline pair | `DETECTOR`, `OCR`, `BASELINE_DETECTOR`, `BASELINE_OCR` | `ANPR_PIPELINE_DETECTOR`, `ANPR_PIPELINE_OCR`, `ANPR_PIPELINE_BASELINE_DETECTOR`, `ANPR_PIPELINE_BASELINE_OCR` |
 
-Frames show license plates, which are personal data. Cells that draw frames run only when `ANPR_SHOW_IMAGES` is
-not `0`, and reports in `notebooks/reports/` are executed with `ANPR_SHOW_IMAGES=0`. The version environment
-variables override the first cell, so a report needs no edit of the notebook:
+The shared helpers (plot style, version selection, config comparison) are in `anpr_ml.analysis`. The written
+conclusions are kept in `notebooks/conclusions/` (`detector_<v>.md`, `ocr_<v>.md`, `pipeline_<det>__<ocr>.md`)
+and shown at the end of each notebook.
+
+Frames, crops and plate texts are personal data. Cells that draw frames or crops run only when
+`ANPR_SHOW_IMAGES` is not `0`, and reports in `notebooks/reports/` are executed with `ANPR_SHOW_IMAGES=0`; the
+tables that reach a report identify errors by frame and width, never by plate text. The environment overrides
+replace the first cell, so a report needs no edit of the notebook (`none` as a baseline means no comparison):
 
 ```powershell
 $env:ANPR_SHOW_IMAGES = "0"; $env:ANPR_DETECTOR_VERSION = "v1"; $env:ANPR_DETECTOR_BASELINE = "v0"
@@ -215,9 +281,10 @@ uv run jupyter nbconvert --to notebook --execute --inplace notebooks/reports/01_
 
 ## Experiment tracking
 
-Runs are tracked in a private Weights & Biases project (`wandb` section of the config): hyperparameters, epoch
-metrics, the final evaluation and a table of the validation frames with labels and predictions drawn, for
-reviewing errors. Validation frames are the only images that leave the machine.
+Runs are tracked in private Weights & Biases projects (`wandb` section of the config), `anpr-detector` and
+`anpr-ocr`: hyperparameters, epoch metrics, the final evaluation and, for reviewing errors, a table of the
+validation frames with labels and predictions drawn (detector) or of the validation crops with their true and
+read text (OCR). Validation frames and crops are the only images that leave the machine.
 
 ## Quality checks
 

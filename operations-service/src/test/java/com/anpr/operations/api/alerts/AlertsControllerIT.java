@@ -1,6 +1,8 @@
 package com.anpr.operations.api.alerts;
 
 import com.anpr.operations.TestcontainersConfiguration;
+import com.anpr.operations.internal.detections.DetectionService;
+import com.anpr.operations.internal.detections.DetectionService.NewDetection;
 import com.anpr.operations.internal.devices.DevicePairingService;
 import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.Test;
@@ -15,11 +17,14 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.UUID;
 
+import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.matchesPattern;
 import static org.hamcrest.Matchers.not;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -43,6 +48,9 @@ class AlertsControllerIT {
 
     @Autowired
     private DevicePairingService pairingService;
+
+    @Autowired
+    private DetectionService detectionService;
 
     @Test
     void createAlertReturns201() throws Exception {
@@ -337,6 +345,35 @@ class AlertsControllerIT {
                 .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
     }
 
+    @Test
+    void lastDetectedAtIsTheLatestDetectionOfThePlateInTheAccount() throws Exception {
+        String account = UUID.randomUUID().toString();
+        OffsetDateTime t0 = OffsetDateTime.of(2026, 10, 30, 9, 0, 0, 0, ZoneOffset.UTC);
+        String alertId = createAlert(account, "WA60001");
+        detect(account, detection("WA60001", t0), detection("WA60001", t0.plusHours(2)));
+        detect(UUID.randomUUID().toString(), detection("WA60001", t0.plusHours(5)));
+
+        mockMvc.perform(get("/api/v1/alerts/{id}", alertId).header(ACCOUNT_HEADER, account))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.lastDetectedAt").value("2026-10-30T11:00:00Z"));
+    }
+
+    @Test
+    void sortingByLastDetectionPutsNeverDetectedPlatesLast() throws Exception {
+        String account = UUID.randomUUID().toString();
+        OffsetDateTime t0 = OffsetDateTime.of(2026, 10, 30, 9, 0, 0, 0, ZoneOffset.UTC);
+        createAlert(account, "WA60011");
+        createAlert(account, "WA60012");
+        createAlert(account, "WA60013");
+        detect(account, detection("WA60011", t0), detection("WA60013", t0.plusHours(1)));
+
+        mockMvc.perform(get("/api/v1/alerts").param("sort", "LAST_DETECTED_AT").param("direction", "DESC")
+                        .header(ACCOUNT_HEADER, account))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[*].plate", contains("WA60013", "WA60011", "WA60012")))
+                .andExpect(jsonPath("$.items[2].lastDetectedAt").value(nullValue()));
+    }
+
     private String createAlert(String account, String plate) throws Exception {
         String body = mockMvc.perform(post("/api/v1/alerts")
                         .header(ACCOUNT_HEADER, account)
@@ -351,6 +388,17 @@ class AlertsControllerIT {
         UUID device = UUID.randomUUID();
         pairingService.pair(device, UUID.fromString(owner), 1);
         return device.toString();
+    }
+
+    /** Accounts have one device each, so all detections of an account come from one paired device. */
+    private void detect(String account, NewDetection... detections) {
+        UUID device = UUID.randomUUID();
+        pairingService.pair(device, UUID.fromString(account), 1);
+        detectionService.store(device, List.of(detections));
+    }
+
+    private static NewDetection detection(String plate, OffsetDateTime detectedAt) {
+        return new NewDetection(UUID.randomUUID(), plate, detectedAt, 52.2, 21.0, 0.9, 0.8, "images/x.jpg");
     }
 
     private static MockHttpServletRequestBuilder alertsOfDevice(String device) {

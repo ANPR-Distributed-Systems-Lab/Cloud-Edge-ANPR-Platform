@@ -7,6 +7,8 @@ import jakarta.persistence.Version;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.Formula;
+
 import java.util.UUID;
 
 import java.time.OffsetDateTime;
@@ -22,6 +24,7 @@ public class Alert {
     private String plate;
     private String alertText;
     private OffsetDateTime createdAt;
+    @Formula("(SELECT MAX(d.detected_at) FROM detections d WHERE d.account_id = account_id AND d.plate = plate)")
     private OffsetDateTime lastDetectedAt;
     @Version
     private Long version;

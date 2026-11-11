@@ -1,21 +1,23 @@
 """OCR metrics on crops with known text (ML_ASSUMPTIONS section 8).
 
-A crop whose true text is empty is a reject: the right reading is no text at all. An empty reading is the OCR
-declining to read, never sent. Rejects are only counted in the reject_* metrics; all others are over the
-readable crops, where an empty reading is a false reject and counts as wrong.
+A crop whose true text is empty is a reject: the OCR should decline it (Reading.declined: no text, or not
+readable for the readability head). A declined reading is never sent. Rejects are only counted in the reject_*
+metrics; all others are over the readable crops, where reading quality (exact, cer, ...) is measured on the
+text whatever the decline, and a declined crop is a false reject.
 
-crops          readable crops
-exact          share of plates read entirely right: the number that matters for a plate reader
-cer            character error rate, edit distance over the length of the true texts
-false_rejects  readable crops read as no text
-reject_crops   crops whose true text is empty
-reject_rate    share of them read as no text (NaN without rejects)
-by_width       exact match per plate width bucket on the original frame
-positions      error rate per character position, over the reads of the right length
-confusions     most frequent (true, read) character pairs at those positions
-coverage       for a threshold on the reading's confidence: share of readable crops sent (a text at or above
-               the threshold), exact match among them and the rejects that would be sent too; the input for
-               the rule deciding which reads the edge node trusts
+crops               readable crops
+exact               share of plates read entirely right: the number that matters for a plate reader
+cer                 character error rate, edit distance over the length of the true texts
+false_rejects       readable crops declined
+reject_crops        crops whose true text is empty
+reject_rate         share of them declined (NaN without rejects)
+by_width            exact match per plate width bucket on the original frame
+positions           error rate per character position, over the reads of the right length
+confusions          most frequent (true, read) character pairs at those positions
+coverage            for a threshold on the reading's confidence: share of readable crops sent (not declined,
+                    at or above the threshold), exact match among them and the rejects that would be sent too;
+                    the input for the rule deciding which reads the edge node trusts
+readability_curve   with the readability head, the same over a threshold on P(readable) instead of the default
 """
 from collections import Counter
 
@@ -25,6 +27,7 @@ from ..common.labels import SMALL_PLATE_PX, WIDTH_BUCKETS, width_bucket_name, wi
 from .predict import Reading
 
 CONF_GRID = (0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.85, 0.9, 0.95, 0.97, 0.99)
+READABLE_GRID = (0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95)
 # The scalars of evaluate(). Evaluations written before rejects existed lack the last three.
 SUMMARY_KEYS = ("crops", "exact", "cer", "wrong_length", "mean_conf", "false_rejects", "reject_crops",
                 "reject_rate")
@@ -42,15 +45,16 @@ def edit_distance(a: str, b: str) -> int:
     return prev[-1]
 
 
-def coverage_curve(correct: np.ndarray, conf: np.ndarray, empty: np.ndarray, reject_conf: np.ndarray,
-                   grid=CONF_GRID) -> list[dict]:
-    """correct, conf, empty: per readable crop. reject_conf: the confidences of the rejects read as a text."""
+def threshold_curve(key: str, grid, correct: np.ndarray, score: np.ndarray, eligible: np.ndarray,
+                    reject_score: np.ndarray) -> list[dict]:
+    """What a threshold on a score keeps. correct, score, eligible: per readable crop, which is kept when
+    eligible and its score is at or above the threshold. reject_score: the scores of the eligible rejects."""
     out = []
     for t in grid:
-        kept = (conf >= t) & ~empty
-        out.append({"conf": t, "kept": float(kept.mean()) if len(kept) else 0.0, "n_kept": int(kept.sum()),
+        kept = eligible & (score >= t)
+        out.append({key: t, "kept": float(kept.mean()) if len(kept) else 0.0, "n_kept": int(kept.sum()),
                     "exact": float(correct[kept].mean()) if kept.any() else float("nan"),
-                    "rejects_sent": int((reject_conf >= t).sum())})
+                    "rejects_sent": int((reject_score >= t).sum())})
     return out
 
 
@@ -84,23 +88,30 @@ def evaluate(texts: list[str], readings: list[Reading], widths: list[float],
     texts, readings, widths = (list(x) for x in zip(*readable)) if readable else ([], [], [])
     reads = [r.text for r in readings]
     correct = np.array([r == t for r, t in zip(reads, texts)], dtype=bool)
-    empty = np.array([not r for r in reads], dtype=bool)
+    declined = np.array([r.declined for r in readings], dtype=bool)
     conf = np.array([r.conf for r in readings])
     positions, confusions = position_errors(texts, reads)
     total_chars = sum(len(t) for t in texts)
     nan = float("nan")
-    return {
+    res = {
         "crops": len(texts),
         "exact": float(correct.mean()) if len(correct) else nan,
         "cer": sum(edit_distance(r, t) for r, t in zip(reads, texts)) / total_chars if total_chars else nan,
         "wrong_length": sum(len(t) != len(r) for t, r in zip(texts, reads)),
         "mean_conf": float(conf.mean()) if len(conf) else nan,
-        "false_rejects": int(empty.sum()),
+        "false_rejects": int(declined.sum()),
         "reject_crops": len(rejects),
-        "reject_rate": sum(not r.text for r in rejects) / len(rejects) if rejects else nan,
+        "reject_rate": sum(r.declined for r in rejects) / len(rejects) if rejects else nan,
         "by_width": exact_by_width(correct, widths),
         "positions": positions,
         "confusions": [{"true": a, "read": b, "count": n}
                        for (a, b), n in confusions.most_common(top_confusions)],
-        "coverage": coverage_curve(correct, conf, empty, np.array([r.conf for r in rejects if r.text])),
+        "coverage": threshold_curve("conf", CONF_GRID, correct, conf, ~declined,
+                                    np.array([r.conf for r in rejects if not r.declined])),
     }
+    if readings and readings[0].readable is not None:
+        # The readability threshold in place of the default one; reads without a text stay declined.
+        res["readability_curve"] = threshold_curve(
+            "readable", READABLE_GRID, correct, np.array([r.readable for r in readings]),
+            np.array([bool(r.text) for r in readings]), np.array([r.readable for r in rejects if r.text]))
+    return res

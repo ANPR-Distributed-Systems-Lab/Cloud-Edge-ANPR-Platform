@@ -151,10 +151,11 @@ directly comparable.
 ### New OCR version
 
 The same way, from the OCR configs (`configs\ocr_v0.yaml` is the pretrained baseline, `ocr_v1.yaml` the first
-fine-tuning, `ocr_v2.yaml` the first with rejects):
+fine-tuning, `ocr_v2.yaml` the first with rejects, read as no text, `ocr_v3.yaml` the first with
+`model.readability_head`, a second head that declines the rejects instead of the country head):
 
 ```powershell
-$prev = "v2"; $new = "v3"
+$prev = "v3"; $new = "v4"
 Copy-Item "configs\ocr_$prev.yaml" "configs\ocr_$new.yaml"
 ```
 
@@ -172,7 +173,7 @@ interrupted, delete its `runs\ocr\<run>` folder (after a look) and run the train
 ### Detector and OCR together
 
 ```powershell
-$det = "v2"; $ocr = "v2"
+$det = "v2"; $ocr = "v3"
 uv run anpr-eval-pipeline --detector "configs\detector_$det.yaml" --ocr "configs\ocr_$ocr.yaml"
 ```
 
@@ -231,6 +232,7 @@ ml-models/
 │       ├── config.py               run config, pretrained model files (pinned checksums), run state
 │       ├── dataset.py              anpr-ocr-dataset
 │       ├── train.py                anpr-train-ocr
+│       ├── readability.py          the readability head (second head: readable / unreadable)
 │       ├── export.py               ONNX export without TensorFlow
 │       ├── predict.py              ONNX Runtime inference, as on the Pi
 │       ├── metrics.py              exact match, CER, per position, confusions, confidence coverage

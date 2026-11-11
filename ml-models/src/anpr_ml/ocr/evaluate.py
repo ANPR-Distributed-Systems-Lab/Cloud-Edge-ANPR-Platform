@@ -47,10 +47,10 @@ def evaluate_run(cfg: dict) -> Evaluation:
 def print_summary(evaluation: Evaluation) -> None:
     res = evaluation.result
     print(f"{evaluation.run.name}: {res['crops']} readable val crops; exact {res['exact']:.3f}, "
-          f"CER {res['cer']:.4f}, wrong length {res['wrong_length']}, read as no text {res['false_rejects']}, "
+          f"CER {res['cer']:.4f}, wrong length {res['wrong_length']}, declined {res['false_rejects']}, "
           f"mean confidence {res['mean_conf']:.3f}")
     if res["reject_crops"]:
-        print(f"{res['reject_crops']} val rejects; read as no text {res['reject_rate']:.3f}")
+        print(f"{res['reject_crops']} val rejects; declined {res['reject_rate']:.3f}")
 
 
 def main() -> None:

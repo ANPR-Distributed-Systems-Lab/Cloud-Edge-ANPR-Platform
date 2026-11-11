@@ -34,14 +34,16 @@ def name_outputs(path: Path) -> None:
 
 def export_onnx(keras_path: Path, plate_config_path: Path, out: Path) -> Path:
     keras = keras_torch()
-    # Internal helpers of fast-plate-ocr (version pinned in pyproject.toml): the loader that registers its
-    # custom layers, and the wrapper that puts the uint8 input handling in front of the model.
+    # Internal helpers of fast-plate-ocr (version pinned in pyproject.toml): the registration of its custom
+    # layers, and the wrapper that puts the uint8 input handling in front of the model.
     from fast_plate_ocr.cli.export import _prepare_model_for_onnx_export
     from fast_plate_ocr.train.model.config import load_plate_config_from_yaml
-    from fast_plate_ocr.train.utilities.utils import load_keras_model
+    from fast_plate_ocr.train.utilities.utils import _register_custom_keras
 
     plate_config = load_plate_config_from_yaml(plate_config_path)
-    model = load_keras_model(keras_path, plate_config)
+    _register_custom_keras()
+    # Without the training setup: the export needs layers and weights only, whatever loss trained them.
+    model = keras.models.load_model(keras_path, compile=False)
     export_model, input_shape, _ = _prepare_model_for_onnx_export(
         model, plate_config, dynamic_batch=False, input_dtype="uint8", data_format="channels_last")
     partial = out.with_name(out.name + ".partial")

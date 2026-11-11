@@ -5,7 +5,8 @@ A config (configs/ocr_<name>.yaml) describes one OCR run completely:
     run_name    the run directory, runs/ocr/<run_name>/
     dataset     name (datasets/<name>/), exports, margin, jitter_copies, jitter_sigma, seed and optionally
                 reject (sources, min_px: crops the OCR learns to answer with no text, see anpr_ml.ocr.dataset)
-    model       the pretrained fast-plate-ocr model to start from (see PRETRAINED)
+    model       the pretrained fast-plate-ocr model to start from (see PRETRAINED) and readability_head (the
+                second head classifies readable / not readable instead of the country, default false)
     train       fine-tuning settings; null for a baseline run, which evaluates the pretrained model unchanged
     wandb       enabled, project, entity, mode, log_images (see anpr_ml.tracking)
 
@@ -53,6 +54,11 @@ def load_config(path: Path) -> dict:
 def run_config(cfg: dict) -> dict:
     """The config as plain YAML / JSON values: written into the run directory and to its W&B run."""
     return {**cfg, "dataset": {**cfg["dataset"], "size": list(cfg["dataset"]["size"])}}
+
+
+def uses_readability(cfg: dict) -> bool:
+    """Whether the second head classifies readability instead of the country (anpr_ml.ocr.readability)."""
+    return bool(cfg["model"].get("readability_head", False))
 
 
 def dataset_dir(cfg: dict) -> Path:

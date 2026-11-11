@@ -27,8 +27,9 @@
 # node, and each read is one of: `correct` / `wrong` (a readable plate), `unreadable` (a plate labeled not
 # readable), `dont_care` (an ignore region or a plate below the small-plate threshold), `background` (no
 # plate). Only `correct` reads are good output; the rest is what a filter on the edge node has to stop. An OCR
-# trained with rejects (v2 on) can also read nothing: such a read is never sent, and is counted as `rejected`
-# in its category (for a readable plate that is a plate lost).
+# trained with rejects (v2 on) can also decline a crop (no text, or not readable for the readability head of
+# v3 on): such a read is never sent, and is counted as `rejected` in its category (for a readable plate that is
+# a plate lost).
 #
 # **Privacy.** Cells that draw crops run only when `SHOW_IMAGES` is on; committed reports are executed with
 # `ANPR_SHOW_IMAGES=0`. Tables here show frame names and widths, never plate texts.
@@ -114,7 +115,7 @@ pd.Series({
 # corners less exact than the labels.
 
 # %%
-pd.DataFrame([res["reads"], res["rejected"]], index=["reads", "of them read as no text"])
+pd.DataFrame([res["reads"], res["rejected"]], index=["reads", "of them declined by the OCR"])
 
 # %% [markdown]
 # ## 2. What would be sent
@@ -149,6 +150,28 @@ fig.tight_layout()
 curve.set_index("conf")[["sent", *CATEGORIES, "precision", "recall"]]
 
 # %% [markdown]
+# ### Readability threshold
+#
+# Only for an OCR with the readability head: the reads sent (with a text) for a threshold on P(readable)
+# instead of the default 0.5, at no OCR confidence threshold. Together with the curve above this is the input
+# for the two thresholds of the rule on the edge node.
+
+# %%
+if "readability_curve" in res:
+    rc = pd.DataFrame(res["readability_curve"])
+    fig, ax = plt.subplots(figsize=(7, 3.6))
+    ax.plot(rc["readable"], rc["precision"], color=BLUE, label="precision of sent reads")
+    ax.plot(rc["readable"], rc["recall"], color=ORANGE, label="readable plates read right")
+    ax.set_xlabel("P(readable) threshold")
+    ax.set_ylim(0, 1.02)
+    ax.legend()
+    ax.set_title("sent reads by readability threshold", loc="left")
+    fig.tight_layout()
+    display(rc.set_index("readable")[["sent", *CATEGORIES, "precision", "recall"]])
+else:
+    print(f"OCR {OCR} has no readability head.")
+
+# %% [markdown]
 # ## 3. By plate width
 
 # %%
@@ -163,11 +186,11 @@ pd.DataFrame(res["by_width"]).set_index("width_px")
 # %%
 def summary(r):
     at = {c["conf"]: c for c in r["curve"]}
-    # Evaluations written before rejects existed have no "rejected": their OCR never read nothing.
+    # Evaluations written before rejects existed have no "rejected": their OCR never declined.
     rejected = r.get("rejected", dict.fromkeys(CATEGORIES, 0))
     return {"read right / readable": r["recall"], "detected": r["detected"],
             **{f"sent @0 {c}": at[0.0][c] for c in CATEGORIES},
-            **{f"no text: {c}": rejected[c] for c in CATEGORIES},
+            **{f"declined: {c}": rejected[c] for c in CATEGORIES},
             **{f"precision @{t}": at[t]["precision"] for t in (0.0, 0.5, 0.9) if t in at}}
 
 
@@ -220,14 +243,15 @@ if SHOW_IMAGES:
     show_reads(wrong, f"wrong reads ({len(wrong)})",
                lambda r: f"{r.truth} -> {r.reading.text or '(none)'} {r.reading.conf:.2f}")
     junk = sorted((r for r in ev.reads if r.category in ("unreadable", "dont_care", "background")
-                   and r.reading.text), key=lambda r: -r.reading.conf)
+                   and not r.reading.declined), key=lambda r: -r.reading.conf)
     show_reads(junk, "most confident texts read on non-targets",
                lambda r: f"{r.category}: {r.reading.text} {r.reading.conf:.2f}")
 else:
     print("SHOW_IMAGES is off: crops are not shown.")
-pd.DataFrame([{"frame": r.frame.split("/")[-1], "category": r.category, "no text": not r.reading.text,
+pd.DataFrame([{"frame": r.frame.split("/")[-1], "category": r.category, "declined": r.reading.declined,
+               "readable": r.reading.readable,
                "conf": r.reading.conf, "width_px": r.width_px} for r in ev.reads if r.category != "correct"]) \
-    .sort_values(["no text", "conf"], ascending=[True, False]).head(15)
+    .sort_values(["declined", "conf"], ascending=[True, False]).head(15)
 
 # %% [markdown]
 # ## 5. Conclusions

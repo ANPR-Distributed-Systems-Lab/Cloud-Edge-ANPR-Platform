@@ -1,9 +1,9 @@
 """Reporting an OCR evaluation to the run's W&B run (see anpr_ml.tracking).
 
 Logged: the final metrics in the run summary, the coverage curve, exact match by plate width and, with
-wandb.log_images, a table with one row per val crop (crop, kind, true text, read text, confidence, width),
-which can be sorted and filtered in the W&B UI. Only val crops are sent; the val frames are already in the
-detector's project, so the crops show nothing new.
+wandb.log_images, a table with one row per val crop (crop, kind, true text, read text, declined,
+confidence, P(readable), width), which can be sorted and filtered in the W&B UI. Only val crops are sent;
+the val frames are already in the detector's project, so the crops show nothing new.
 """
 from typing import TYPE_CHECKING
 
@@ -21,15 +21,15 @@ VIEW_SCALE = 3  # crops are 128x64; enlarged without smoothing so the pixels the
 
 
 def crops_table(wandb, evaluation: "Evaluation"):
-    columns = ["crop", "kind", "true", "read", "correct", "conf", "weakest_slot", "width_px", "frame",
-               "session"]
+    columns = ["crop", "kind", "true", "read", "correct", "declined", "conf", "readable", "weakest_slot",
+               "width_px", "frame", "session"]
     table = wandb.Table(columns=columns)
     for crop, reading in zip(evaluation.crops, evaluation.readings):
         image = cv2.cvtColor(read_image(crop["path"]), cv2.COLOR_BGR2RGB)
         image = cv2.resize(image, None, fx=VIEW_SCALE, fy=VIEW_SCALE, interpolation=cv2.INTER_NEAREST)
         table.add_data(wandb.Image(image, file_type="png"), crop["kind"], crop["text"], reading.text,
-                       reading.text == crop["text"], reading.conf, reading.weakest_slot + 1,
-                       crop["width_px"], crop["frame"], crop["session"])
+                       reading.text == crop["text"], reading.declined, reading.conf, reading.readable,
+                       reading.weakest_slot + 1, crop["width_px"], crop["frame"], crop["session"])
     return table
 
 

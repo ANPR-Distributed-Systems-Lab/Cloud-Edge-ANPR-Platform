@@ -112,7 +112,7 @@ These refine the documents above (which are already updated):
   now: no enrichment. Later, use detector v0 predictions to pick such frames for training batches. Never enrich
   the test set; it must reflect the real distribution.
 
-## Current state (2026-11-10)
+## Current state (2026-11-11)
 
 - **train_001**: 300 frames from the train split, labeled by hand, validated with 0 errors. 180 `plate`,
   186 `plate_ignore`; plate width min 70, median 121, p90 236, max 525 px.
@@ -153,14 +153,26 @@ These refine the documents above (which are already updated):
   detector v2: 132 of 143 readable plates read right (v1 137), 4 of them read as no text; no text on 32 of 61
   unreadable plates and 78 of 92 don't-care regions. With width >= 70 px, the format check and conf >= 0.8: v2
   precision 0.90 / recall 0.88 (v0 0.88 / 0.90, v1 0.78 / 0.95); agreement across frames adds nothing for v2.
-  Rejecting with an empty text costs reading quality; not decided which OCR goes on.
+  Rejecting with an empty text costs reading quality; replaced by v3.
+- **OCR v3** (`configs/ocr_v3.yaml`, `anpr_ml.ocr.readability`): the country head replaced by a readability head
+  (`readable` / `unreadable` as `plate_regions`), rejects with text loss weight 0, same dataset as v2. **Trained
+  (2026-11-11):** best epoch 6 of 26, readable val crops exact 0.959 (139 of 145), CER 0.006, 0 wrong length,
+  4 declined; 101 of 137 val rejects declined. Behind detector v2: 135 of 143 read right. Send rule with
+  P(readable) >= 0.8 and conf >= 0.8: precision 0.91 / recall 0.89 (v2 0.90 / 0.88). Scratch variants (weight
+  0.5, checkpoint on the text loss, label smoothing, head alone on a frozen v1) changed nothing beyond a few val
+  plates: the head is limited by the data (~86 % val accuracy). Reported to W&B. **Decided 2026-11-11: v3 goes
+  on, kept in its simplest form** (one run, v1's settings; no two-stage training or extra knobs). The send-rule
+  thresholds are not decided.
+- The OCR export loads the `.keras` file with `compile=False` after fast-plate-ocr's `_register_custom_keras()`,
+  because a readability model's compile config names a loss of this package.
 - **test_001 does not exist yet**: ~150 frames from the test split, labeled from scratch, never with
   model suggestions.
 - **val_002** is labeled (150 frames, 72 readable plates) and `configs/detector_v2.yaml` (v1 plus val_002 for
   validation) is committed; detector v2 on val_001 + val_002 (207 plates): precision and recall 0.986 at conf
   0.40 (3 FP, 3 FN). The OCR configs and the pipeline validate on val_001 + val_002 too.
 - Committed: the package restructuring, detector v1 and v2 configs, the version-agnostic detector notebook, the
-  OCR and pipeline code (v0 / v1), `anpr_ml.analysis` and notebooks 02 / 03. Uncommitted: the OCR rejects (v2).
+  OCR and pipeline code (v0 / v1), `anpr_ml.analysis`, notebooks 02 / 03 and the OCR rejects (v2). Uncommitted:
+  the readability head (v3).
 
 ## Roadmap
 
@@ -178,7 +190,8 @@ The order agreed so far; confirm each step with the project owner before startin
 7. OCR. **Done (2026-11-09):** rectified 128x64 crops with an 8 % margin and corner jitter (`anpr-ocr-dataset`),
    fast-plate-ocr `cct-s-v2-global` on Keras 3 + torch with ONNX export (`anpr-train-ocr`), baseline v0, the
    end-to-end evaluation (`anpr-eval-pipeline`) and notebooks 02 / 03. **Done (2026-11-10):** v1 trained, rejects
-   added (v2 configured). Left: train v2, the send rule on the Pi (geometry, format, agreement across frames), a
+   added, v2 trained. **Done (2026-11-11):** readability head (v3) trained. v3 chosen. Left: the thresholds,
+   the send rule on the Pi (geometry, format, agreement across frames), a
    written and verified document of the Polish per-position character rules, then the final model.
 8. Export both models to ONNX (OCR: done by `anpr-train-ocr`). The S3 bucket for model distribution does not exist in `infrastructure/` yet; that
    belongs to the infrastructure session.

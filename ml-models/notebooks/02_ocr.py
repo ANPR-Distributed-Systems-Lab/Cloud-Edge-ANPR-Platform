@@ -75,7 +75,7 @@ from anpr_ml.analysis import (
 )
 from anpr_ml.analysis import versions as config_versions
 from anpr_ml.common.preprocess import read_image
-from anpr_ml.ocr.config import TRAINING_LOG, load_config, run_dir, run_state
+from anpr_ml.ocr.config import TRAINING_LOG, load_config, run_dir, run_state, uses_readability
 from anpr_ml.ocr.dataset import READABLE, ensure_dataset, read_crops
 from anpr_ml.ocr.evaluate import evaluate_run
 from anpr_ml.ocr.metrics import SUMMARY_KEYS, evaluate
@@ -105,7 +105,7 @@ pd.Series({"version": VERSION, "baseline": BASELINE or "none", "python": platfor
 # %%
 pd.DataFrame([
     {"version": v, "state": run_state(run_dir(c)), "dataset": c["dataset"]["name"],
-     "fine-tuned": c["train"] is not None}
+     "fine-tuned": c["train"] is not None, "second head": "readability" if uses_readability(c) else "countries"}
     for v, c in ((v, load_config(config_path("ocr", v))) for v in config_versions("ocr"))
 ]).set_index("version")
 
@@ -185,7 +185,8 @@ else:
 #
 # Trained by `uv run anpr-train-ocr --config configs/ocr_<VERSION>.yaml`. A baseline run (`train: null`) has
 # no training log. The val loss selects the checkpoint: near the top, val accuracy only moves in steps of
-# single plates, while the loss still ranks models that read the same plates.
+# single plates, while the loss still ranks models that read the same plates. With the readability head the
+# plate loss and accuracy count the readable crops only, and a third panel shows the head's accuracy.
 
 # %%
 RUN = run_dir(cfg)
@@ -197,8 +198,11 @@ log_file = RUN / TRAINING_LOG
 if log_file.exists():
     hist = pd.read_csv(log_file)
     hist["epoch"] += 1
-    fig, axes = plt.subplots(1, 2, figsize=(12, 3.6))
-    for ax, metric, title in zip(axes, ("plate_loss", "plate_acc"), ("plate loss", "plate accuracy")):
+    panels = [("plate_loss", "plate loss"), ("plate_acc", "plate accuracy")]
+    if uses_readability(cfg):
+        panels.append(("region_acc", "readability head accuracy"))
+    fig, axes = plt.subplots(1, len(panels), figsize=(6 * len(panels), 3.6))
+    for ax, (metric, title) in zip(axes, panels):
         ax.plot(hist["epoch"], hist[metric], color=BLUE, label="train (augmented)")
         ax.plot(hist["epoch"], hist[f"val_{metric}"], color=ORANGE, label="val")
         ax.set_title(title, loc="left")
@@ -216,8 +220,9 @@ else:
 #
 # `evaluate_run()` is what `anpr-eval-ocr` runs (and reports to W&B); it reads every val crop with the run's
 # `model.onnx` through ONNX Runtime on the CPU, as the edge node will, and writes
-# `runs/ocr/<run>/eval_val.json`. The reading metrics are over the readable crops (an empty reading of one is a
-# `false_reject`); `reject_rate` is the share of rejects read as no text.
+# `runs/ocr/<run>/eval_val.json`. The reading metrics are over the readable crops and judge the text alone;
+# a readable crop the OCR declines (no text, or not readable for the readability head) is a `false_reject`,
+# and `reject_rate` is the share of rejects declined.
 
 # %%
 evaluation = evaluate_run(cfg)
@@ -256,6 +261,39 @@ ax.legend()
 fig.tight_layout()
 
 # %% [markdown]
+# ### Readability
+#
+# Only for a run with the readability head: P(readable) of the readable crops against the rejects, and what a
+# threshold on it keeps (the default, 0.5, is the head's own decision). The edge node's threshold is chosen
+# behind the detector, in `03_pipeline.py`.
+
+# %%
+if "readability_curve" in res:
+    p_readable = pd.DataFrame({"kind": [c["kind"] for c in evaluation.crops],
+                               "readable": [r.readable for r in evaluation.readings]})
+    fig, axes = plt.subplots(1, 2, figsize=(13, 3.6))
+    bins = np.linspace(0, 1, 21)
+    for kind, color in ((READABLE, AQUA), ("unreadable", BLUE), ("ignore", BASE)):
+        values = p_readable.loc[p_readable["kind"] == kind, "readable"]
+        axes[0].hist(values, bins=bins, color=color, alpha=0.7, label=f"{kind} ({len(values)})")
+    axes[0].set_xlabel("P(readable)")
+    axes[0].set_ylabel("val crops")
+    axes[0].legend()
+    axes[0].set_title("P(readable) by crop kind", loc="left")
+    rc = pd.DataFrame(res["readability_curve"])
+    axes[1].plot(rc["readable"], rc["kept"], color=BLUE, label="share of readable crops kept")
+    axes[1].plot(rc["readable"], rc["exact"], color=ORANGE, label="exact among kept")
+    axes[1].plot(rc["readable"], rc["rejects_sent"] / res["reject_crops"], color=AQUA,
+                 label="share of rejects sent")
+    axes[1].set_xlabel("P(readable) threshold")
+    axes[1].set_ylim(0, 1.02)
+    axes[1].legend()
+    axes[1].set_title("what a readability threshold keeps", loc="left")
+    fig.tight_layout()
+else:
+    print(f"{VERSION} has no readability head.")
+
+# %% [markdown]
 # ## 4. Comparison with the baseline
 #
 # The baseline model reads the val crops of this version's dataset here, so both are measured on the same
@@ -283,34 +321,36 @@ else:
 # %% [markdown]
 # ### Error review (private)
 #
-# Every wrong read of a readable plate (an empty one included), the rejects read as a text, then the least
-# confident right reads. Label errors show up here too: a confident read that disagrees with the label, or a
-# confident text on a reject, is worth checking in CVAT (train and val only, never test).
+# Every wrong read of a readable plate (an empty one included), the readable plates the OCR declines, the
+# rejects it does not decline, then the least confident right reads. Label errors show up here too: a
+# confident read that disagrees with the label, or a reject read with confidence, is worth checking in CVAT
+# (train and val only, never test).
 
 # %%
-rows = pd.DataFrame([{**c, "read": r.text, "conf": r.conf}
+rows = pd.DataFrame([{**c, "read": r.text, "conf": r.conf, "readable": r.readable, "declined": r.declined}
                      for c, r in zip(evaluation.crops, evaluation.readings)])
 rows["correct"] = rows["read"] == rows["text"]
 readable = rows["kind"] == READABLE
-conf_label = rows["conf"].map(" {:.2f}".format)
+label = rows["read"].replace("", "(none)") + rows["conf"].map(" {:.2f}".format)
 if SHOW_IMAGES:
-    wrong = rows[readable & ~rows["correct"]]
-    wrong = wrong.assign(label=wrong["text"] + " -> " + wrong["read"].replace("", "(none)") + conf_label)
-    if len(wrong):
-        show_grid(wrong, f"wrong reads ({len(wrong)})")
-    else:
-        print("wrong reads: none")
-    sent = rows[~readable & ~rows["correct"]].sort_values("conf", ascending=False)
-    if len(sent):
-        show_grid(sent.assign(label=sent["kind"] + ": " + sent["read"] + conf_label),
-                  f"rejects read as a text ({len(sent)}), most confident first")
-    unsure = rows[readable & rows["correct"]].assign(label=rows["text"] + conf_label).nsmallest(8, "conf")
-    show_grid(unsure, "least confident right reads")
+    grids = [
+        (rows[readable & ~rows["correct"]], "wrong reads", rows["text"] + " -> " + label),
+        (rows[readable & rows["declined"]], "readable plates declined", rows["text"] + " -> " + label),
+        (rows[~readable & ~rows["declined"]].sort_values("conf", ascending=False),
+         "rejects not declined, most confident first", rows["kind"] + ": " + label),
+        (rows[readable & rows["correct"]].nsmallest(8, "conf"), "least confident right reads", label),
+    ]
+    for subset, title, labels in grids:
+        if len(subset):
+            show_grid(subset.assign(label=labels), f"{title} ({len(subset)})")
+        else:
+            print(f"{title}: none")
 else:
     print("SHOW_IMAGES is off: crops are not shown.")
 # Plate texts are personal data too: the table that also lands in reports shows where the errors are, not what
 # the plates say.
-rows.loc[~rows["correct"], ["frame", "kind", "plate", "width_px", "conf"]]
+errors = (readable & (~rows["correct"] | rows["declined"])) | (~readable & ~rows["declined"])
+rows.loc[errors, ["frame", "kind", "plate", "width_px", "conf", "readable", "declined"]]
 
 # %% [markdown]
 # ## 5. Summary and conclusions

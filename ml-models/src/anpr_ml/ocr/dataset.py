@@ -53,7 +53,9 @@ from ..paths import BATCHES_DIR, DATASETS_DIR, EXPORTS_DIR
 from .config import dataset_dir, sha256_file
 
 # The pretrained model has a region head. Every readable plate here is Polish and every reject is "Unknown",
-# both regions of the pretrained plate config, which keeps that head and the exported model's outputs unchanged.
+# both regions of the pretrained plate config, which keeps that head and the exported model's outputs
+# unchanged. A readability model ignores the column and takes its class from the text
+# (anpr_ml.ocr.readability).
 REGION = "Poland"
 REJECT_REGION = "Unknown"
 READABLE = "readable"
@@ -133,7 +135,8 @@ def jitter_corners(corners_px: np.ndarray, sigma_rel: float, rng: np.random.Gene
 
 def plate_rng(seed: int, frame: str, index: int, ignore: bool = False) -> np.random.Generator:
     """A generator per labeled quad, so its crops do not depend on which other frames or rejects are in the
-    dataset. Ignore regions get streams of their own; plates keep the streams of datasets built before them."""
+    dataset. Ignore regions get streams of their own; plates keep the streams of datasets built before
+    them."""
     return np.random.default_rng([seed, zlib.crc32(frame.encode()), index, *([1] if ignore else [])])
 
 
@@ -147,7 +150,8 @@ def record_crops(record: dict, frame: np.ndarray, settings: CropSettings,
         corners = np.asarray(t.corners) * frame_size(record)
         name = f"{stem}__{'i' if t.kind == 'ignore' else 'p'}{t.index}"
         row = {"frame": Path(record["image"]).name, "kind": t.kind, "plate": t.index,
-               "session": session_of(record["image"]), "width_px": round(plate_width_px(t.corners, record), 1),
+               "session": session_of(record["image"]),
+               "width_px": round(plate_width_px(t.corners, record), 1),
                "type": t.type, "text": t.text}
         if copies == 0:
             crop = rectify_plate(frame, corners, settings.size, settings.margin)
@@ -174,7 +178,8 @@ def write_split(out_dir: Path, records: list[dict], settings: CropSettings, jitt
     with open(out_dir / "annotations.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["image_path", "plate_text", "plate_region"])
-        w.writerows((row["image_path"], row["text"], REGION if row["text"] else REJECT_REGION) for row in rows)
+        w.writerows((row["image_path"], row["text"], REGION if row["text"] else REJECT_REGION)
+                    for row in rows)
     with open(out_dir / "crops.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=CROP_COLUMNS, extrasaction="ignore")
         w.writeheader()
@@ -241,7 +246,8 @@ def read_crops(cfg: dict, split: str) -> list[dict]:
     with open(base / "crops.csv", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
     for row in rows:
-        row.update(text=texts[row["image_path"]], path=base / row["image_path"], kind=row.get("kind", READABLE),
+        row.update(text=texts[row["image_path"]], path=base / row["image_path"],
+                   kind=row.get("kind", READABLE),
                    plate=int(row["plate"]), width_px=float(row["width_px"]), jitter=int(row["jitter"]))
     return rows
 

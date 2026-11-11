@@ -7,8 +7,10 @@ crops and, with W&B enabled, a report.
 
 Training reuses fast-plate-ocr's model builder, data pipeline, default augmentation, loss and metrics with the
 optimizer setup of its own CLI (AdamW with EMA, cosine decay with warmup). What differs is the run layout
-(runs/ocr/<run>/), the checkpoint selection and the W&B logging. A run takes minutes and is not resumable:
-an interrupted run directory is reported and has to be checked and removed by hand.
+(runs/ocr/<run>/), the checkpoint selection and the W&B logging. With `model.readability_head` the second head
+classifies readable against not readable instead of the country, and the text loss skips the rejects (see
+anpr_ml.ocr.readability). A run takes minutes and is not resumable: an interrupted run directory is reported
+and has to be checked and removed by hand.
 """
 import argparse
 import shutil
@@ -32,10 +34,12 @@ from .config import (
     run_config,
     run_dir,
     run_state,
+    uses_readability,
 )
 from .dataset import ensure_dataset
 from .evaluate import evaluate_run, print_summary
 from .export import export_onnx
+from .readability import text_loss, text_metrics, training_data, transfer_weights, write_plate_config
 from .report import report
 
 WEIGHT_DECAY_EXCLUDED = ["bias", "layer_norm"]  # fast-plate-ocr's default
@@ -54,7 +58,7 @@ def _optimizer(keras, t: dict, steps_per_epoch: int):
     return optimizer
 
 
-def _compile(keras, model, optimizer, t: dict, plate_config) -> None:
+def _compile(keras, model, optimizer, t: dict, plate_config, readability: bool) -> None:
     from fast_plate_ocr.train.model.loss import cce_loss
     from fast_plate_ocr.train.model.metric import (
         cat_acc_metric,
@@ -64,18 +68,27 @@ def _compile(keras, model, optimizer, t: dict, plate_config) -> None:
     )
 
     slots, vocab = plate_config.max_plate_slots, plate_config.vocabulary_size
-    model.compile(
-        optimizer=optimizer,
-        loss={"plate": cce_loss(vocabulary_size=vocab, label_smoothing=t["label_smoothing"]),
-              "region": keras.losses.CategoricalCrossentropy()},
-        loss_weights={"plate": t["plate_loss_weight"], "region": 1 - t["plate_loss_weight"]},
-        metrics={"plate": [
+    if readability:
+        # Per-crop text loss and metrics, so the rejects' sample weight of 0 takes them out.
+        plate_loss = text_loss(keras, t["label_smoothing"])
+        metrics = {"region": [keras.metrics.CategoricalAccuracy(name="acc")]}
+        weighted_metrics = {"plate": text_metrics(keras)}
+    else:
+        plate_loss = cce_loss(vocabulary_size=vocab, label_smoothing=t["label_smoothing"])
+        metrics = {"plate": [
             cat_acc_metric(max_plate_slots=slots, vocabulary_size=vocab),
             plate_acc_metric(max_plate_slots=slots, vocabulary_size=vocab),
             top_3_k_metric(vocabulary_size=vocab),
             plate_len_acc_metric(max_plate_slots=slots, vocabulary_size=vocab,
                                  pad_token_index=plate_config.pad_idx),
-        ]},
+        ]}
+        weighted_metrics = None
+    model.compile(
+        optimizer=optimizer,
+        loss={"plate": plate_loss, "region": keras.losses.CategoricalCrossentropy()},
+        loss_weights={"plate": t["plate_loss_weight"], "region": 1 - t["plate_loss_weight"]},
+        metrics=metrics,
+        weighted_metrics=weighted_metrics,
         jit_compile=False,
     )
 
@@ -99,33 +112,56 @@ def _callbacks(keras, cfg: dict, run: Path) -> list:
     return callbacks
 
 
+def _model(files: dict[str, Path], plate_config, readability: bool):
+    """The model to fine-tune, holding the pretrained weights (all but the new head layer for readability)."""
+    from fast_plate_ocr.train.model.config import load_plate_config_from_yaml
+    from fast_plate_ocr.train.model.model_builders import build_model
+    from fast_plate_ocr.train.model.model_schema import load_model_config_from_yaml
+
+    model_config = load_model_config_from_yaml(files["model_config"])
+    model = build_model(model_config, plate_config, enable_region_head=True)
+    if not readability:
+        model.load_weights(files["keras"])  # same architecture and outputs: every weight must load
+        return model
+    pretrained = build_model(model_config, load_plate_config_from_yaml(files["plate_config"]),
+                             enable_region_head=True)
+    pretrained.load_weights(files["keras"])
+    transfer_weights(pretrained, model)
+    return model
+
+
+def _datasets(keras, cfg: dict, plate_config, augmentation, readability: bool) -> tuple:
+    """(train, val) data: fast-plate-ocr's dataset, or the readability one with per-output sample weights."""
+    from fast_plate_ocr.train.data.dataset import PlateRecognitionPyDataset
+
+    t, data = cfg["train"], dataset_dir(cfg)
+    train_csv, val_csv = data / "train" / "annotations.csv", data / "val" / "annotations.csv"
+    if readability:
+        return (training_data(keras, train_csv, plate_config, t["batch"], augmentation, shuffle=True,
+                              seed=t["seed"]),
+                training_data(keras, val_csv, plate_config, t["batch"]))
+    return (PlateRecognitionPyDataset(annotations_file=train_csv, transform=augmentation,
+                                      plate_config=plate_config, batch_size=t["batch"], shuffle=True),
+            PlateRecognitionPyDataset(annotations_file=val_csv, plate_config=plate_config,
+                                      batch_size=t["batch"], shuffle=False))
+
+
 def fine_tune(cfg: dict, files: dict[str, Path], run: Path) -> None:
     """Trains the pretrained model on the dataset's train crops; best.keras is the selected checkpoint."""
     keras = keras_torch()
     import albumentations as A
     from fast_plate_ocr.train.data.augmentation import default_train_augmentation
-    from fast_plate_ocr.train.data.dataset import PlateRecognitionPyDataset
     from fast_plate_ocr.train.model.config import load_plate_config_from_yaml
-    from fast_plate_ocr.train.model.model_builders import build_model
-    from fast_plate_ocr.train.model.model_schema import load_model_config_from_yaml
 
-    t = cfg["train"]
+    t, readability = cfg["train"], uses_readability(cfg)
     keras.utils.set_random_seed(t["seed"])
-    plate_config = load_plate_config_from_yaml(files["plate_config"])
+    plate_config = load_plate_config_from_yaml(run / PLATE_CONFIG)
     augmentation = default_train_augmentation(img_color_mode=plate_config.image_color_mode)
     A.save(augmentation, run / "train_augmentation.yaml", "yaml")
 
-    data = dataset_dir(cfg)
-    train_data = PlateRecognitionPyDataset(annotations_file=data / "train" / "annotations.csv",
-                                           transform=augmentation, plate_config=plate_config,
-                                           batch_size=t["batch"], shuffle=True)
-    val_data = PlateRecognitionPyDataset(annotations_file=data / "val" / "annotations.csv",
-                                         plate_config=plate_config, batch_size=t["batch"], shuffle=False)
-
-    model = build_model(load_model_config_from_yaml(files["model_config"]), plate_config,
-                        enable_region_head=True)
-    model.load_weights(files["keras"])  # same architecture and outputs: every weight must load
-    _compile(keras, model, _optimizer(keras, t, len(train_data)), t, plate_config)
+    train_data, val_data = _datasets(keras, cfg, plate_config, augmentation, readability)
+    model = _model(files, plate_config, readability)
+    _compile(keras, model, _optimizer(keras, t, len(train_data)), t, plate_config, readability)
     model.fit(train_data, validation_data=val_data, epochs=t["epochs"], callbacks=_callbacks(keras, cfg, run))
 
 
@@ -134,11 +170,16 @@ def train(cfg: dict) -> Path:
     run = run_dir(cfg)
     if run.exists():
         raise FileExistsError(f"{run} already exists")
+    if uses_readability(cfg) and cfg["train"] is None:
+        raise ValueError("the readability head starts untrained: a config with it needs a train section")
     files = pretrained_files(cfg)
     run.mkdir(parents=True)
     (run / "config.yaml").write_text(yaml.safe_dump(run_config(cfg), sort_keys=False))
     shutil.copy(files["model_config"], run / MODEL_CONFIG)
-    shutil.copy(files["plate_config"], run / PLATE_CONFIG)
+    if uses_readability(cfg):
+        write_plate_config(files["plate_config"], run / PLATE_CONFIG)
+    else:
+        shutil.copy(files["plate_config"], run / PLATE_CONFIG)
     if cfg["train"] is None:
         shutil.copy(files["keras"], run / BEST)
     else:

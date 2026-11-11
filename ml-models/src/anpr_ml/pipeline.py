@@ -10,8 +10,10 @@ is read, because on the edge node every detection is, and each read falls into o
     dont_care    a plate_ignore region or a plate below the small-plate threshold
     background   no plate at all (a detector false positive)
 
-An empty reading is the OCR declining to read (an OCR trained with rejects does that): it is never sent and
-is counted under `rejected` by category, where the readable plates (category wrong) are the reads lost.
+An OCR trained with rejects can decline a crop (Reading.declined: no text, or not readable for the readability
+head). A declined read is never sent and is counted under `rejected` by category; for the readable plates
+(correct or wrong by its text) those are reads lost. A readable plate counts as read right only when its read
+is right and not declined.
 
 Only `correct` reads are good output. The curve over the OCR confidence threshold shows, for the reads that
 would be sent, their precision and the share of readable plates read right: the input for the rule that
@@ -33,7 +35,7 @@ from .detector.evaluate import val_records
 from .detector.metrics import match_image
 from .detector.predict import Prediction, predict_records
 from .ocr import config as ocr_config
-from .ocr.metrics import CONF_GRID
+from .ocr.metrics import CONF_GRID, READABLE_GRID
 from .ocr.predict import Reader, Reading
 from .paths import BATCHES_DIR, CONFIGS_DIR, RUNS_DIR
 
@@ -110,20 +112,22 @@ def readable_plates(record: dict, min_plate_px: float, read_right: dict[int, boo
     return rows
 
 
+def sent_counts(cats: np.ndarray, sent: np.ndarray, readable_plates: int) -> dict:
+    """The sent reads by category, their precision and the share of readable plates among them read right."""
+    counts = {c: int(((cats == c) & sent).sum()) for c in CATEGORIES}
+    total = int(sent.sum())
+    nan = float("nan")
+    return {"sent": total, **counts, "precision": counts["correct"] / total if total else nan,
+            "recall": counts["correct"] / readable_plates if readable_plates else nan}
+
+
 def summarize(reads: list[Read], plates: list[dict], grid=CONF_GRID) -> dict:
     n = len(plates)
     conf = np.array([r.reading.conf for r in reads])
     cats = np.array([r.category for r in reads])
-    rejected = np.array([not r.reading.text for r in reads], dtype=bool)
+    rejected = np.array([r.reading.declined for r in reads], dtype=bool)
     nan = float("nan")
-    curve = []
-    for t in grid:
-        sent = (conf >= t) & ~rejected
-        counts = {c: int(((cats == c) & sent).sum()) for c in CATEGORIES}
-        total = int(sent.sum())
-        curve.append({"conf": t, "sent": total, **counts,
-                      "precision": counts["correct"] / total if total else nan,
-                      "recall": counts["correct"] / n if n else nan})
+    curve = [{"conf": t, **sent_counts(cats, (conf >= t) & ~rejected, n)} for t in grid]
     by_width = []
     for lo, hi in WIDTH_BUCKETS:
         name = width_bucket_name(lo, hi)
@@ -132,7 +136,7 @@ def summarize(reads: list[Read], plates: list[dict], grid=CONF_GRID) -> dict:
         by_width.append({"width_px": name, "plates": len(rows), "detected": sum(p["detected"] for p in rows),
                          "read_correct": right, "recall": right / len(rows) if rows else nan})
     right = sum(p["read_correct"] for p in plates)
-    return {
+    res = {
         "readable_plates": n,
         "detected": sum(p["detected"] for p in plates),
         "read_correct": right,
@@ -142,6 +146,13 @@ def summarize(reads: list[Read], plates: list[dict], grid=CONF_GRID) -> dict:
         "curve": curve,
         "by_width": by_width,
     }
+    if reads and reads[0].reading.readable is not None:
+        # The same over the readability threshold in place of the default: the input for choosing it.
+        p_readable = np.array([r.reading.readable for r in reads])
+        has_text = np.array([bool(r.reading.text) for r in reads])
+        res["readability_curve"] = [{"readable": t, **sent_counts(cats, has_text & (p_readable >= t), n)}
+                                    for t in READABLE_GRID]
+    return res
 
 
 def evaluate_pipeline(det_cfg: dict, ocr_cfg: dict) -> PipelineEvaluation:
@@ -167,7 +178,7 @@ def evaluate_pipeline(det_cfg: dict, ocr_cfg: dict) -> PipelineEvaluation:
             truth = plate["text"] if target == "readable" else None
             category = read_category(target, reading.text, truth)
             if target == "readable":
-                read_right[i] = category == "correct"
+                read_right[i] = category == "correct" and not reading.declined
             width = plate_width_px(plate["corners"], r) if plate is not None else None
             reads.append(Read(r["image"], category, reading, det, truth, width))
         plates += readable_plates(r, min_px, read_right)
@@ -187,7 +198,8 @@ def print_summary(ev: PipelineEvaluation) -> None:
           f"{res['read_correct']} of {res['readable_plates']} readable val plates read right "
           f"({res['recall']:.3f}), {res['detected']} detected; reads: {reads}")
     if any(res["rejected"].values()):
-        print("rejected by the OCR (never sent): " + ", ".join(f"{k} {v}" for k, v in res["rejected"].items()))
+        rejected = ", ".join(f"{k} {v}" for k, v in res["rejected"].items())
+        print(f"declined by the OCR (never sent): {rejected}")
 
 
 def main() -> None:

@@ -3,7 +3,8 @@
 A config (configs/ocr_<name>.yaml) describes one OCR run completely:
 
     run_name    the run directory, runs/ocr/<run_name>/
-    dataset     name (datasets/<name>/), exports, margin, jitter_copies, jitter_sigma, seed
+    dataset     name (datasets/<name>/), exports, margin, jitter_copies, jitter_sigma, seed and optionally
+                reject (sources, min_px: crops the OCR learns to answer with no text, see anpr_ml.ocr.dataset)
     model       the pretrained fast-plate-ocr model to start from (see PRETRAINED)
     train       fine-tuning settings; null for a baseline run, which evaluates the pretrained model unchanged
     wandb       enabled, project, entity, mode, log_images (see anpr_ml.tracking)

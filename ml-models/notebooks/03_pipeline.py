@@ -26,7 +26,9 @@
 # The detector runs at its operating threshold (best F1 on val). Every detection is read, as on the edge
 # node, and each read is one of: `correct` / `wrong` (a readable plate), `unreadable` (a plate labeled not
 # readable), `dont_care` (an ignore region or a plate below the small-plate threshold), `background` (no
-# plate). Only `correct` reads are good output; the rest is what a filter on the edge node has to stop.
+# plate). Only `correct` reads are good output; the rest is what a filter on the edge node has to stop. An OCR
+# trained with rejects (v2 on) can also read nothing: such a read is never sent, and is counted as `rejected`
+# in its category (for a readable plate that is a plate lost).
 #
 # **Privacy.** Cells that draw crops run only when `SHOW_IMAGES` is on; committed reports are executed with
 # `ANPR_SHOW_IMAGES=0`. Tables here show frame names and widths, never plate texts.
@@ -35,7 +37,7 @@
 # evaluation from a terminal:
 #
 # ```powershell
-# uv run anpr-eval-pipeline --detector configs/detector_v1.yaml --ocr configs/ocr_v1.yaml
+# uv run anpr-eval-pipeline --detector configs/detector_v2.yaml --ocr configs/ocr_v2.yaml
 # ```
 #
 # A report: set `$env:ANPR_SHOW_IMAGES = "0"`, `ANPR_PIPELINE_DETECTOR`, `ANPR_PIPELINE_OCR` (and the
@@ -44,9 +46,9 @@
 
 # %% tags=["parameters"]
 DETECTOR = "v2"           # configs/detector_<DETECTOR>.yaml
-OCR = "v1"                # configs/ocr_<OCR>.yaml
+OCR = "v2"                # configs/ocr_<OCR>.yaml
 BASELINE_DETECTOR = "v2"  # the pair compared against; None for no comparison
-BASELINE_OCR = "v0"
+BASELINE_OCR = "v1"
 
 # %%
 import json
@@ -112,14 +114,15 @@ pd.Series({
 # corners less exact than the labels.
 
 # %%
-pd.DataFrame([res["reads"]], index=["reads"])
+pd.DataFrame([res["reads"], res["rejected"]], index=["reads", "of them read as no text"])
 
 # %% [markdown]
 # ## 2. What would be sent
 #
-# For a threshold on the OCR confidence: the reads that pass, by category. `precision` is the share of passing
-# reads that are right, `recall` the share of readable plates read right. This is what the filter on the edge
-# node trades off; format rules and agreement across frames come on top of it later.
+# For a threshold on the OCR confidence: the reads that pass (a text at or above the threshold), by category.
+# `precision` is the share of passing reads that are right, `recall` the share of readable plates read right.
+# This is what the filter on the edge node trades off; format rules and agreement across frames come on top of
+# it later.
 
 # %%
 curve = pd.DataFrame(res["curve"])
@@ -160,7 +163,11 @@ pd.DataFrame(res["by_width"]).set_index("width_px")
 # %%
 def summary(r):
     at = {c["conf"]: c for c in r["curve"]}
-    return {"read right / readable": r["recall"], "detected": r["detected"], **r["reads"],
+    # Evaluations written before rejects existed have no "rejected": their OCR never read nothing.
+    rejected = r.get("rejected", dict.fromkeys(CATEGORIES, 0))
+    return {"read right / readable": r["recall"], "detected": r["detected"],
+            **{f"sent @0 {c}": at[0.0][c] for c in CATEGORIES},
+            **{f"no text: {c}": rejected[c] for c in CATEGORIES},
             **{f"precision @{t}": at[t]["precision"] for t in (0.0, 0.5, 0.9) if t in at}}
 
 
@@ -181,9 +188,9 @@ else:
 # %% [markdown]
 # ### Error review (private)
 #
-# Crops as the edge node cuts them, from the detector's corners: wrong reads of readable plates, then the most
-# confident reads that are not plates to read (unreadable, don't-care, background): the ones a confidence
-# threshold alone would let through.
+# Crops as the edge node cuts them, from the detector's corners: wrong reads of readable plates (no text
+# included), then the most confident texts read where there is no plate to read (unreadable, don't-care,
+# background): the ones a confidence threshold alone would let through.
 
 # %%
 def crop_of(read):
@@ -211,16 +218,16 @@ def show_reads(reads, title, label, n=8):
 if SHOW_IMAGES:
     wrong = [r for r in ev.reads if r.category == "wrong"]
     show_reads(wrong, f"wrong reads ({len(wrong)})",
-               lambda r: f"{r.truth} -> {r.reading.text} {r.reading.conf:.2f}")
-    junk = sorted((r for r in ev.reads if r.category in ("unreadable", "dont_care", "background")),
-                  key=lambda r: -r.reading.conf)
-    show_reads(junk, "most confident reads of non-targets",
+               lambda r: f"{r.truth} -> {r.reading.text or '(none)'} {r.reading.conf:.2f}")
+    junk = sorted((r for r in ev.reads if r.category in ("unreadable", "dont_care", "background")
+                   and r.reading.text), key=lambda r: -r.reading.conf)
+    show_reads(junk, "most confident texts read on non-targets",
                lambda r: f"{r.category}: {r.reading.text} {r.reading.conf:.2f}")
 else:
     print("SHOW_IMAGES is off: crops are not shown.")
-pd.DataFrame([{"frame": r.frame.split("/")[-1], "category": r.category, "conf": r.reading.conf,
-               "width_px": r.width_px} for r in ev.reads if r.category != "correct"]) \
-    .sort_values("conf", ascending=False).head(15)
+pd.DataFrame([{"frame": r.frame.split("/")[-1], "category": r.category, "no text": not r.reading.text,
+               "conf": r.reading.conf, "width_px": r.width_px} for r in ev.reads if r.category != "correct"]) \
+    .sort_values(["no text", "conf"], ascending=[True, False]).head(15)
 
 # %% [markdown]
 # ## 5. Conclusions

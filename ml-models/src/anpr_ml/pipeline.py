@@ -10,6 +10,9 @@ is read, because on the edge node every detection is, and each read falls into o
     dont_care    a plate_ignore region or a plate below the small-plate threshold
     background   no plate at all (a detector false positive)
 
+An empty reading is the OCR declining to read (an OCR trained with rejects does that): it is never sent and
+is counted under `rejected` by category, where the readable plates (category wrong) are the reads lost.
+
 Only `correct` reads are good output. The curve over the OCR confidence threshold shows, for the reads that
 would be sent, their precision and the share of readable plates read right: the input for the rule that
 decides what the edge node trusts. Format rules and agreement across frames come on top of this later.
@@ -111,10 +114,11 @@ def summarize(reads: list[Read], plates: list[dict], grid=CONF_GRID) -> dict:
     n = len(plates)
     conf = np.array([r.reading.conf for r in reads])
     cats = np.array([r.category for r in reads])
+    rejected = np.array([not r.reading.text for r in reads], dtype=bool)
     nan = float("nan")
     curve = []
     for t in grid:
-        sent = conf >= t
+        sent = (conf >= t) & ~rejected
         counts = {c: int(((cats == c) & sent).sum()) for c in CATEGORIES}
         total = int(sent.sum())
         curve.append({"conf": t, "sent": total, **counts,
@@ -134,6 +138,7 @@ def summarize(reads: list[Read], plates: list[dict], grid=CONF_GRID) -> dict:
         "read_correct": right,
         "recall": right / n if n else nan,
         "reads": {c: int((cats == c).sum()) for c in CATEGORIES},
+        "rejected": {c: int(((cats == c) & rejected).sum()) for c in CATEGORIES},
         "curve": curve,
         "by_width": by_width,
     }
@@ -181,6 +186,8 @@ def print_summary(ev: PipelineEvaluation) -> None:
     print(f"detector {res['detector_run']} (conf {res['detector_conf']}) + OCR {res['ocr_run']}: "
           f"{res['read_correct']} of {res['readable_plates']} readable val plates read right "
           f"({res['recall']:.3f}), {res['detected']} detected; reads: {reads}")
+    if any(res["rejected"].values()):
+        print("rejected by the OCR (never sent): " + ", ".join(f"{k} {v}" for k, v in res["rejected"].items()))
 
 
 def main() -> None:

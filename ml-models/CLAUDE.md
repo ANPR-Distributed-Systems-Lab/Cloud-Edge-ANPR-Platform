@@ -112,7 +112,7 @@ These refine the documents above (which are already updated):
   now: no enrichment. Later, use detector v0 predictions to pick such frames for training batches. Never enrich
   the test set; it must reflect the real distribution.
 
-## Current state (2026-11-09)
+## Current state (2026-11-10)
 
 - **train_001**: 300 frames from the train split, labeled by hand, validated with 0 errors. 180 `plate`,
   186 `plate_ignore`; plate width min 70, median 121, p90 236, max 525 px.
@@ -133,17 +133,34 @@ These refine the documents above (which are already updated):
 - **OCR**: readable plates train 270 (183 texts), val 145 (val_001 + val_002, 65 texts), all `standard`. Dataset
   `ocr_128x64_v0` (train 2160 jittered crops, val 145). **OCR v0** (pretrained, `configs/ocr_v0.yaml`): finished,
   val exact 0.945 (137 of 145), CER 0.011, reported to W&B `anpr-ocr`. **OCR v1** (`configs/ocr_v1.yaml`,
-  fine-tuning): configured and smoke-tested, not trained yet. **Pipeline detector v2 + OCR v0**: 134 of 143
-  readable val plates (at or above 70 px) read right; every detection is read, so 61 reads of unreadable plates,
-  92 of don't-care regions and 2 of background come out too, and OCR confidence alone does not remove them
-  (precision of sent reads 0.93 at conf 0.95, 0.97 at 0.99 with recall 0.67).
+  fine-tuning): finished, best epoch 34 of 54 (early stop), val exact 0.952 (138 of 145), CER 0.007.
+  **Pipeline detector v2 + OCR v0 / v1**: 134 / 137 of 143 readable val plates (at or above 70 px) read right;
+  every detection is read, so 61 reads of unreadable plates, 92 of don't-care regions and 2 of background come
+  out too. v1 is confident on them (median conf on unreadable plates 0.80, v0 0.51), so confidence alone does not
+  stop them (precision of sent reads at conf 0.95: v0 0.93, v1 0.81).
+- **Send rule analysis (2026-11-10, scratch scripts, nothing committed)**: on val, a width of at least 70 px and
+  10 px from the frame edge removes 49 of 297 reads and no correct one; the Polish format (2-3 letter county code
+  plus the official vehicle-part patterns, 412 of 415 labeled texts pass, 3 special shapes do not) removes most
+  garbage with v0 but little with v1; requiring the same text in a neighboring raw frame (+-2, ~0.7 s) removes
+  wrong reads and most don't-care reads, but not unreadable plates: v1 reads the same text on them in consecutive
+  frames of moving cars. Hence OCR v2 with rejects. Recommended shape of the rule on the Pi (not decided): geometry
+  before OCR, format and confidence per frame, then one event per tracked pass with agreement across frames.
+- **OCR v2** (`configs/ocr_v2.yaml`): v1 plus rejects (empty text, region Unknown) from unreadable plates and
+  `plate_ignore` regions of at least 70 px. Dataset `ocr_128x64_v1` built: train 2160 readable crops (byte-identical
+  to `ocr_128x64_v0`) + 936 unreadable + 888 ignore; val 145 + 62 + 75. **Trained (2026-11-10):** best epoch 12 of
+  32 (val loss rises after it: the rejects are memorized), readable val crops exact 0.917 (133 of 145, v1 138),
+  CER 0.032, 5 reads of the wrong length, 0 read as no text; 102 of 137 val rejects read as no text. Behind
+  detector v2: 132 of 143 readable plates read right (v1 137), 4 of them read as no text; no text on 32 of 61
+  unreadable plates and 78 of 92 don't-care regions. With width >= 70 px, the format check and conf >= 0.8: v2
+  precision 0.90 / recall 0.88 (v0 0.88 / 0.90, v1 0.78 / 0.95); agreement across frames adds nothing for v2.
+  Rejecting with an empty text costs reading quality; not decided which OCR goes on.
 - **test_001 does not exist yet**: ~150 frames from the test split, labeled from scratch, never with
   model suggestions.
 - **val_002** is labeled (150 frames, 72 readable plates) and `configs/detector_v2.yaml` (v1 plus val_002 for
   validation) is committed; detector v2 on val_001 + val_002 (207 plates): precision and recall 0.986 at conf
   0.40 (3 FP, 3 FN). The OCR configs and the pipeline validate on val_001 + val_002 too.
-- Committed: the package restructuring, detector v1 and v2 configs, the version-agnostic detector notebook.
-  Uncommitted: the OCR and pipeline code, `anpr_ml.analysis`, notebooks 02 / 03 and the related doc updates.
+- Committed: the package restructuring, detector v1 and v2 configs, the version-agnostic detector notebook, the
+  OCR and pipeline code (v0 / v1), `anpr_ml.analysis` and notebooks 02 / 03. Uncommitted: the OCR rejects (v2).
 
 ## Roadmap
 
@@ -160,7 +177,8 @@ The order agreed so far; confirm each step with the project owner before startin
 6. Pi 5 latency benchmark at 1024x768 / 1280x960 / 1920x1440 to close the detector input size.
 7. OCR. **Done (2026-11-09):** rectified 128x64 crops with an 8 % margin and corner jitter (`anpr-ocr-dataset`),
    fast-plate-ocr `cct-s-v2-global` on Keras 3 + torch with ONNX export (`anpr-train-ocr`), baseline v0, the
-   end-to-end evaluation (`anpr-eval-pipeline`) and notebooks 02 / 03. Left: train v1, a written and verified
-   document of the Polish per-position character rules, then the final model.
+   end-to-end evaluation (`anpr-eval-pipeline`) and notebooks 02 / 03. **Done (2026-11-10):** v1 trained, rejects
+   added (v2 configured). Left: train v2, the send rule on the Pi (geometry, format, agreement across frames), a
+   written and verified document of the Polish per-position character rules, then the final model.
 8. Export both models to ONNX (OCR: done by `anpr-train-ocr`). The S3 bucket for model distribution does not exist in `infrastructure/` yet; that
    belongs to the infrastructure session.

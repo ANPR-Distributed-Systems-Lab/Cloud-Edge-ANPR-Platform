@@ -1,0 +1,43 @@
+# OCR v2: v1 plus rejects. Trained on readable plates only, v1 reads a plausible Polish plate into anything,
+# with high confidence; here the unreadable plates and plate_ignore regions of at least 70 px are added with an
+# empty text (every slot padding) and the region Unknown, so the OCR learns to decline them. Training settings
+# are v1's and the readable crops are byte-identical to ocr_128x64_v0, so the difference to v1 measures the
+# rejects alone.
+run_name: v2
+
+dataset:
+  name: ocr_128x64_v1
+  exports: [train_001, train_002, val_001, val_002]
+  size: [128, 64]
+  margin: 0.08
+  jitter_copies: 8                # rejects get the same jittered copies as the readable plates
+  jitter_sigma: 0.015
+  seed: 42
+  reject:
+    sources: [unreadable, ignore] # plates labeled readable = no, plate_ignore regions
+    min_px: 70                    # narrower detections never reach the OCR on the edge node
+
+model:
+  name: cct_s_v2_global
+
+train:                            # fast-plate-ocr's CLI defaults, except where noted
+  epochs: 60                      # fine-tuning from a model that already reads ~90 % of the plates
+  batch: 64
+  lr: 0.0005                      # half the default (meant for training from scratch)
+  final_lr_factor: 0.01           # cosine decay to 1 % of lr
+  warmup_fraction: 0.05
+  weight_decay: 0.01
+  clipnorm: 1.0
+  label_smoothing: 0.01
+  plate_loss_weight: 0.9          # the rest goes to the region head (Poland, Unknown for the rejects)
+  ema: true                       # checkpoints hold the exponential moving average of the weights
+  monitor: val_plate_loss         # checkpoint selection and early stopping, now over plates and rejects
+  patience: 20
+  seed: 42
+
+wandb:
+  enabled: true
+  project: anpr-ocr
+  entity: null
+  mode: online
+  log_images: true

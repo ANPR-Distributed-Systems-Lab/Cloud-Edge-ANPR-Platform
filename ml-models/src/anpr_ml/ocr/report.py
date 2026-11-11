@@ -1,8 +1,8 @@
 """Reporting an OCR evaluation to the run's W&B run (see anpr_ml.tracking).
 
 Logged: the final metrics in the run summary, the coverage curve, exact match by plate width and, with
-wandb.log_images, a table with one row per val crop (crop, true text, read text, confidence, width), which
-can be sorted and filtered in the W&B UI. Only val crops are sent; the val frames are already in the
+wandb.log_images, a table with one row per val crop (crop, kind, true text, read text, confidence, width),
+which can be sorted and filtered in the W&B UI. Only val crops are sent; the val frames are already in the
 detector's project, so the crops show nothing new.
 """
 from typing import TYPE_CHECKING
@@ -21,12 +21,13 @@ VIEW_SCALE = 3  # crops are 128x64; enlarged without smoothing so the pixels the
 
 
 def crops_table(wandb, evaluation: "Evaluation"):
-    columns = ["crop", "true", "read", "correct", "conf", "weakest_slot", "width_px", "frame", "session"]
+    columns = ["crop", "kind", "true", "read", "correct", "conf", "weakest_slot", "width_px", "frame",
+               "session"]
     table = wandb.Table(columns=columns)
     for crop, reading in zip(evaluation.crops, evaluation.readings):
         image = cv2.cvtColor(read_image(crop["path"]), cv2.COLOR_BGR2RGB)
         image = cv2.resize(image, None, fx=VIEW_SCALE, fy=VIEW_SCALE, interpolation=cv2.INTER_NEAREST)
-        table.add_data(wandb.Image(image, file_type="png"), crop["text"], reading.text,
+        table.add_data(wandb.Image(image, file_type="png"), crop["kind"], crop["text"], reading.text,
                        reading.text == crop["text"], reading.conf, reading.weakest_slot + 1,
                        crop["width_px"], crop["frame"], crop["session"])
     return table
@@ -40,14 +41,15 @@ def log_evaluation(wandb, evaluation: "Evaluation", images: bool) -> None:
     }
     wandb.run.summary.update(tracking.scalars(summary))
     coverage = [c for c in res["coverage"] if c["n_kept"]]
+    series = {"share kept": [c["kept"] for c in coverage], "exact among kept": [c["exact"] for c in coverage]}
+    if res["reject_crops"]:
+        series["share of rejects sent"] = [c["rejects_sent"] / res["reject_crops"] for c in coverage]
     width_table = wandb.Table(data=[[b["width_px"], b["exact"]] for b in res["by_width"]],
                               columns=["width_px", "exact"])
     wandb.log({
         "eval/coverage": wandb.plot.line_series(
-            xs=[c["conf"] for c in coverage],
-            ys=[[c["kept"] for c in coverage], [c["exact"] for c in coverage]],
-            keys=["share kept", "exact among kept"], title="val: reads kept vs confidence threshold",
-            xname="confidence threshold"),
+            xs=[c["conf"] for c in coverage], ys=list(series.values()), keys=list(series),
+            title="val: reads kept vs confidence threshold", xname="confidence threshold"),
         "eval/exact_by_width": wandb.plot.bar(
             width_table, "width_px", "exact", title="val: exact match by plate width on the original (px)"),
     })

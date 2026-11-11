@@ -84,7 +84,7 @@ frames that differed in content; `--sweep` shows how many frames survive each th
 - **Attributes of `plate`**:
   - `text`: the plate number, uppercase letters and digits, no spaces or separators.
   - `readable`: `yes` if you can read every character, `no` otherwise (the plate stays in detection
-    data and is dropped for OCR; leave `text` empty).
+    data, and the OCR learns to read no text there; leave `text` empty).
   - `occlusion`: `none` or `partial` (part of the plate hidden, the corners are still estimated).
   - `type`: `standard`, `two-line`, `motorcycle` or `other`.
 - **Pre-annotations** (detector predictions imported into a task): correct them, do not just accept them. Test

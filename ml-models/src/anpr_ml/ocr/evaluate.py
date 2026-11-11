@@ -1,6 +1,7 @@
 """anpr-eval-ocr: evaluates a finished OCR run on the val crops (labeled corners, no jitter).
 
-This measures the OCR alone. The OCR behind the real detector, on its corners and its false positives, is
+This measures the OCR alone: reading the readable plates and, when the dataset has rejects, declining the
+rest (see anpr_ml.ocr.metrics). The OCR behind the real detector, on its corners and its false positives, is
 measured by anpr-eval-pipeline.
 
 Writes runs/ocr/<run>/eval_val.json and, with W&B enabled in the config, reports to the run's W&B run.
@@ -45,8 +46,11 @@ def evaluate_run(cfg: dict) -> Evaluation:
 
 def print_summary(evaluation: Evaluation) -> None:
     res = evaluation.result
-    print(f"{evaluation.run.name}: {res['crops']} val crops; exact {res['exact']:.3f}, "
-          f"CER {res['cer']:.4f}, wrong length {res['wrong_length']}, mean confidence {res['mean_conf']:.3f}")
+    print(f"{evaluation.run.name}: {res['crops']} readable val crops; exact {res['exact']:.3f}, "
+          f"CER {res['cer']:.4f}, wrong length {res['wrong_length']}, read as no text {res['false_rejects']}, "
+          f"mean confidence {res['mean_conf']:.3f}")
+    if res["reject_crops"]:
+        print(f"{res['reject_crops']} val rejects; read as no text {res['reject_rate']:.3f}")
 
 
 def main() -> None:

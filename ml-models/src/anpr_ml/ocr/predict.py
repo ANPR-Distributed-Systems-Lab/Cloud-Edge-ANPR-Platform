@@ -10,7 +10,7 @@ from .config import ONNX, PLATE_CONFIG
 
 @dataclass
 class Reading:
-    """The text read from one crop.
+    """The text read from one crop; an empty text (every slot padding) means the OCR declines to read it.
 
     slot_probs: the probability of the chosen character in each of the model's fixed slots, padding slots
     included: the model has to be sure where the plate ends, too. conf is the weakest slot, since a plate is

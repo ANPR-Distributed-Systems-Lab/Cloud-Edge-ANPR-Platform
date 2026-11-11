@@ -72,7 +72,7 @@ Each plate is a polygon with exactly **4 points** (set as "Number of points = 4"
 - **Corner position:** the intersection of the plate's outer edges, not the rounded corner.
 - **Attributes:**
   - `text`: the plate number, uppercase, no spaces.
-  - `readable`: yes / no. Unreadable plates stay in detection data but are excluded from OCR.
+  - `readable`: yes / no. Unreadable plates stay in detection data; for OCR they are rejects (to be read as no text, section 7).
   - `occlusion`: none / partial (named so it does not clash with CVAT's built-in `occluded` flag).
   - `type`: standard / two-line / motorcycle / other (values fixed in the labeling guide).
 - **Small plates:** plates narrower than about **70 px on the original** are not labeled as regular plates. They get a separate label (`plate_ignore`, 4 points, no text) so the detector is not trained on noise. 70 px is about 22 px at a 1280 px detector input (33 px at 1920), near the ~30 px a keypoint detector needs. The first batch (`train_001`) started at 80 px, and was lowered to 70 px because plates of 70 px and wider were often still readable. The threshold is confirmed with a histogram of plate widths after the first ~100 labels.
@@ -136,16 +136,18 @@ Much of the best data is expected to be oncoming cars passing on the left side o
 ## 7. OCR model
 
 - **Input (decided 2026-11-09):** the plate rectified with a perspective transform from the 4 corners (`rectify_plate()`, shared with the Pi), **128x64 RGB**, the input of the pretrained model, whose weights a different size would not fit. The quad is first widened by an **8 % margin** about its center: the pretrained model saw plates with surroundings, and on val_001 it read 0.918 of tight crops, 0.986 with the margin and 0.973 of axis-aligned boxes with 10 % margin. Rectifying keeps oblique close-range plates undistorted. The 4.5:1 plate is stretched to 2:1; the model is trained that way.
-- **Model (decided 2026-11-09):** `fast-plate-ocr` `cct-s-v2-global` (MIT; trained on plates of about 70 countries, Poland included, 98.4 % plate accuracy on its own Polish val set), fine-tuned on our crops. Output: 10 fixed slots over 36 characters plus padding, each with its probability, which suits per-position rules; the region head is kept and trained on "Poland" only.
+- **Model (decided 2026-11-09):** `fast-plate-ocr` `cct-s-v2-global` (MIT; trained on plates of about 70 countries, Poland included, 98.4 % plate accuracy on its own Polish val set), fine-tuned on our crops. Output: 10 fixed slots over 36 characters plus padding, each with its probability, which suits per-position rules; the region head is kept and trained on "Poland" for readable plates and "Unknown" for rejects.
 - **Training stack (decided 2026-11-09):** Keras 3 on the **torch backend**, for training and for the ONNX export; TensorFlow is not installed. fast-plate-ocr's own export fails on Windows and needs a dynamic batch that the torch exporter cannot convert, so `anpr_ml.ocr.export` exports with **batch size 1** and names the outputs `plate` / `region` like the official models. Verified: the export of the pretrained weights reads exactly like the official ONNX (largest probability difference 1e-6).
 - **Baseline (OCR v0):** the pretrained model without fine-tuning: exact 0.945 (137 of 145) on the val_001 + val_002 crops; behind detector v2, 134 of 143 readable val plates read right.
+- **Fine-tuning on readable plates only (OCR v1):** exact 0.952 (138 of 145), CER 0.007; behind detector v2, 137 of 143. But it reads a plausible Polish plate into everything: behind detector v2 the median confidence of its reads of unreadable plates rose from 0.51 (v0) to 0.80, and its region head calls 90 of 92 don't-care regions Polish (v0: 35). Confidence alone then cannot stop garbage reads (precision of sent reads 0.81 at a threshold of 0.95).
+- **Rejects (decided 2026-11-10):** the OCR is trained to answer with **no text** (every slot padding) and the region "Unknown" where there is nothing to read: plates labeled `readable = no` and `plate_ignore` regions, at least 70 px wide (narrower detections never reach the OCR on the Pi), cut and jittered like the readable plates (train 1824 reject crops next to 2160 readable ones, val 137 next to 145). An empty reading is never sent. First trained in OCR v2: 102 of 137 val rejects read as no text, but reading got worse (exact 0.917 against v1's 0.952, some reads cut short), so the way rejects are trained is not final.
 - **Final model: OPEN.** The target model should encode Polish plate rules, e.g. which characters may appear in the district code and in which positions of the registration number. Candidate approaches:
   - generic model plus rule-based post-processing (regex or per-position masks),
   - constrained decoding (per-slot output heads or masked CTC),
   - alternatives to `fast-plate-ocr`: PaddleOCR PP-OCRv5 recognition model, or a custom CRNN/CTC in PyTorch.
 - **Rules document:** the exact character rules per position must be written down and verified against official sources before they are used.
 - **Training data:**
-  - rectified real crops from verified labels (only `readable = yes`), split by session like everything else,
+  - rectified real crops from verified labels (`readable = yes`, plus the rejects above), split by session like everything else,
   - **corner jitter (decided 2026-11-09):** 8 crops per train plate, built offline, each from corners displaced at random (normal, per corner and axis, sigma = 1.5 % of the plate width, the order of detector v1's corner error), so OCR tolerates detector inaccuracy; val crops come from the labeled corners. fast-plate-ocr's default augmentation runs on top,
   - synthetic Polish plates (layout, EU strip, random characters, perspective, blur, noise) are likely and mixed with real data. Exact ratio decided after the baseline.
 - **Export:** ONNX.
@@ -162,11 +164,12 @@ Thresholds (acceptance criteria) are set after the first baseline run. Until the
 **OCR**
 - exact-match accuracy of the whole plate,
 - character error rate (CER),
-- confusion matrix (e.g. 0/O, 1/I, 8/B), and errors per position.
+- confusion matrix (e.g. 0/O, 1/I, 8/B), and errors per position,
+- with rejects: share of reject crops read as no text, readable crops read as no text (false rejects).
 
 **End to end** (`anpr-eval-pipeline`)
 - plate read correctly from frame to text, on the test set, split by distance/size bucket,
-- every detection is read, as on the Pi, and classified: correct, wrong, unreadable plate, don't-care region, background; precision of the reads that pass and share of readable plates read right, over the OCR confidence threshold.
+- every detection is read, as on the Pi, and classified: correct, wrong, unreadable plate, don't-care region, background; precision of the reads that pass (a text at or above the OCR confidence threshold) and share of readable plates read right, over that threshold; reads with no text per category.
 
 Development decisions (checkpoints, thresholds, model variants) are made on the val split; the reported numbers are computed once on the session-split test set, which no decision has seen. Metrics are logged to Weights & Biases as described in section 3.
 
@@ -189,4 +192,4 @@ Development decisions (checkpoints, thresholds, model variants) are made on the 
 | 5 | Metric acceptance thresholds | After the first baseline run |
 | 6 | Perceptual-hash distance threshold for deduplication | **Decided 2026-11-04: 5** (kept at a distance of 5 or more), after a visual review of kept and dropped frames in 4 train sessions |
 | 7 | Mixed precision on the GTX 1660 Super | **Decided 2026-11-05: off.** Ultralytics disables AMP on this GPU; training is FP32 |
-| 8 | OCR model, input and training data | **Decided 2026-11-09:** fast-plate-ocr `cct-s-v2-global` fine-tuned with Keras 3 on torch, 128x64 rectified with an 8 % margin, 8 jittered crops per train plate; see section 7 |
+| 8 | OCR model, input and training data | **Decided 2026-11-09:** fast-plate-ocr `cct-s-v2-global` fine-tuned with Keras 3 on torch, 128x64 rectified with an 8 % margin, 8 jittered crops per train plate; **2026-11-10:** plus rejects (no text) from unreadable plates and `plate_ignore` regions of 70 px and more; see section 7 |

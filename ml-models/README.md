@@ -21,7 +21,7 @@ CVAT (labeling/cvat.ps1)               4 corners per plate, attributes       -> 
   │ anpr-validate                      checks the export                     -> labeling/exports/<batch>.jsonl
   ├──────────────────────────────────────┐
   │ anpr-yolo-dataset                    │ anpr-ocr-dataset  rectified crops of readable plates
-  │   YOLO-pose dataset at detector size │     (train: jittered copies)      -> datasets/<name>/
+  │   YOLO-pose dataset at detector size │     and rejects (train: jittered) -> datasets/<name>/
   │ anpr-train-detector                  │ anpr-train-ocr    fine-tunes fast-plate-ocr, exports ONNX
   │   -> runs/detector/<run>/            │     -> runs/ocr/<run>/
   │ anpr-eval-detector  (val, W&B)       │ anpr-eval-ocr     (val crops, W&B)
@@ -57,7 +57,7 @@ All commands run from `ml-models/` with `uv run <command>`; each has `--help`.
 | `anpr-yolo-dataset --name NAME --exports B1 B2` | Builds a YOLO-pose dataset from validated labels. |
 | `anpr-train-detector --config CONFIG` | Trains a detector run; resumes it if interrupted; evaluates and reports it when finished. |
 | `anpr-eval-detector --config CONFIG` | Re-evaluates a finished run and reports it to W&B. |
-| `anpr-ocr-dataset --name NAME --exports B1 B2` | Builds an OCR crop dataset from validated labels. |
+| `anpr-ocr-dataset --name NAME --exports B1 B2 [--reject unreadable ignore]` | Builds an OCR crop dataset from validated labels; `--reject` adds crops the OCR learns to answer with no text. |
 | `anpr-train-ocr --config CONFIG` | Fine-tunes an OCR run (or exports the pretrained model for a baseline config), exports `model.onnx`, evaluates and reports it. |
 | `anpr-eval-ocr --config CONFIG` | Re-evaluates a finished OCR run on the val crops and reports it to W&B. |
 | `anpr-eval-pipeline --detector CONFIG --ocr CONFIG` | Runs detector and OCR together on the val frames and classifies every read. |
@@ -151,28 +151,28 @@ directly comparable.
 ### New OCR version
 
 The same way, from the OCR configs (`configs\ocr_v0.yaml` is the pretrained baseline, `ocr_v1.yaml` the first
-fine-tuning):
+fine-tuning, `ocr_v2.yaml` the first with rejects):
 
 ```powershell
-$prev = "v1"; $new = "v2"
+$prev = "v2"; $new = "v3"
 Copy-Item "configs\ocr_$prev.yaml" "configs\ocr_$new.yaml"
 ```
 
 In `configs\ocr_<new>.yaml` change the header comment, `run_name`, and when the data or the crops change
-(new batches, margin, jitter) `dataset.name` to a new name such as `ocr_128x64_v2`. Then:
+(new batches, margin, jitter, `reject`) `dataset.name` to a new name such as `ocr_128x64_v2`. Then:
 
 ```powershell
 uv run anpr-train-ocr --config "configs\ocr_$new.yaml"
 uv run anpr-eval-ocr --config "configs\ocr_$new.yaml"     # only to re-evaluate a finished run
 ```
 
-A run takes about half an hour. If one is interrupted, delete its `runs\ocr\<run>` folder (after a look) and run
-the training command again.
+A run takes about half an hour (with rejects, nearly twice as many crops: up to an hour). If one is
+interrupted, delete its `runs\ocr\<run>` folder (after a look) and run the training command again.
 
 ### Detector and OCR together
 
 ```powershell
-$det = "v2"; $ocr = "v1"
+$det = "v2"; $ocr = "v2"
 uv run anpr-eval-pipeline --detector "configs\detector_$det.yaml" --ocr "configs\ocr_$ocr.yaml"
 ```
 

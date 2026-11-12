@@ -1,0 +1,37 @@
+# OCR v1: cct-s-v2-global fine-tuned on the readable plates of train_001 + train_002 (8 jittered crops each).
+# Same crops and val set (val_001 + val_002) as v0, so the difference to v0 measures the fine-tuning alone.
+run_name: v1
+
+dataset:
+  name: ocr_128x64_v0             # shared with v0
+  exports: [train_001, train_002, val_001, val_002]
+  size: [128, 64]
+  margin: 0.08
+  jitter_copies: 8
+  jitter_sigma: 0.015
+  seed: 42
+
+model:
+  name: cct_s_v2_global
+
+train:                            # fast-plate-ocr's CLI defaults, except where noted
+  epochs: 60                      # fine-tuning from a model that already reads ~90 % of the plates
+  batch: 64
+  lr: 0.0005                      # half the default (meant for training from scratch)
+  final_lr_factor: 0.01           # cosine decay to 1 % of lr
+  warmup_fraction: 0.05
+  weight_decay: 0.01
+  clipnorm: 1.0
+  label_smoothing: 0.01
+  plate_loss_weight: 0.9          # the rest goes to the region head (always Poland here)
+  ema: true                       # checkpoints hold the exponential moving average of the weights
+  monitor: val_plate_loss         # checkpoint selection and early stopping (val accuracy saturates near 1)
+  patience: 20
+  seed: 42
+
+wandb:
+  enabled: true
+  project: anpr-ocr
+  entity: null
+  mode: online
+  log_images: true

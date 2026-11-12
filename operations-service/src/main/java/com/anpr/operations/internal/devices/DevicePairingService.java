@@ -36,6 +36,21 @@ public class DevicePairingService {
                 () -> deviceRepository.save(Device.paired(deviceId, accountId, version)));
     }
 
+    /** The owner of a device; empty when the device is unknown or unpaired. */
+    public Optional<UUID> findOwner(UUID deviceId) {
+        return deviceRepository.findOwnerById(deviceId);
+    }
+
+    /** The owner of a device that sends data; until the pairing event arrives the message is retried. */
+    public UUID requireOwner(UUID deviceId) {
+        return findOwner(deviceId).orElseThrow(() -> new DeviceNotPairedException(deviceId));
+    }
+
+    /** The device currently paired with the account; an account has at most one. */
+    public Optional<UUID> findPairedDeviceId(UUID accountId) {
+        return deviceRepository.findPairedDeviceId(accountId);
+    }
+
     @Transactional
     public void unpair(UUID deviceId, long version) {
         Optional<Device> stored = deviceRepository.findById(deviceId);

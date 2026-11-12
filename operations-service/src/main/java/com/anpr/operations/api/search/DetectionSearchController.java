@@ -5,7 +5,7 @@ import com.anpr.operations.api.generated.model.DetectionPage;
 import com.anpr.operations.api.generated.model.DetectionSortField;
 import com.anpr.operations.api.generated.model.PlateSuggestionList;
 import com.anpr.operations.api.generated.model.SortDirection;
-import com.anpr.operations.internal.detections.DetectionSearchService;
+import com.anpr.operations.internal.detections.DetectionService;
 import com.anpr.operations.internal.detections.model.DetectionFilter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
@@ -18,7 +18,7 @@ import java.time.OffsetDateTime;
 @RestController
 @RequiredArgsConstructor
 public class DetectionSearchController implements AnprSearchApi {
-    private final DetectionSearchService searchService;
+    private final DetectionService detectionService;
     private final DetectionApiMapper mapper;
 
     @Override
@@ -26,12 +26,12 @@ public class DetectionSearchController implements AnprSearchApi {
                                                           Integer page, Integer size, DetectionSortField sort,
                                                           SortDirection direction) {
         PageRequest pageable = PageRequest.of(page, size, toSort(sort, direction));
-        return ResponseEntity.ok(mapper.toPage(searchService.search(new DetectionFilter(plate, from, to), pageable)));
+        return ResponseEntity.ok(mapper.toPage(detectionService.search(new DetectionFilter(plate, from, to), pageable)));
     }
 
     @Override
     public ResponseEntity<PlateSuggestionList> suggestPlates(String q, Integer limit) {
-        return ResponseEntity.ok(mapper.toSuggestions(searchService.suggestPlates(q, limit)));
+        return ResponseEntity.ok(mapper.toSuggestions(detectionService.suggestPlates(q, limit)));
     }
 
     private static Sort toSort(DetectionSortField field, SortDirection direction) {

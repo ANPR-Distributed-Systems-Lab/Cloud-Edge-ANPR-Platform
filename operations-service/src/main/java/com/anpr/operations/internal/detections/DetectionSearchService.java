@@ -1,7 +1,6 @@
 package com.anpr.operations.internal.detections;
 
-import com.anpr.operations.internal.alerts.model.Alert;
-import com.anpr.operations.internal.alerts.repository.AlertRepository;
+import com.anpr.operations.internal.alerts.AlertService;
 import com.anpr.operations.internal.detections.model.Detection;
 import com.anpr.operations.internal.detections.model.DetectionFilter;
 import com.anpr.operations.internal.detections.model.DetectionWithAlert;
@@ -21,7 +20,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -31,7 +29,7 @@ import java.util.stream.Collectors;
 @Transactional(readOnly = true)
 public class DetectionSearchService {
     private final DetectionRepository detectionRepository;
-    private final AlertRepository alertRepository;
+    private final AlertService alertService;
     private final CurrentAccount currentAccount;
 
     public Page<DetectionWithAlert> search(DetectionFilter filter, Pageable pageable) {
@@ -52,21 +50,12 @@ public class DetectionSearchService {
         }
 
         Page<Detection> page = detectionRepository.findAll(spec, pageable);
-        Map<String, UUID> alertIds = alertIdsByPlate(accountId, page.getContent());
+        Map<String, UUID> alertIds = alertService.alertIdsByPlate(accountId,
+                page.stream().map(Detection::getPlate).collect(Collectors.toSet()));
         return page.map(detection -> new DetectionWithAlert(detection, alertIds.get(detection.getPlate())));
     }
 
     public List<PlateSuggestionRow> suggestPlates(String prefix, int limit) {
         return detectionRepository.findPlateSuggestions(currentAccount.id(), prefix, Limit.of(limit));
-    }
-
-    /** One query for the whole page instead of one per detection. */
-    private Map<String, UUID> alertIdsByPlate(UUID accountId, List<Detection> detections) {
-        if (detections.isEmpty()) {
-            return Map.of();
-        }
-        Set<String> plates = detections.stream().map(Detection::getPlate).collect(Collectors.toSet());
-        return alertRepository.findByAccountIdAndPlateIn(accountId, plates).stream()
-                .collect(Collectors.toMap(Alert::getPlate, Alert::getAlertId));
     }
 }

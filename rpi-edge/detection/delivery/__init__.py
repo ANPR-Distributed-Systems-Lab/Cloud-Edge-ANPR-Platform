@@ -1,1 +1,1 @@
-"""Events, the local buffer and sending them in batches."""
+"""The local buffer of detections and sending them in batches."""

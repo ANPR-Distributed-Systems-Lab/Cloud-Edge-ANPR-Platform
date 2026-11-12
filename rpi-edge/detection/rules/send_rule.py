@@ -7,7 +7,7 @@
 """
 import numpy as np
 
-from detection.config.schema import MlSettings
+from detection.contract.configuration import MlConfiguration
 from detection.rules.plates import is_polish_plate
 from detection.vision.ocr import Reading
 
@@ -29,7 +29,7 @@ def is_clockwise_convex(corners: np.ndarray) -> bool:
     return True
 
 
-def geometry_rejection(corners: np.ndarray, frame_size: tuple[int, int], ml: MlSettings) -> str | None:
+def geometry_rejection(corners: np.ndarray, frame_size: tuple[int, int], ml: MlConfiguration) -> str | None:
     """Why the plate is not worth reading, or None. frame_size is (width, height)."""
     if not is_clockwise_convex(corners):
         return "bad_corners"
@@ -43,7 +43,7 @@ def geometry_rejection(corners: np.ndarray, frame_size: tuple[int, int], ml: MlS
     return None
 
 
-def reading_rejection(reading: Reading, ml: MlSettings) -> str | None:
+def reading_rejection(reading: Reading, ml: MlConfiguration) -> str | None:
     """Why the reading is not worth sending, or None."""
     if not reading.text:
         return "no_text"

@@ -10,7 +10,10 @@ import json
 import sqlite3
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
+
+from detection.contract.ingest import DetectionEvent
 
 RETENTION_DAYS = 30  # the ingest refuses detections older than this
 MAX_ROWS = 100_000  # of each table, about 50 MB; the oldest rows go first
@@ -34,6 +37,12 @@ CREATE TABLE IF NOT EXISTS quarantine (
 """
 
 
+@dataclass(frozen=True)
+class QueuedDetection:
+    row_id: int  # outbox row, to delete or quarantine it after the answer
+    event: DetectionEvent
+
+
 class Outbox:
     def __init__(self, path: Path, clock=time.time) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -50,17 +59,18 @@ class Outbox:
         with self._lock:
             self._db.close()
 
-    def add(self, detections: list[dict], detected_at: float) -> None:
+    def add(self, events: list[DetectionEvent]) -> None:
         """The detections of one frame, in one transaction."""
-        rows = [(d["detectionId"], detected_at, json.dumps(d, separators=(",", ":"))) for d in detections]
+        rows = [(e.detection_id, e.detected_at.timestamp(), json.dumps(e.to_document(), separators=(",", ":")))
+                for e in events]
         with self._lock, self._db:
             self._db.executemany("INSERT OR IGNORE INTO detections (detection_id, detected_at, body) VALUES (?, ?, ?)",
                                  rows)
 
-    def oldest(self, limit: int) -> list[tuple[int, dict]]:
+    def oldest(self, limit: int) -> list[QueuedDetection]:
         with self._lock:
             rows = self._db.execute("SELECT id, body FROM detections ORDER BY id LIMIT ?", (limit,)).fetchall()
-        return [(row_id, json.loads(body)) for row_id, body in rows]
+        return [QueuedDetection(row_id, DetectionEvent.from_document(json.loads(body))) for row_id, body in rows]
 
     def pending(self) -> int:
         with self._lock:

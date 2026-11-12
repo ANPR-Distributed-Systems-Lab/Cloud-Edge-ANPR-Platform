@@ -1,37 +1,38 @@
 import pytest
+from fakes import FakeApi, response
+from samples import configuration
+from test_outbox import event
 
 from detection.cloud.transport import NetworkError
-from detection.config.schema import EdgeSettings
-from detection.config.settings import DEFAULTS, merge
-from detection.delivery.events import batch_id
+from detection.contract.ingest import DetectionBatch
 from detection.delivery.outbox import Outbox
 from detection.delivery.sender import FORBIDDEN_WAIT_SECONDS, Sender
-from fakes import FakeApi, response
 
 URL = "https://api.example/api/v1/ingest/detections"
 
 
-class FixedSettings:
+class FixedConfiguration:
     def __init__(self, **batching):
-        self.current = EdgeSettings.from_document(merge(DEFAULTS, {"batching": batching}))
+        self.current = configuration(batching=batching)
 
 
 def setup(tmp_path, *answers, count=3, age=0.0, **batching):
     now = 1000.0
     box = Outbox(tmp_path / "o.sqlite3", clock=lambda: now)
-    box.add([{"detectionId": f"d{n}", "plate": "WA12345"} for n in range(count)], detected_at=now - age)
+    box.add([event(n, now - age) for n in range(count)])
     api = FakeApi(*answers)
-    settings = FixedSettings(**({"detectionsBatchSize": 3, "maxBatchDelaySeconds": 10} | batching))
-    return box, api, Sender(box, api, URL, settings)
+    config = FixedConfiguration(**({"detectionsBatchSize": 3, "maxBatchDelaySeconds": 10} | batching))
+    return box, api, Sender(box, api, URL, config)
 
 
 def test_a_full_batch_is_sent_and_deleted_on_202(tmp_path):
     box, api, sender = setup(tmp_path, response(202, {"accepted": 3}))
+    expected = DetectionBatch(tuple(q.event for q in box.oldest(3)))
     sender.send_once()
     [sent] = api.requests
     assert sent["method"] == "POST" and sent["url"] == URL
-    assert [d["detectionId"] for d in sent["body"]["detections"]] == ["d0", "d1", "d2"]
-    assert sent["body"]["batchId"] == batch_id(["d0", "d1", "d2"]) == sent["headers"]["X-Trace-Id"]
+    assert sent["body"] == expected.to_document()
+    assert sent["body"]["batchId"] == sent["headers"]["X-Trace-Id"]
     assert sent["headers"]["Content-Type"] == "application/json"
     assert box.pending() == 0
 
@@ -50,7 +51,7 @@ def test_only_the_detections_named_by_a_400_are_quarantined(tmp_path):
     problem = {"code": "VALIDATION_FAILED", "fields": [{"index": 1, "field": "detections[1].plate", "code": "PATTERN"}]}
     box, api, sender = setup(tmp_path, response(400, problem))
     assert sender.send_once() == 0.0  # the rest goes again right away
-    assert [body["detectionId"] for _, body in box.oldest(10)] == ["d0", "d2"]
+    assert [q.event.detection_id for q in box.oldest(10)] == ["id-0", "id-2"]
     assert box.quarantined() == 1
 
 
@@ -91,3 +92,10 @@ def test_nothing_to_send_makes_no_request(tmp_path):
     box, api, sender = setup(tmp_path, count=0)
     sender.send_once()
     assert api.requests == []
+
+
+def test_nothing_is_sent_before_the_first_configuration(tmp_path):
+    box, api, sender = setup(tmp_path)
+    sender.configuration.current = None
+    sender.send_once()
+    assert api.requests == [] and box.pending() == 3

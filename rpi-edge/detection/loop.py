@@ -1,43 +1,50 @@
-"""The frame loop: capture, pipeline, outbox; a summary every SUMMARY_SECONDS (counters only, no plate texts)."""
+"""The frame loop: capture, pipeline, outbox; a summary every SUMMARY_SECONDS (counters only, no plate texts).
+
+Each frame runs with the configuration and the models current at that moment: a new configuration re-applies the
+camera settings, and a new set of models (cloud/model_updater.py) is used from the next frame on.
+"""
 import threading
 import time
 from collections import Counter
 
 from common import system_info
 from common.jsonlog import log
-from detection.config.settings import Settings
+from detection.config.store import ConfigurationStore
 from detection.delivery.outbox import Outbox
 from detection.pipeline import FrameResult, Pipeline
 from detection.vision.camera import Camera
-from detection.vision.frame import Frame
+from detection.vision.models import ModelSlot
 from detection.vision.replay import ReplayCamera
 
 SUMMARY_SECONDS = 30.0
 CAMERA_RETRY_SECONDS = 5.0
 
 
-def run_loop(camera: Camera | ReplayCamera, pipeline: Pipeline, settings: Settings, outbox: Outbox,
-             stop: threading.Event) -> None:
-    """Analyses frames until stopped. Any failure closes the camera, which opens again a little later."""
+def run_loop(camera: Camera | ReplayCamera, pipeline: Pipeline, configuration: ConfigurationStore, models: ModelSlot,
+             outbox: Outbox, stop: threading.Event) -> None:
+    """Analyses frames until stopped; expects a configuration and models to be there. Any failure closes the
+    camera, which opens again a little later."""
     applied_version = None
     summary = Summary()
     while not stop.is_set():
         try:
+            current = configuration.current
             if not camera.is_open:
-                camera.open(settings.current.camera)
-                applied_version = settings.version
-            elif applied_version != settings.version:
-                camera.apply(settings.current.camera)
-                applied_version = settings.version
+                camera.open(current.camera)
+                applied_version = configuration.version
+            elif applied_version != configuration.version:
+                camera.apply(current.camera)
+                applied_version = configuration.version
             started = time.monotonic()
             frame = camera.capture()
-            result = pipeline.process(frame, settings.current)
-            _buffer(result, frame, outbox)
+            loaded = models.get()
+            result = pipeline.process(frame, current, loaded)
+            _buffer(result, outbox)
             summary.add(result, time.monotonic() - started)
             if summary.due():
                 log("detection_summary", **summary.flush(), pending=outbox.pending(), quarantined=outbox.quarantined(),
-                    temp_c=system_info.cpu_temp_c())
-            stop.wait(max(0.0, 1 / settings.current.camera.fps - (time.monotonic() - started)))
+                    detector=loaded.versions.detector, ocr=loaded.versions.ocr, temp_c=system_info.cpu_temp_c())
+            stop.wait(max(0.0, 1 / current.camera.fps - (time.monotonic() - started)))
         except Exception as e:  # the loop must outlive any camera or model error
             log("detection_loop_error", level="error", error=repr(e))
             camera.close()
@@ -45,13 +52,13 @@ def run_loop(camera: Camera | ReplayCamera, pipeline: Pipeline, settings: Settin
     camera.close()
 
 
-def _buffer(result: FrameResult, frame: Frame, outbox: Outbox) -> None:
-    if not result.detections:
+def _buffer(result: FrameResult, outbox: Outbox) -> None:
+    if not result.events:
         return
-    outbox.add(result.detections, frame.captured_at.timestamp())
-    for d in result.detections:  # the detectionId is the trace id of a detection
-        log("detection_buffered", traceId=d["detectionId"], frameId=d["frameId"],
-            ocrConfidence=d["ocrConfidence"], detectorConfidence=d["detectorConfidence"])
+    outbox.add(result.events)
+    for event in result.events:  # the detectionId is the trace id of a detection
+        log("detection_buffered", traceId=event.detection_id, frameId=event.frame_id,
+            ocrConfidence=event.ocr_confidence, detectorConfidence=event.detector_confidence)
 
 
 class Summary:
@@ -68,7 +75,7 @@ class Summary:
 
     def add(self, result: FrameResult, seconds: float) -> None:
         self.frames += 1
-        self.events += len(result.detections)
+        self.events += len(result.events)
         self.rejected.update(result.rejected)
         self.frame_ms.append(seconds * 1000)
         self.detect_ms.append(result.detect_ms)

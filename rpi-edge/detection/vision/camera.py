@@ -7,13 +7,13 @@ fresh measurements. picamera2 is imported when the camera opens, so the rest of 
 """
 import time
 from dataclasses import asdict
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import numpy as np
 
 from common import autoexposure
 from common.jsonlog import log
-from detection.config.schema import CameraSettings
+from detection.contract.configuration import CameraConfiguration
 from detection.vision.frame import Frame
 
 SIZE = (4056, 3040)  # the recording resolution of the training frames
@@ -33,14 +33,14 @@ MAX_SENSOR_AGE_NS = 10**10  # a sensor timestamp older than 10 s is not trusted 
 class Camera:
     def __init__(self) -> None:
         self.picam2 = None
-        self._settings: CameraSettings | None = None
+        self._camera: CameraConfiguration | None = None
         self._sensor_fps = SENSOR_MIN_FPS
 
     @property
     def is_open(self) -> bool:
         return self.picam2 is not None
 
-    def open(self, camera: CameraSettings) -> None:
+    def open(self, camera: CameraConfiguration) -> None:
         from libcamera import ColorSpace, Transform
         from picamera2 import Picamera2
 
@@ -58,27 +58,27 @@ class Camera:
         config["colour_space"] = ColorSpace.Sycc()
         self.picam2.configure(config)
         self.picam2.start()
-        self._settings = camera
+        self._camera = camera
         log("camera_started", size=list(SIZE), sensor_fps=self._sensor_fps, hflip=camera.hflip, vflip=camera.vflip,
             exposure_mode=camera.exposure.mode)
 
-    def apply(self, camera: CameraSettings) -> None:
+    def apply(self, camera: CameraConfiguration) -> None:
         """New settings: controls change live, flips and the sensor rate need a restart of the camera."""
-        if camera == self._settings:
+        if camera == self._camera:
             return
         if self._needs_restart(camera):
             self.close()
             self.open(camera)
             return
         self.picam2.set_controls(self._controls(camera))
-        self._settings = camera
+        self._camera = camera
         log("camera_settings_applied", exposure_mode=camera.exposure.mode)
 
-    def _needs_restart(self, camera: CameraSettings) -> bool:
-        flips_changed = (camera.hflip, camera.vflip) != (self._settings.hflip, self._settings.vflip)
+    def _needs_restart(self, camera: CameraConfiguration) -> bool:
+        flips_changed = (camera.hflip, camera.vflip) != (self._camera.hflip, self._camera.vflip)
         return flips_changed or _sensor_fps(camera) != self._sensor_fps
 
-    def _controls(self, camera: CameraSettings) -> dict:
+    def _controls(self, camera: CameraConfiguration) -> dict:
         from libcamera import controls as lc
 
         ex, wb = camera.exposure, camera.white_balance
@@ -105,7 +105,7 @@ class Camera:
         return Frame(image, _capture_time(metadata))
 
     def _auto_expose(self, image: np.ndarray, metadata: dict) -> None:
-        ex = self._settings.exposure
+        ex = self._camera.exposure
         if ex.mode == "MANUAL":
             return
         t = metadata.get("ExposureTime", ex.exposure_us)
@@ -132,7 +132,7 @@ class Camera:
             self.picam2 = None
 
 
-def _sensor_fps(camera: CameraSettings) -> float:
+def _sensor_fps(camera: CameraConfiguration) -> float:
     return max(SENSOR_MIN_FPS, camera.fps)
 
 
@@ -145,7 +145,7 @@ def _brightness(image: np.ndarray) -> float:
 
 def _capture_time(metadata: dict) -> datetime:
     """Wall-clock time of the exposure, from the sensor timestamp (boot clock) rather than the time of return."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     sensor_ns = metadata.get("SensorTimestamp")
     if not sensor_ns or not hasattr(time, "CLOCK_BOOTTIME"):
         return now

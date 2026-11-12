@@ -1,11 +1,11 @@
 import numpy as np
 import pytest
+from samples import configuration
 
-from detection.config.settings import default_settings
-from detection.vision.ocr import Reading
 from detection.rules.send_rule import Cooldown, geometry_rejection, is_clockwise_convex, plate_width, reading_rejection
+from detection.vision.ocr import Reading
 
-ML = default_settings().ml
+ML = configuration().ml
 FRAME = (4056, 3040)
 
 
@@ -56,7 +56,7 @@ def test_cooldown_suppresses_the_same_plate_until_it_expires():
     cooldown = Cooldown()
     assert cooldown.accept("WA12345", now=100.0, seconds=60)
     assert not cooldown.accept("WA12345", now=130.0, seconds=60)
-    assert cooldown.accept("KR1AB23", now=130.0, seconds=60)  # another plate is independent
+    assert cooldown.accept("KR1AC23", now=130.0, seconds=60)  # another plate is independent
     assert not cooldown.accept("WA12345", now=159.9, seconds=60)  # sightings do not extend the window
     assert cooldown.accept("WA12345", now=160.0, seconds=60)
 

@@ -1,1 +1,1 @@
-"""Access to the platform: HTTP, the device account, models and the device configuration."""
+"""Access to the platform: HTTP, the device account, the device configuration and the models."""

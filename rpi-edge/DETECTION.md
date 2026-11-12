@@ -9,11 +9,11 @@ camera (4056x3040 BGR) -> detector (ONNX) -> geometry rule -> rectified crop -> 
        -> cooldown per plate -> outbox (SQLite) -> sender -> POST /api/v1/ingest/detections (batches)
 ```
 
-Status (2026-11-12): detection, OCR, the outbox and batch sending run on the Pi against development servers
-(`tools/`), see [Measured on the Pi](#9-measured-on-the-pi). The AWS parts (Cognito sign-in, the real ingest,
-the model manifest and the configuration of device-management) are implemented and covered by unit tests, but
-not yet run against AWS, see [What is still missing](#10-what-is-still-missing). How to switch the Pi into this
-mode is in [README.md](README.md).
+Status (2026-11-12): detection, OCR, the outbox and batch sending run on the Pi against a development stand-in
+of the platform (`tools/dev_cloud.py`), see [Measured on the Pi](#9-measured-on-the-pi). The AWS side exists in
+code (the models bucket and route in `infrastructure/`, `GET /api/v1/device/models` and the configuration fields in
+device-management, Cognito sign-in here) and is covered by tests, but has not run against AWS yet, see
+[What is still missing](#10-what-is-still-missing). How to switch the Pi into this mode is in [README.md](README.md).
 
 ## 1. Decisions
 
@@ -25,11 +25,12 @@ Decided 2026-11-12. Each line is the decision, the reason follows in the section
 | Runtime | ONNX Runtime on the CPU for both models; opencv pinned to the version of the golden preprocessing checksums |
 | Preprocessing parity | Identical pixels to ml-models on x86; on the Pi the detector input is identical and the OCR crop within ±1 on at most 0.1 % of its values ([section 2](#2-pipeline)) |
 | Send rule | Geometry before the OCR, then format / confidence / readability per frame, then a cooldown per plate text; no tracking yet ([section 3](#3-send-rule)) |
-| Settings | Defaults < local `/config/detection.json` < the device configuration polled from device-management, with field names of its contract ([section 4](#4-configuration)) |
+| Configuration | Only the device configuration of device-management (thresholds, model versions, camera, batching), which also holds the defaults; the device keeps a copy and has no settings of its own ([section 4](#4-configuration)) |
 | Device identity | Cognito only (the `device` app client, username and password from pairing); no AWS keys on the device ([section 5](#5-device-account)) |
-| Models | A manifest from device-management with presigned S3 GET URLs; immutable versions; SHA-256 checked; cached on the SD card, so the device works offline ([section 6](#6-models)) |
+| Models | The versions are part of the configuration; device-management signs S3 download URLs for them; immutable versions, SHA-256 checked, cached on the SD card; a new version is swapped in without a restart ([section 6](#6-models)) |
 | Buffer | SQLite (WAL, `synchronous=FULL`) on the SD card; only detections to be sent; 30 days at most ([section 7](#7-outbox-and-sending)) |
 | Sending | Batches in the shape of the ingest contract; its section 4 decides delete / quarantine / retry ([section 7](#7-outbox-and-sending)) |
+| Messages | Every document exchanged with the platform is a frozen dataclass in `detection/contract/`, checked against its contract on the way in ([section 2](#2-pipeline)) |
 
 ## 2. Pipeline
 
@@ -40,15 +41,26 @@ detection/
   main.py         assembles the parts and starts the threads
   loop.py         the frame loop: capture, pipeline, outbox, a summary every 30 s
   pipeline.py     one frame -> the events to buffer (detector, send rule, OCR)
-  config/         environment.py (rpi-edge/.env), schema.py (typed settings, contract ranges), settings.py (layers)
-  vision/         frame, camera, replay, preprocess, onnx (sessions), detector, ocr
+  contract/       every message with the platform as a dataclass: configuration, models, ingest, problem
+  config/         environment.py (rpi-edge/.env), store.py (the configuration and its copy on the device)
+  vision/         frame, camera, replay, preprocess, onnx (sessions), detector, ocr, models (loaded set, swap)
   rules/          plates (Polish format), send_rule (geometry, reading, cooldown)
-  delivery/       events (ingest shape, ids), outbox (SQLite), sender (batches)
-  cloud/          transport (HTTP), cognito, api (token, trace id), model_store, config_poll
+  delivery/       outbox (SQLite), sender (batches)
+  cloud/          transport (HTTP), cognito, api (token, trace id), config_poll, model_store, model_updater
 ```
 
-Settings reach the code as immutable dataclasses (`settings.current.ml.ocr_min_confidence`); only `config/` sees
-the documents with the field names of the contract. Tests mirror the folders under `tests/`.
+What goes where, by type (all in `detection/contract/`):
+
+| Type | Direction | Endpoint | Used by |
+|---|---|---|---|
+| `DeviceConfiguration` | in | `GET /api/v1/device/config` | `config/store.py`, then every part reads `configuration.current` |
+| `DeviceModels` | in | `GET /api/v1/device/models` | `cloud/model_store.py` |
+| `DetectionEvent`, `DetectionBatch` | out | `POST /api/v1/ingest/detections` | `pipeline.py` creates events, `delivery/outbox.py` stores them, `delivery/sender.py` sends batches |
+| `Problem` | in | any error answer | the sender (quarantine by `fields[].index`), the poller and the model store (logged codes) |
+
+A document becomes a dataclass in `from_document()`, which checks every field against the range, choices or
+pattern of its contract (`contract/parsing.py`) and names each problem; nothing else in the mode touches a raw
+document. Tests mirror the folders under `tests/`.
 
 | Step | Module | What it does |
 |---|---|---|
@@ -57,7 +69,7 @@ the documents with the field names of the contract. Tests mirror the folders und
 | Crop | `vision/preprocess.py` | `rectify_plate()`: 128x64 RGB with an 8 % margin, from the corners on the full-resolution frame |
 | OCR | `vision/ocr.py` | OCR v3 (fast-plate-ocr `cct-s-v2-global` with the readability head): text, the weakest slot probability, P(readable) |
 | Rule | `rules/send_rule.py`, `rules/plates.py` | [Section 3](#3-send-rule) |
-| Event | `pipeline.py`, `delivery/events.py` | One detection per accepted plate in the shape of `docs/api/ingest-detections.md` |
+| Event | `pipeline.py`, `contract/ingest.py` | One `DetectionEvent` per accepted plate, in the shape of `docs/api/ingest-detections.md` |
 
 `vision/preprocess.py` is a copy of `ml-models/src/anpr_ml/common/preprocess.py`. `tests/vision/test_preprocess.py` holds
 the golden checksums of `ml-models/tests/test_common.py`. If the functions change in ml-models, they change here
@@ -74,7 +86,8 @@ The camera stream uses the colour space of the recordings (`Sycc`: sRGB transfer
 video configuration would be Rec709.
 
 The camera must be mounted as during the recording of the training data. This Pi recorded with both flips on,
-so its `/config/detection.json` sets `"camera": {"hflip": true, "vflip": true}`.
+so its configuration has `"camera": {"hflip": true, ..., "vflip": true}` (the default of device-management, which
+matches the devices built so far).
 
 ## 3. Send rule
 
@@ -95,9 +108,12 @@ Tracking a plate across frames with agreement between them is left out for now: 
 about 14 m between frames, which makes tracking unreliable, and the ML analysis found that agreement across frames
 added nothing for the OCR with rejects. It can be added in `pipeline.py` when real drives show repeated wrong reads.
 
-The format check follows the standard patterns (2- or 3-letter county code, then the vehicle part patterns of
-the registration regulation). It is **not verified** against the official text yet; the verified rules
-document is an open item of ml-models. Custom and special plates fail it and are not sent.
+The format check (`rules/plates.py`) implements `ml-models/PLATE_FORMAT.md`, written from the registration
+regulation (Dz.U. 2022 poz. 1847 with the amendment of 2023) and checked against its text: ordinary car plates
+(voivodeship letter, one of the 421 county codes of annex 13, a vehicle part in one of its layouts, no B, D, I, O,
+Z in the vehicle part, no run of digits all zeros) and individual plates pass (decided 2026-11-12). Reduced,
+motorcycle, temporary, historic, diplomatic and service plates fail and are not sent. 412 of the 415 labeled texts
+pass (PLATE_FORMAT.md, last section).
 
 The rejections are counted per reason in the `detection_summary` log line every 30 s (`too_small`,
 `near_edge`, `bad_corners`, `no_text`, `unreadable`, `bad_format`, `low_confidence`, `cooldown`), with the
@@ -107,32 +123,26 @@ median timings. That is the data for tuning the thresholds, without any plate te
 
 Two kinds, kept apart:
 
-- **Environment** (`rpi-edge/.env`, see `.env.example`): where the platform is (`API_BASE_URL`), the Cognito
-  region and the public `device` app client id, and development overrides (`INGEST_URL`, `MODELS_MANIFEST_URL`).
-  Fixed for the life of the container. Contains no secret.
-- **Settings**: thresholds, batching, camera. Three layers, each overriding the one before (`config/settings.py`):
-  1. the defaults in the code,
-  2. `/config/detection.json` on the device, edited by hand (the camera mounting, experiments),
-  3. the device configuration of device-management (`GET /api/v1/device/config`, polled every
-     `intervals.configPollSeconds` with `If-None-Match`), cached in `/config/cloud-config.json`, so it also
-     applies after a restart without network. Polling runs only when `API_BASE_URL` is set.
+- **Environment** (`rpi-edge/.env`, see `.env.example`): where the platform is (`API_BASE_URL`, required in this
+  mode), the Cognito region and the public `device` app client id (without them requests carry no token, for
+  `tools/dev_cloud.py`). Fixed for the life of the container. Contains no secret.
+- **The device configuration** of device-management (`GET /api/v1/device/config`, contract
+  `DeviceConfigurationResponse`, here `contract/configuration.py`): the send rule thresholds (`ml`), the model
+  versions (`models`), `plateCooldownSeconds`, `batching`, `intervals` and `camera` (exposure, white balance, fps,
+  the flips of the mounting). **Decided 2026-11-12: it is the only source.** device-management holds the defaults
+  of a new device (its `application.yaml`) and the owner edits them (View 4); the device has no defaults and no
+  settings file of its own.
 
-The field names are those of the device configuration contract (`device-management-api.yaml`): `ml`,
-`batching`, `plateCooldownSeconds`, `intervals`, `camera` (exposure and white balance with the upper-case enums
-of the contract). A layer that breaks a range of the contract is ignored as a whole and logged
-(`settings_layer_ignored`), so a typo never leaves a half-applied configuration. Settings change live; a change
-of the flips or the sensor rate restarts the camera.
+`config/store.py` keeps the last configuration received in `/config/device-config.json` (with its ETag), so after
+a restart without network the device runs on that copy. `cloud/config_poll.py` asks every
+`intervals.configPollSeconds` with `If-None-Match` (every 10 s until the first configuration arrives). A device
+that has never received one waits: it does not open the camera. A configuration outside the contract is refused
+as a whole and logged (`configuration_refused`, with the field problems), and the current one stays. A change
+applies from the next frame; a change of the flips or the sensor rate restarts the camera, a change of `models`
+starts the model update ([section 6](#6-models)).
 
-Two fields are not in the contract yet: `ml.readableMinProbability` and `ml.minEdgeMarginPx` (local defaults
-apply until device-management adds them). The contract's default thresholds (detector 0.5, OCR 0.6, width 60 px)
-also differ from the ML starting points used here (0.40, 0.80, 70 px). Once the device polls the cloud, the
-cloud values win.
-
-Example `/config/detection.json` on this Pi:
-
-```json
-{"camera": {"hflip": true, "vflip": true}}
-```
+During development the configuration comes from `tools/dev_cloud.py`, which serves `tools/dev-device-config.json`:
+a stand-in with the service defaults for this Pi, used only until the device runs against the cloud.
 
 ## 5. Device account
 
@@ -156,63 +166,54 @@ Example `/config/detection.json` on this Pi:
 
 ## 6. Models
 
-Weights are never in git (root `CLAUDE.md`). The device downloads the current models at startup.
+Weights are never in git (root `CLAUDE.md`). Decided 2026-11-12:
 
-**Distribution (target).**
+**Distribution.**
 
-- A dedicated S3 bucket for models, with immutable keys `models/{detector|ocr}/{version}/{file}`.
-  A version is never overwritten; a new model is a new version.
-- A pointer to the current version of each model, written by the publishing step (ml-models).
-- device-management answers `GET /api/v1/device/models` (device token) with the manifest of the current set. Per
-  file it gives the SHA-256, the size and a presigned GET URL (as it already does for image uploads). This way
-  the device needs no AWS credentials.
-
-The manifest the device expects (`cloud/model_store.py`):
+- ml-models publishes a version with `anpr-publish-model <detector|ocr> <run>` into the models bucket
+  (`infrastructure/envs/dev/models.tf`): the files under `models/{detector|ocr}/{version}/` and, last,
+  `release.json` with the SHA-256 and size of each. A version is written once and never changed.
+- Which versions a device runs is part of its configuration: `models.detector`, `models.ocr`. device-management
+  refuses a configuration that names an unpublished version (400 `MODEL_NOT_PUBLISHED`).
+- `GET /api/v1/device/models` (device token) answers with the versions of the device's configuration and, per
+  file, the SHA-256, the size and a presigned GET URL valid for 30 minutes (`contract/models.py`). The device
+  needs no AWS credentials. A configured version that is not published answers 409 `MODEL_NOT_PUBLISHED`.
 
 ```json
-{
-  "models": {
-    "detector": {"version": "v2", "files": {
-      "model.onnx": {"sha256": "<64 hex>", "size": 11576350, "url": "https://<bucket>.s3...?X-Amz-Signature=..."}}},
-    "ocr": {"version": "v3", "files": {
-      "model.onnx": {"sha256": "<64 hex>", "size": 4881344, "url": "..."},
-      "plate_config.yaml": {"sha256": "<64 hex>", "size": 314, "url": "..."}}}
-  }
-}
+{"deviceId": "...",
+ "detector": {"version": "v2", "files": [
+   {"name": "model.onnx", "sha256": "<64 hex>", "sizeBytes": 11576350, "url": "https://...", "expiresAt": "..."}]},
+ "ocr": {"version": "v3", "files": [
+   {"name": "model.onnx", ...}, {"name": "plate_config.yaml", ...}]}}
 ```
 
-A `url` may also be relative to the manifest (the development server). The bucket, the pointer and the
-endpoint do not exist yet; they belong to the infrastructure and device-management work.
+A `url` may also be relative to the endpoint (`tools/dev_cloud.py` serves the files itself).
 
-**On the device** (`state` volume, `/state/models/`):
+**On the device** (`state` volume, `/state/models/`, `cloud/model_store.py` and `cloud/model_updater.py`):
 
-1. At startup the manifest is fetched. Files whose version is not cached are downloaded to a `.part` file and
-   checked against their SHA-256. Only a complete set replaces `current.json`, so a power cut or a network error
-   during a download never leaves a half-installed set.
-2. The current and the previous version of each model are kept (a quick way back), older ones are removed.
-3. **Without network** the cached set from `current.json` is used, after its SHA-256 sums are checked again
-   (a damaged SD card is caught). **Without network and without a cache** the mode waits and retries (5 s,
-   doubling up to 5 min) and does not start the camera.
-4. Models are checked at startup only. A new model reaches the device with the next restart (every power-up in
-   the car).
+1. At startup the cached set of `current.json` is loaded at once, after its SHA-256 sums are checked again (a
+   damaged SD card is caught), whatever its versions: the device detects without network.
+2. The model updater (its own thread) compares the loaded versions with `models` of the configuration. When they
+   differ it fetches the download URLs, downloads what is not cached to `.part` files, checks their SHA-256 and
+   only then replaces `current.json`, so a power cut or a network error never leaves a half-installed set.
+3. It loads the new set (ONNX Runtime sessions) while the frame loop goes on with the old one, then swaps them
+   (`vision/models.py`): the next frame runs with the new models, without a restart and without a gap. The
+   cooldown per plate survives the swap.
+4. The current and the previous version of each model are kept, older ones are removed.
+5. A failure keeps the running set and is retried after 5 s, doubling up to 5 min (`models_update_failed`).
+   **Without network and without a cache** nothing can run: the mode waits and does not open the camera.
 
-**Exports in use**: detector v2 was exported ad hoc for the first tests (from `ml-models`, outside git):
-
-```bash
-# in ml-models, on a copy of runs/detector/v2/weights/best.pt, so nothing is written into runs/
-uv run python -c "from ultralytics import YOLO; YOLO('detector_v2.pt').export(format='onnx', imgsz=[960, 1280], nms=True, conf=0.1, iou=0.7, max_det=100, device='cpu')"
-```
-
-The output is `(1, 100, 18)`: on 15 val frames its detections and confidences match the PyTorch weights exactly
-(corners differ only where PyTorch clips them to the frame). A proper export command and the publishing of models
-belong to ml-models (its roadmap, item 8). OCR v3 is `ml-models/runs/ocr/v3/model.onnx` with its
-`plate_config.yaml`, as exported by `anpr-train-ocr`.
+**Exports**: detector v2 is `ml-models/runs/detector/v2/model.onnx`, written by `anpr-export-detector`
+(Ultralytics, `imgsz=[960, 1280]`, NMS inside with `conf=0.1, iou=0.7, max_det=100`; checked on 20 val frames: 39
+detections in both ONNX Runtime and PyTorch, corners within 0.024 px). Output `(1, 100, 18)`. OCR v3 is
+`ml-models/runs/ocr/v3/model.onnx` with its `plate_config.yaml`, as exported by `anpr-train-ocr`.
 
 ## 7. Outbox and sending
 
 **Outbox** (`delivery/outbox.py`, `/state/outbox.sqlite3`):
 
-- One row per accepted detection, the body exactly as it is sent. Each frame's detections are added in one
+- One row per accepted `DetectionEvent`, stored as the document that is sent and read back into the same
+  dataclass (`QueuedDetection`). Each frame's detections are added in one
   committed transaction with `synchronous=FULL`, so they survive a power cut.
 - Only what is to be sent is stored: no frames, no rejected readings (plates are personal data).
 - Rows older than 30 days are dropped (the ingest refuses them anyway), and each table keeps at most 100 000 rows,
@@ -258,6 +259,9 @@ Pi 5 (8 GB), detector v2 at 1280x960 and OCR v3, both FP32 on ONNX Runtime with 
 
 - In the replay, every stage of the send rule fired (`too_small`, `near_edge`, `unreadable`, `bad_format`,
   `low_confidence`, `cooldown`), and the accepted detections reached the mock ingest in batches (202).
+- After the move to the cloud-only configuration (same day, on the PC with `tools/dev_cloud.py` and a recorded
+  session): configuration from the stand-in, the three model files downloaded and checked, then on a restart both
+  taken from the copies on disk; 1.4-1.5 fps, batches accepted (202).
 - Store-and-forward: with the mock stopped, detections stayed in the outbox (`batch_not_sent`, backoff). After a
   `docker kill` (no clean shutdown) the container came back with them (`pending: 4`), and they went out in one
   batch once the mock was back.
@@ -270,10 +274,8 @@ Pi 5 (8 GB), detector v2 at 1280x960 and OCR v3, both FP32 on ONNX Runtime with 
 - **Full ingest body**: `location` (GPS module) and `imageKey` (upload of the frame through
   `POST /api/v1/images/presigned-urls`) are required by the ingest contract. Until they exist, a batch sent to the
   real ingest is refused with 400 and quarantined. That is why the real endpoint has not been called yet.
-- **Infrastructure**: the models bucket, the pointer to the current versions, `GET /api/v1/device/models` in
-  device-management, and a device account to sign in with.
-- **device-management contract**: `ml.readableMinProbability` and `ml.minEdgeMarginPx`, and defaults aligned
-  with the ML starting points.
-- **ml-models**: a detector export command and model publishing; the verified Polish plate rules; the final
-  thresholds and detector input size (the `detection_summary` timings on the Pi feed that benchmark).
+- **First run against AWS**: `terraform apply` of the models bucket and route, device-management deployed with
+  the new contract, models v2 and v3 published, the device paired and its credentials placed on the Pi.
+- **ml-models**: the final thresholds and detector input size (the `detection_summary` timings on the Pi feed that
+  benchmark).
 - **Device**: metrics (`POST /api/v1/device/metrics`), alerts, LCD / buzzer feedback in this mode.

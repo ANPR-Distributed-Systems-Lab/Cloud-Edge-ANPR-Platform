@@ -30,7 +30,8 @@ logs of whichever mode runs.
 
 `main.py` reads `EDGE_MODE` and starts `collection.main` or `detection.main`. Both modes keep their state in Docker
 volumes, so a mode switch or a rebuild loses nothing: `rpi-edge-config` (`/config`: the settings of both modes, the
-device credentials) and `rpi-edge-state` (`/state`: the outbox and the model cache of the detection mode).
+device credentials, the copy of the device configuration) and `rpi-edge-state` (`/state`: the outbox and the
+model cache of the detection mode).
 
 ## Layout
 
@@ -38,9 +39,9 @@ device credentials) and `rpi-edge-state` (`/state`: the outbox and the model cac
 main.py             entry point: runs the mode chosen by EDGE_MODE
 common/             shared by both modes: JSON logs, atomic JSON files, auto exposure, Pi health
 collection/         the data collection mode (web UI in collection/ui/)
-detection/          the detection mode: config/, vision/, rules/, delivery/, cloud/ (DETECTION.md, section 2)
+detection/          the detection mode: contract/, config/, vision/, rules/, delivery/, cloud/ (DETECTION.md, section 2)
 tests/              unit tests (pytest), no camera, network or GPU
-tools/              development tools: mock_ingest.py, serve_models.py, stress_test.py (power supply test)
+tools/              development tools: dev_cloud.py (the platform without AWS), stress_test.py (power supply test)
 ```
 
 ## Development
@@ -67,28 +68,31 @@ changes rebuild the image.
 
 ### The detection mode without AWS
 
-Run the two development servers on the PC and reach them from the Pi through an SSH tunnel, so the Pi needs nothing
-installed and no firewall rule changes:
+`tools/dev_cloud.py` stands in for the platform: it serves the device configuration from
+`tools/dev-device-config.json` (the defaults of device-management for this Pi; edit it to change thresholds,
+flips or model versions, the Pi picks the change up at its next poll), the models from a directory laid out like
+the models bucket, and accepts the batches of detections (printing counts, never plates). Run it on the PC and
+reach it from the Pi through an SSH tunnel, so the Pi needs nothing installed and no firewall rule changes:
 
 ```bash
-uv run python tools/serve_models.py <models-dir>     # port 8100, <models-dir>/detector/v2/model.onnx, ocr/v3/...
-uv run python tools/mock_ingest.py                   # port 8200
-ssh -N -R 8100:127.0.0.1:8100 -R 8200:127.0.0.1:8200 kamiljach@anpr-rpi.local
+uv run python tools/dev_cloud.py <models-dir>     # port 8100; <models-dir>/detector/v2/model.onnx, ocr/v3/model.onnx, ocr/v3/plate_config.yaml
+ssh -N -R 8100:127.0.0.1:8100 kamiljach@anpr-rpi.local
 ```
 
-(`127.0.0.1`, not `localhost`: Windows' ssh tries `::1` first, and the servers listen on IPv4 only.)
+(`127.0.0.1`, not `localhost`: Windows' ssh tries `::1` first, and the server listens on IPv4 only.)
 
 and in `.env`:
 
 ```
 EDGE_MODE=detection
-INGEST_URL=http://localhost:8200/api/v1/ingest/detections
-MODELS_MANIFEST_URL=http://localhost:8100/manifest.json
+API_BASE_URL=http://localhost:8100
 ```
 
-The container uses the host network, so `localhost` on the Pi is the end of the tunnel. Models are downloaded once
-and cached, so the Pi keeps detecting without the PC; the mock only has to be reachable when batches go out
-(they wait in the outbox otherwise). `mock_ingest.py --status 503` (or `400`) shows the retries (or the quarantine).
+The container uses the host network, so `localhost` on the Pi is the end of the tunnel. The configuration and the
+models are kept on the Pi, so it keeps detecting without the PC; the stand-in only has to be reachable when
+batches go out (they wait in the outbox otherwise). `dev_cloud.py --ingest-status 503` (or `400`) shows the
+retries (or the quarantine). The stand-in is for development only: against AWS, `API_BASE_URL` is the API Gateway
+and the Cognito settings are filled in (`.env.example`).
 
 ### Replaying frames
 
@@ -100,7 +104,7 @@ container (on the Pi, with the service stopped so that only one process analyses
 ```bash
 docker run --rm --privileged --network host -v /dev:/dev -v rpi-edge_rpi-edge-config:/config \
   -v rpi-edge_rpi-edge-state:/state -e EDGE_MODE=detection -e STATE_DIR=/state/replay \
-  -e INGEST_URL=http://localhost:8200/api/v1/ingest/detections -e MODELS_MANIFEST_URL=http://localhost:8100/manifest.json \
+  -e API_BASE_URL=http://localhost:8100 \
   -e REPLAY_DIR=/mnt/usb/rpi-edge/<session> --entrypoint sh rpi-edge-rpi-edge \
   -c 'mkdir -p /mnt/usb && mount -o ro /dev/sda1 /mnt/usb && exec /opt/venv/bin/python main.py'
 ```

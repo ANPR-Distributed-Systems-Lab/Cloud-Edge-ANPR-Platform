@@ -1,1 +1,1 @@
-"""Settings of the mode and where the cloud is."""
+"""The device configuration (from the cloud, with a copy on the device) and where the cloud is."""

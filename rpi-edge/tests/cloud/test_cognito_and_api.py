@@ -2,11 +2,11 @@
 import json
 
 import pytest
+from fakes import FakeHttp, response
 
 from detection.cloud.api import Api
 from detection.cloud.cognito import AuthError, CognitoAuth
 from detection.cloud.transport import NetworkError
-from fakes import FakeHttp, response
 
 BASE = "https://abc.execute-api.eu-central-1.amazonaws.com"
 

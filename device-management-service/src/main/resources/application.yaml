@@ -30,6 +30,7 @@ app:
         device-metrics: ${DEVICE_METRICS_TABLE:}
     s3:
       images-bucket: ${IMAGES_BUCKET:}
+      models-bucket: ${MODELS_BUCKET:}
     cognito:
       user-pool-id: ${USER_POOL_ID:}
       users-group: ${USERS_GROUP:}
@@ -51,8 +52,13 @@ app:
     max-capture-age: 30d
     max-clock-skew: 5m
 
+  models:
+    # Long enough for the largest model over a slow mobile connection.
+    download-url-validity: 30m
+
   # The configuration a new device starts with. Must satisfy the ranges of device-management-api.yaml
-  # (checked by DefaultSettingsIT). Exposure and white balance are the defaults of rpi-edge/settings.py.
+  # (checked by DefaultSettingsIT). This is the only place defaults live: a device runs on what this service
+  # gives it and keeps just a local copy (rpi-edge/DETECTION.md).
   configuration:
     defaults:
       plate-cooldown-seconds: 60
@@ -61,25 +67,37 @@ app:
         locations-batch-size: 100
         image-urls-batch-size: 20
         max-batch-delay-seconds: 10
+      # The send rule: starting points of the ml-models analysis on val (ML_ASSUMPTIONS.md, section 9); the
+      # final thresholds are still open there.
       ml:
-        detector-min-confidence: 0.5
-        ocr-min-confidence: 0.6
-        min-plate-width-px: 60
+        detector-min-confidence: 0.40
+        ocr-min-confidence: 0.80
+        readable-min-probability: 0.80
+        min-plate-width-px: 70
+        min-edge-margin-px: 10
+      # Must be published (ml-models, anpr-publish-model) before a device can download them.
+      models:
+        detector: v2
+        ocr: v3
       intervals:
         metrics-seconds: 60
         config-poll-seconds: 60
         alerts-poll-seconds: 60
         location-sample-seconds: 5
+      # Tested on the Pi: automatic exposure capped at 540 us, so passing plates stay sharp.
       camera:
         exposure:
-          mode: MANUAL
-          exposure-us: 2000
-          gain: 4.0
-          max-exposure-us: 4000
-          max-gain: 12.0
+          mode: AUTO
+          exposure-us: 500
+          gain: 2.0
+          max-exposure-us: 540
+          max-gain: 4.0
           target-brightness: 0.4
         white-balance:
           mode: DAYLIGHT
           red-gain: 2.0
           blue-gain: 1.6
         fps: 3.0
+        # The devices built so far hold the camera upside down.
+        hflip: true
+        vflip: true

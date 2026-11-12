@@ -21,6 +21,7 @@ app:
         device-metrics: device-metrics
     s3:
       images-bucket: local-images
+      models-bucket: local-models
     cognito:
       user-pool-id: local
       users-group: users

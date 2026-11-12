@@ -1,10 +1,10 @@
 openapi: 3.0.3
 info:
   title: Device Management Service API
-  version: 0.1.0
+  version: 0.2.0
   description: |
     Control plane of the edge fleet (Views 4 and 5): device configuration, device metrics, presigned image upload
-    URLs, and creating and deleting devices.
+    URLs, download URLs of the models a device runs, and creating and deleting devices.
 
     The device is never named in a path. It follows from the caller (docs/identity-and-access.md):
     - a device (X-Account-Type device) acts on itself: X-Account-Id is its deviceId,
@@ -32,6 +32,8 @@ tags:
     description: View 5 - health metrics sent by the device and charted for its owner
   - name: images
     description: Presigned URLs for uploading the photos of detections
+  - name: models
+    description: Download URLs of the model versions named in the configuration of the device
   - name: admin
     description: Creating and deleting devices (administrator, AWS Signature V4)
 
@@ -90,7 +92,9 @@ paths:
       summary: Replace the configuration of the device
       description: |
         Called by a person only. Replaces the whole configuration. Optimistic locking - a stale version returns 409
-        CONCURRENT_MODIFICATION. The device picks the change up at its next poll.
+        CONCURRENT_MODIFICATION. The device picks the change up at its next poll. A model version that is not
+        published returns 400 VALIDATION_FAILED with the field code MODEL_NOT_PUBLISHED (field models.detector or
+        models.ocr).
       requestBody:
         required: true
         content:
@@ -191,6 +195,30 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/device/models:
+    get:
+      tags: [models]
+      operationId: getDeviceModels
+      summary: Download URLs of the models of the device
+      description: |
+        Called by the device only, at startup and whenever its configuration names other model versions (models in
+        the configuration). For each model, the version of the configuration and, for each of its files, the SHA-256
+        and size to check the download against and a presigned GET URL, valid until expiresAt (30 minutes). Model
+        versions are immutable: a file once downloaded and checked never changes. A version named in the
+        configuration that is not published (yet) returns 409 MODEL_NOT_PUBLISHED; the device keeps the models it
+        has and asks again later.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeviceModelsResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/ModelNotPublished' }
         '500': { $ref: '#/components/responses/InternalError' }
 
   /api/v1/admin/devices:
@@ -294,6 +322,11 @@ components:
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
+    ModelNotPublished:
+      description: A model version named in the configuration of the device is not published (MODEL_NOT_PUBLISHED)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
     DeviceConflict:
       description: The username is taken (USERNAME_TAKEN) or the account already has a device (ACCOUNT_HAS_DEVICE)
       content:
@@ -362,7 +395,7 @@ components:
 
     DeviceConfigurationResponse:
       type: object
-      required: [deviceId, version, updatedAt, plateCooldownSeconds, batching, ml, intervals, camera]
+      required: [deviceId, version, updatedAt, plateCooldownSeconds, batching, ml, models, intervals, camera]
       properties:
         deviceId: { type: string, format: uuid }
         version:
@@ -373,12 +406,13 @@ components:
         plateCooldownSeconds: { $ref: '#/components/schemas/PlateCooldownSeconds' }
         batching: { $ref: '#/components/schemas/BatchingConfiguration' }
         ml: { $ref: '#/components/schemas/MlConfiguration' }
+        models: { $ref: '#/components/schemas/ModelsConfiguration' }
         intervals: { $ref: '#/components/schemas/IntervalsConfiguration' }
         camera: { $ref: '#/components/schemas/CameraConfiguration' }
 
     UpdateDeviceConfigurationRequest:
       type: object
-      required: [version, plateCooldownSeconds, batching, ml, intervals, camera]
+      required: [version, plateCooldownSeconds, batching, ml, models, intervals, camera]
       properties:
         version:
           type: integer
@@ -387,6 +421,7 @@ components:
         plateCooldownSeconds: { $ref: '#/components/schemas/PlateCooldownSeconds' }
         batching: { $ref: '#/components/schemas/BatchingConfiguration' }
         ml: { $ref: '#/components/schemas/MlConfiguration' }
+        models: { $ref: '#/components/schemas/ModelsConfiguration' }
         intervals: { $ref: '#/components/schemas/IntervalsConfiguration' }
         camera: { $ref: '#/components/schemas/CameraConfiguration' }
 
@@ -424,16 +459,55 @@ components:
 
     MlConfiguration:
       type: object
-      description: Thresholds below which the device drops a detection instead of sending it
-      required: [detectorMinConfidence, ocrMinConfidence, minPlateWidthPx]
+      description: |
+        The send rule of the device (rpi-edge/DETECTION.md): which detections it reads and sends. Geometry first
+        (minPlateWidthPx, minEdgeMarginPx), then the reading (readableMinProbability, the Polish plate format,
+        ocrMinConfidence), then plateCooldownSeconds per plate.
+      required: [detectorMinConfidence, ocrMinConfidence, readableMinProbability, minPlateWidthPx, minEdgeMarginPx]
       properties:
-        detectorMinConfidence: { type: number, format: double, minimum: 0, maximum: 1 }
-        ocrMinConfidence: { type: number, format: double, minimum: 0, maximum: 1 }
+        detectorMinConfidence:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          description: Detections of the plate detector below this confidence are dropped
+        ocrMinConfidence:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          description: Readings whose least certain character is below this probability are not sent
+        readableMinProbability:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          description: Readings the readability head of the OCR rates below this probability of being readable are not sent
         minPlateWidthPx:
           type: integer
           minimum: 10
           maximum: 4056
-          description: Plates narrower than this in the frame are ignored
+          description: Plates narrower than this in the frame (4056 px wide) are not read
+        minEdgeMarginPx:
+          type: integer
+          minimum: 0
+          maximum: 1000
+          description: Plates with a corner closer than this to the frame edge are not read (they may be cut off)
+
+    ModelsConfiguration:
+      type: object
+      description: |
+        The model versions the device runs. A version must be published (ml-models, anpr-publish-model); the device
+        downloads it through GET /api/v1/device/models and switches to it without a restart.
+      required: [detector, ocr]
+      properties:
+        detector: { $ref: '#/components/schemas/ModelVersion' }
+        ocr: { $ref: '#/components/schemas/ModelVersion' }
+
+    ModelVersion:
+      type: string
+      pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'
+      description: Name of a published version of the model, e.g. v3
 
     IntervalsConfiguration:
       type: object
@@ -463,11 +537,22 @@ components:
     CameraConfiguration:
       type: object
       description: Capture settings. The resolution is fixed at 4056x3040, which limits fps to 11.7.
-      required: [exposure, whiteBalance, fps]
+      required: [exposure, whiteBalance, fps, hflip, vflip]
       properties:
         exposure: { $ref: '#/components/schemas/ExposureConfiguration' }
         whiteBalance: { $ref: '#/components/schemas/WhiteBalanceConfiguration' }
-        fps: { type: number, format: double, minimum: 0.1, maximum: 11.7 }
+        fps:
+          type: number
+          format: double
+          minimum: 0.1
+          maximum: 11.7
+          description: The most frames the device analyses per second
+        hflip:
+          type: boolean
+          description: Mirror the image horizontally to undo how the camera is mounted; the models expect an unmirrored view
+        vflip:
+          type: boolean
+          description: Flip the image vertically; both flips together rotate it by 180 degrees
 
     ExposureConfiguration:
       type: object
@@ -617,6 +702,44 @@ components:
           type: string
           format: uri
           description: Presigned PUT URL; upload with the header Content-Type image/jpeg
+        expiresAt: { type: string, format: date-time }
+
+    # ---------------------------------------------------------------- models
+
+    DeviceModelsResponse:
+      type: object
+      required: [deviceId, detector, ocr]
+      properties:
+        deviceId: { type: string, format: uuid }
+        detector: { $ref: '#/components/schemas/ModelDownload' }
+        ocr: { $ref: '#/components/schemas/ModelDownload' }
+
+    ModelDownload:
+      type: object
+      required: [version, files]
+      properties:
+        version: { $ref: '#/components/schemas/ModelVersion' }
+        files:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/ModelFileDownload' }
+
+    ModelFileDownload:
+      type: object
+      required: [name, sha256, sizeBytes, url, expiresAt]
+      properties:
+        name:
+          type: string
+          description: File name, e.g. model.onnx
+        sha256:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: SHA-256 of the file, lower-case hex; a download that does not match is discarded
+        sizeBytes: { type: integer, format: int64, minimum: 0 }
+        url:
+          type: string
+          format: uri
+          description: Presigned GET URL; send no Authorization header
         expiresAt: { type: string, format: date-time }
 
     # ---------------------------------------------------------------- admin

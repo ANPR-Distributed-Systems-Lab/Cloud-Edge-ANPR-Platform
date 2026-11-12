@@ -87,6 +87,11 @@ output "storage_bucket_name" {
   value = module.storage_bucket.name
 }
 
+output "models_bucket_name" {
+  description = "Where anpr-publish-model (ml-models) uploads model versions."
+  value       = module.models_bucket.name
+}
+
 output "devices_table_name" {
   value = module.devices_table.name
 }

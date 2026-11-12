@@ -32,6 +32,9 @@ public class Detection {
     private double ocrConfidence;
     private double detectorConfidence;
     private String imageKey;
+    /** Set by the database when the row is stored (V4); the order of the live feed. */
+    @Column(insertable = false, updatable = false)
+    private OffsetDateTime ingestedAt;
 
     public static Detection create(UUID detectionId, UUID accountId, UUID deviceId, String plate,
                                    OffsetDateTime detectedAt, Point position, double ocrConfidence,

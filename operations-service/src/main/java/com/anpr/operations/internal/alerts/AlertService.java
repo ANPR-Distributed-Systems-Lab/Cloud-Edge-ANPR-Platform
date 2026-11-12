@@ -4,6 +4,7 @@ import com.anpr.operations.internal.alerts.model.Alert;
 import com.anpr.operations.internal.alerts.model.AlertFilter;
 import com.anpr.operations.internal.alerts.repository.AlertRepository;
 import com.anpr.operations.internal.alerts.repository.AlertSpecification;
+import com.anpr.operations.internal.alerts.repository.PlateAlert;
 import com.anpr.operations.internal.devices.repository.DeviceRepository;
 import com.anpr.operations.shared.error.BadRequestException;
 import com.anpr.operations.shared.error.ConflictException;
@@ -21,9 +22,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.OffsetDateTime;
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -91,6 +95,18 @@ public class AlertService {
             return new ForbiddenException(ErrorCodes.DEVICE_NOT_PAIRED, "The device is not paired with an account");
         });
         return alertRepository.findAllByAccountIdOrderByCreatedAtAsc(ownerId);
+    }
+
+    /**
+     * The alert of each plate, for the views that list detections (D14). One query for all plates of a page instead
+     * of one per detection.
+     */
+    public Map<String, UUID> alertIdsByPlate(UUID accountId, Collection<String> plates) {
+        if (plates.isEmpty()) {
+            return Map.of();
+        }
+        return alertRepository.findAlertIdsByPlates(accountId, plates).stream()
+                .collect(Collectors.toMap(PlateAlert::getPlate, PlateAlert::getAlertId));
     }
 
     private Alert findOwned(UUID alertId) {

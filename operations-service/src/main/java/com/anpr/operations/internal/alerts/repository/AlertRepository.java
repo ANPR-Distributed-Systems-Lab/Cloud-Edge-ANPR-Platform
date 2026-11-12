@@ -3,6 +3,7 @@ package com.anpr.operations.internal.alerts.repository;
 import com.anpr.operations.internal.alerts.model.Alert;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Query;
 
 import java.util.Collection;
 import java.util.List;
@@ -17,5 +18,10 @@ public interface AlertRepository extends JpaRepository<Alert, UUID>, JpaSpecific
 
     List<Alert> findAllByAccountIdOrderByCreatedAtAsc(UUID accountId);
 
-    List<Alert> findByAccountIdAndPlateIn(UUID accountId, Collection<String> plates);
+    /** Only the two columns: loading whole alerts would also compute lastDetectedAt (@Formula) for nothing. */
+    @Query("""
+            SELECT a.plate AS plate, a.alertId AS alertId FROM Alert a
+            WHERE a.accountId = :accountId AND a.plate IN :plates
+            """)
+    List<PlateAlert> findAlertIdsByPlates(UUID accountId, Collection<String> plates);
 }

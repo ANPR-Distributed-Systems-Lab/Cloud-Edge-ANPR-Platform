@@ -8,10 +8,10 @@ import socketserver
 import threading
 from http import server
 
-import settings as cfg
-from camera_service import CameraService
-from jsonlog import log
-from storage import Storage
+from collection import settings as cfg
+from collection.camera_service import CameraService
+from collection.storage import Storage
+from common.jsonlog import log
 
 UI_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui", "index.html")
 

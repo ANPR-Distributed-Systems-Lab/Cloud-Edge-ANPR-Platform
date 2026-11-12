@@ -1,12 +1,14 @@
 # Training data collection (rpi-edge)
 
-Tool for gathering road frames to train the plate detection/OCR models. It runs on the Raspberry Pi in a
-container and is controlled from a browser (laptop at the desk, phone in the car). Frames are saved as
-full-resolution JPEGs on a USB stick that can be read directly on Windows.
+Tool for gathering road frames to train the plate detection/OCR models: the `collection` mode of the image (the
+other mode is described in [DETECTION.md](DETECTION.md)). It runs on the Raspberry Pi in a container and is
+controlled from a browser (laptop at the desk, phone in the car). Frames are saved as full-resolution JPEGs on a
+USB stick that can be read directly on Windows. The code is in `collection/`.
 
 ## Run it
 
-From `rpi-edge/`, with the Docker context pointing at the Pi (see `RASPBERRY_PI_SETUP.md`):
+From `rpi-edge/`, with the Docker context pointing at the Pi (see `RASPBERRY_PI_SETUP.md`), and
+`EDGE_MODE=collection` in `.env` (or no `.env` at all, see [README.md](README.md)):
 
 ```bash
 docker compose up --build

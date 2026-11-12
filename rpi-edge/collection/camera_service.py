@@ -23,11 +23,10 @@ from libcamera import ColorSpace, Transform
 from libcamera import controls as lc
 from picamera2 import MappedArray, Picamera2
 
-import autoexposure
-import settings as cfg
-import system_info
-from jsonlog import log
-from storage import Storage
+from collection import settings as cfg
+from collection.storage import Storage
+from common import autoexposure, system_info
+from common.jsonlog import log
 
 PREVIEW_WIDTH = 960
 PREVIEW_QUALITY = 75

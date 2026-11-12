@@ -1,11 +1,27 @@
 [project]
 name = "rpi-edge"
-version = "0.1.0"
+version = "0.2.0"
 requires-python = ">=3.12"
 dependencies = [
+    # Hardware of the collection mode (GPIO, LCD) and Pi health
     "gpiozero>=2.0.1.post3",
     "lgpio>=0.2.2.0 ; sys_platform == 'linux'",
     "psutil>=7.2.2",
     "rplcd>=1.4.0",
     "smbus2>=0.6.1 ; sys_platform == 'linux'",
+    # Detection mode
+    # The version of Debian trixie's python3-numpy, which the apt-installed picamera2 and simplejpeg are built against.
+    "numpy==2.2.4",
+    # The version the golden preprocessing checksums are computed with (tests/test_preprocess.py, ml-models).
+    "opencv-python-headless==5.0.0.93",
+    "onnxruntime>=1.31",
+    "pyyaml>=6",
+    "requests>=2.32",
 ]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "tests"]  # tests: the shared fakes module

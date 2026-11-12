@@ -10,7 +10,7 @@ import shutil
 import subprocess
 import threading
 
-from jsonlog import log
+from common.jsonlog import log
 
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 USB_DEVICE = os.environ.get("USB_DEVICE")  # explicit device, e.g. /dev/sda1. Default: first USB disk found

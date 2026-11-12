@@ -1,5 +1,4 @@
 """Pi health values worth watching in a hot car on a power bank: CPU temperature and throttling flags."""
-import fcntl
 import os
 import struct
 
@@ -14,6 +13,8 @@ def cpu_temp_c() -> float | None:
 
 def _vcgencmd(command: str) -> str:
     """Firmware command through the /dev/vcio mailbox, what the vcgencmd binary does (the image has no binary)."""
+    import fcntl  # Linux only; imported here so the module also loads on a development PC
+
     buf = bytearray(263 * 4)
     struct.pack_into("<5I", buf, 0, len(buf), 0, 0x00030080, 1024, 0)
     struct.pack_into(f"{len(command) + 1}s", buf, 24, command.encode())

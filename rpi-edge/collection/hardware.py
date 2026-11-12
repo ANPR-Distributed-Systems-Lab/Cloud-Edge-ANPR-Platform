@@ -7,8 +7,8 @@ import socket
 import threading
 import time
 
-from camera_service import CameraService
-from jsonlog import log
+from collection.camera_service import CameraService
+from common.jsonlog import log
 
 LCD_COLS = 20
 LCD_ROWS = 4

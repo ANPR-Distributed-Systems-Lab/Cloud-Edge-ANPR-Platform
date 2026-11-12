@@ -5,7 +5,7 @@ import com.anpr.operations.internal.alerts.model.AlertFilter;
 import com.anpr.operations.internal.alerts.repository.AlertRepository;
 import com.anpr.operations.internal.alerts.repository.AlertSpecification;
 import com.anpr.operations.internal.alerts.repository.PlateAlert;
-import com.anpr.operations.internal.devices.repository.DeviceRepository;
+import com.anpr.operations.internal.devices.DevicePairingService;
 import com.anpr.operations.shared.error.BadRequestException;
 import com.anpr.operations.shared.error.ConflictException;
 import com.anpr.operations.shared.error.ErrorCodes;
@@ -37,7 +37,7 @@ public class AlertService {
     private final AlertRepository alertRepository;
     private final CurrentAccount currentAccount;
     private final Clock clock;
-    private final DeviceRepository deviceRepository;
+    private final DevicePairingService pairingService;
 
     @Transactional
     public Alert create(String plate, String alertText) {
@@ -90,7 +90,7 @@ public class AlertService {
 
     public List<Alert> listForDevice() {
         UUID deviceId = currentAccount.id();
-        UUID ownerId = deviceRepository.findOwnerById(deviceId).orElseThrow(() -> {
+        UUID ownerId = pairingService.findOwner(deviceId).orElseThrow(() -> {
             log.warn("Device {} asked for alerts but has no owner", deviceId);
             return new ForbiddenException(ErrorCodes.DEVICE_NOT_PAIRED, "The device is not paired with an account");
         });

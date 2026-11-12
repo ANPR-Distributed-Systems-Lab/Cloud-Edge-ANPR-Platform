@@ -3,7 +3,7 @@ package com.anpr.operations.internal.alerts;
 import com.anpr.operations.internal.alerts.model.Alert;
 import com.anpr.operations.internal.alerts.model.AlertFilter;
 import com.anpr.operations.internal.alerts.repository.AlertRepository;
-import com.anpr.operations.internal.devices.repository.DeviceRepository;
+import com.anpr.operations.internal.devices.DevicePairingService;
 import com.anpr.operations.shared.error.BadRequestException;
 import com.anpr.operations.shared.error.ConflictException;
 import com.anpr.operations.shared.error.ErrorCodes;
@@ -54,14 +54,14 @@ class AlertServiceTest {
     private CurrentAccount currentAccount;
 
     @Mock
-    private DeviceRepository deviceRepository;
+    private DevicePairingService pairingService;
 
     private AlertService alertService;
 
     @BeforeEach
     void setUp() {
         Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
-        alertService = new AlertService(alertRepository, currentAccount, clock, deviceRepository);
+        alertService = new AlertService(alertRepository, currentAccount, clock, pairingService);
         lenient().when(currentAccount.id()).thenReturn(ACCOUNT_ID);
     }
 
@@ -164,7 +164,7 @@ class AlertServiceTest {
     void listForDeviceReturnsAllAlertsOfTheOwner() {
         UUID owner = UUID.fromString("22222222-2222-2222-2222-222222222222");
         List<Alert> alerts = List.of(Alert.create(owner, "WA12345", null, OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC)));
-        when(deviceRepository.findOwnerById(ACCOUNT_ID)).thenReturn(Optional.of(owner));
+        when(pairingService.findOwner(ACCOUNT_ID)).thenReturn(Optional.of(owner));
         when(alertRepository.findAllByAccountIdOrderByCreatedAtAsc(owner)).thenReturn(alerts);
 
         assertThat(alertService.listForDevice()).isEqualTo(alerts);
@@ -172,7 +172,7 @@ class AlertServiceTest {
 
     @Test
     void listForDeviceWithNoOwnerIsForbidden() {
-        when(deviceRepository.findOwnerById(ACCOUNT_ID)).thenReturn(Optional.empty());
+        when(pairingService.findOwner(ACCOUNT_ID)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> alertService.listForDevice())
                 .isInstanceOf(ForbiddenException.class)

@@ -20,12 +20,15 @@ anpr-validate = "anpr_ml.labeling.validation:main"
 anpr-yolo-dataset = "anpr_ml.detector.dataset:main"
 anpr-train-detector = "anpr_ml.detector.train:main"
 anpr-eval-detector = "anpr_ml.detector.evaluate:main"
+anpr-export-detector = "anpr_ml.detector.export:main"
 # OCR
 anpr-ocr-dataset = "anpr_ml.ocr.dataset:main"
 anpr-train-ocr = "anpr_ml.ocr.train:main"
 anpr-eval-ocr = "anpr_ml.ocr.evaluate:main"
 # Detector + OCR
 anpr-eval-pipeline = "anpr_ml.pipeline:main"
+# Distribution to the edge devices
+anpr-publish-model = "anpr_ml.publish:main"
 
 [dependency-groups]
 dev = [
@@ -38,6 +41,8 @@ train = [
     "torchvision>=0.28",
     "ultralytics>=8.4",
     "wandb>=0.21",
+    # Ultralytics simplifies ONNX exports with it and would otherwise install it on the fly.
+    "onnxslim>=0.1.99",
 ]
 # OCR on Keras 3 with the torch backend (torch comes from `train`); TensorFlow is deliberately not installed.
 # fast-plate-ocr is pinned exactly because the ONNX export reuses two of its internal helpers.
@@ -50,6 +55,10 @@ ocr = [
     "onnx>=1.17",
     "onnxscript>=0.5",
 ]
+# Uploading model versions to the models bucket (anpr-publish-model).
+publish = [
+    "boto3>=1.40",
+]
 notebook = [
     "jupyterlab>=4.2",
     "jupytext>=1.16",
@@ -59,7 +68,7 @@ notebook = [
 ]
 
 [tool.uv]
-default-groups = ["dev", "train", "ocr", "notebook"]
+default-groups = ["dev", "train", "ocr", "publish", "notebook"]
 # The CUDA index has no macOS wheels; locking only for the platforms we run on keeps resolution possible.
 environments = ["sys_platform == 'win32'", "sys_platform == 'linux'"]
 # fast-plate-ocr and albumentations ask for opencv-python-headless, Ultralytics for opencv-python. Both ship the

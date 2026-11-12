@@ -35,6 +35,8 @@ When a decision changes, update those documents in the same change, so they neve
 - The test split is never enriched, never labeled with model suggestions and never used for a decision.
 - Datasets (`datasets/<name>/`) and runs (`runs/detector/<run>/`, `runs/ocr/<run>/`) are never overwritten: a
   change gets a new name.
+- Model files leave the PC only through `anpr-publish-model` into the models bucket (the developer's AWS
+  credentials); never the training data.
 - Images leave the PC only as the validation frames table (`anpr-detector`, decided 2026-11-05) and the
   validation crops table (`anpr-ocr`, decided 2026-11-09) in the private W&B projects. No training images,
   training crops or raw data are uploaded, and no frame, crop or plate text appears in anything committed to git.
@@ -61,9 +63,10 @@ When a decision changes, update those documents in the same change, so they neve
 
 - Windows 10, PowerShell (Git Bash is also available). Paths are relative to `ml-models/`.
 - Python 3.11, environment managed by **uv**, separate from `rpi-edge`. Groups `dev` (pytest, ruff), `train`
-  (torch 2.14 + CUDA 12.6 from the PyTorch index pinned in `pyproject.toml`, torchvision, ultralytics 8.4, wandb)
-  `ocr` (fast-plate-ocr 1.1.0, keras 3, albumentations, onnx, onnxscript, onnxruntime; no TensorFlow) and
-  `notebook` (jupyterlab, jupytext, ipykernel, matplotlib, pandas); all installed by default. Only `opencv-python`
+  (torch 2.14 + CUDA 12.6 from the PyTorch index pinned in `pyproject.toml`, torchvision, ultralytics 8.4, wandb,
+  onnxslim for the detector export), `ocr` (fast-plate-ocr 1.1.0, keras 3, albumentations, onnx, onnxscript,
+  onnxruntime; no TensorFlow), `publish` (boto3, for `anpr-publish-model`) and `notebook` (jupyterlab, jupytext,
+  ipykernel, matplotlib, pandas); all installed by default. Only `opencv-python`
   is installed: the `opencv-python-headless` that fast-plate-ocr and albumentations ask for is overridden away in
   `pyproject.toml`, because both ship the same `cv2` package.
 - The uv cache defaults to C: (too small for torch). Run uv with `$env:UV_CACHE_DIR = "G:\uv-cache"`, or set it
@@ -112,7 +115,7 @@ These refine the documents above (which are already updated):
   now: no enrichment. Later, use detector v0 predictions to pick such frames for training batches. Never enrich
   the test set; it must reflect the real distribution.
 
-## Current state (2026-11-11)
+## Current state (2026-11-12)
 
 - **train_001**: 300 frames from the train split, labeled by hand, validated with 0 errors. 180 `plate`,
   186 `plate_ignore`; plate width min 70, median 121, p90 236, max 525 px.
@@ -165,6 +168,18 @@ These refine the documents above (which are already updated):
   thresholds are not decided.
 - The OCR export loads the `.keras` file with `compile=False` after fast-plate-ocr's `_register_custom_keras()`,
   because a readability model's compile config names a loss of this package.
+- **Distribution to the devices (2026-11-12)**: `anpr-export-detector` writes `runs/detector/<run>/model.onnx`
+  (NMS inside, checked against best.pt on 20 val frames; v2 exported: 39 = 39 detections, corners within
+  0.024 px). `anpr-publish-model <detector|ocr> <run> --bucket <models bucket>` uploads a version with
+  `release.json`; the bucket (`infrastructure/envs/dev/models.tf`) is not applied yet, so nothing is published.
+  The device runs the versions named in its configuration in device-management (`models.detector`,
+  `models.ocr`, defaults v2 / v3); every send-rule threshold is part of that configuration too.
+- **Polish plate rules (2026-11-12)**: [PLATE_FORMAT.md](PLATE_FORMAT.md), written from the registration regulation
+  (Dz.U. 2022 poz. 1847 + Dz.U. 2023 poz. 1255) and verified against its PDF; scope decided: ordinary car plates
+  and individual plates. Implemented in `rpi-edge/detection/rules/plates.py`; 412 of 415 labeled texts pass.
+- **ARM preprocessing (2026-11-12)**: `rectify_plate()` differs by at most 1 grey level on the Pi;
+  ML_ASSUMPTIONS section 5 now says "identical on x86, within ±1 on ARM". `tests/test_common.py` keeps the x86
+  checksums.
 - **test_001 does not exist yet**: ~150 frames from the test split, labeled from scratch, never with
   model suggestions.
 - **val_002** is labeled (150 frames, 72 readable plates) and `configs/detector_v2.yaml` (v1 plus val_002 for
@@ -190,8 +205,8 @@ The order agreed so far; confirm each step with the project owner before startin
 7. OCR. **Done (2026-11-09):** rectified 128x64 crops with an 8 % margin and corner jitter (`anpr-ocr-dataset`),
    fast-plate-ocr `cct-s-v2-global` on Keras 3 + torch with ONNX export (`anpr-train-ocr`), baseline v0, the
    end-to-end evaluation (`anpr-eval-pipeline`) and notebooks 02 / 03. **Done (2026-11-10):** v1 trained, rejects
-   added, v2 trained. **Done (2026-11-11):** readability head (v3) trained. v3 chosen. Left: the thresholds,
-   the send rule on the Pi (geometry, format, agreement across frames), a
-   written and verified document of the Polish per-position character rules, then the final model.
-8. Export both models to ONNX (OCR: done by `anpr-train-ocr`). The S3 bucket for model distribution does not exist in `infrastructure/` yet; that
-   belongs to the infrastructure session.
+   added, v2 trained. **Done (2026-11-11):** readability head (v3) trained. v3 chosen. **Done (2026-11-12):** the
+   verified per-position rules (PLATE_FORMAT.md) and the send rule on the Pi (geometry, format, confidence,
+   P(readable), cooldown; no agreement across frames yet). Left: the thresholds, then the final model.
+8. **Done (2026-11-12):** both models export to ONNX (`anpr-export-detector`, `anpr-train-ocr`) and publish to the
+   models bucket (`anpr-publish-model`). Left: apply the bucket in AWS, then publish detector v2 and OCR v3.

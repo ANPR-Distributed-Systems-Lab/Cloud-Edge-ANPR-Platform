@@ -29,6 +29,10 @@ CVAT (labeling/cvat.ps1)               4 corners per plate, attributes       -> 
   │ anpr-eval-pipeline                 detector + OCR on the val frames      -> runs/pipeline/<det>__<ocr>/
   ▼
 notebooks/                             01 detector, 02 OCR, 03 both together
+
+runs/detector/<run>/  │ anpr-export-detector   ONNX with NMS, checked     -> runs/detector/<run>/model.onnx
+runs/<model>/<run>/   │ anpr-publish-model     to the models bucket       -> s3://<bucket>/models/<model>/<run>/
+                      ▼                        the devices download the versions their configuration names
 ```
 
 ## Setup
@@ -38,7 +42,7 @@ with CUDA 12.6 from the PyTorch index pinned in `pyproject.toml`. The OCR runs o
 TensorFlow is not installed, and the OCR code selects the backend itself before Keras is first imported.
 
 ```powershell
-uv sync                      # all dependency groups: dev, train, ocr, notebook
+uv sync                      # all dependency groups: dev, train, ocr, publish, notebook
 uv run wandb login           # once per machine, for experiment tracking
 ```
 
@@ -61,6 +65,8 @@ All commands run from `ml-models/` with `uv run <command>`; each has `--help`.
 | `anpr-train-ocr --config CONFIG` | Fine-tunes an OCR run (or exports the pretrained model for a baseline config), exports `model.onnx`, evaluates and reports it. |
 | `anpr-eval-ocr --config CONFIG` | Re-evaluates a finished OCR run on the val crops and reports it to W&B. |
 | `anpr-eval-pipeline --detector CONFIG --ocr CONFIG` | Runs detector and OCR together on the val frames and classifies every read. |
+| `anpr-export-detector --config CONFIG` | Exports a finished detector run to `model.onnx` for the edge node (NMS inside) and checks it against the PyTorch weights on val frames. |
+| `anpr-publish-model {detector,ocr} RUN --bucket BUCKET [--profile P]` | Uploads a run's edge files and `release.json` to the models bucket; a published version is never replaced. |
 
 Training always runs from a terminal, not from a notebook: a run must not depend on a kernel or an IDE. Detector
 runs can be resumed; OCR runs take minutes and are not resumable (an interrupted one is reported and has to be
@@ -179,6 +185,21 @@ uv run anpr-eval-pipeline --detector "configs\detector_$det.yaml" --ocr "configs
 
 The detector run must have been evaluated (`anpr-eval-detector`), since its operating threshold comes from there.
 
+### Publishing a version for the devices
+
+The edge devices download models from the models bucket (Terraform output `models_bucket_name` of
+`infrastructure/envs/dev`); the run name is the version. The upload uses your AWS credentials.
+
+```powershell
+uv run anpr-export-detector --config configs\detector_v2.yaml   # writes runs\detector\v2\model.onnx
+uv run anpr-publish-model detector v2 --bucket <models bucket>
+uv run anpr-publish-model ocr v3 --bucket <models bucket>      # model.onnx and plate_config.yaml of the run
+```
+
+Publishing changes no device: a device runs the versions of its configuration in device-management
+(`models.detector`, `models.ocr`, View 4), which accepts only published versions, and switches to new ones without
+a restart.
+
 ### Analysis of a version
 
 ```powershell
@@ -203,11 +224,13 @@ uv run jupytext --sync notebooks/02_ocr.py
 ```
 ml-models/
 ├── README.md, ML_ASSUMPTIONS.md, CLAUDE.md
+├── PLATE_FORMAT.md                 Polish registration numbers per position, from the regulation (verified)
 ├── pyproject.toml, uv.lock
 ├── src/anpr_ml/
 │   ├── paths.py                    every location the tooling reads or writes
 │   ├── tracking.py                 Weights & Biases: one W&B run per training run
 │   ├── pipeline.py                 anpr-eval-pipeline: detector + OCR on the val frames
+│   ├── publish.py                  anpr-publish-model: a version into the models bucket
 │   ├── analysis.py                 notebook helpers: plot style, version selection, config comparison
 │   ├── common/
 │   │   ├── geometry.py             plate width, boxes from corners, IoU
@@ -226,6 +249,7 @@ ml-models/
 │       ├── predict.py              inference on original frames, as on the Pi
 │       ├── metrics.py              P / R / F1, recall by plate width, corner error
 │       ├── evaluate.py             anpr-eval-detector
+│       ├── export.py               anpr-export-detector: ONNX for the edge node, checked against the weights
 │       └── report.py               evaluation report in W&B (metrics, validation frames table)
 │   └── ocr/
 │       ├── backend.py              Keras 3 on the torch backend
@@ -251,7 +275,7 @@ ml-models/
 ```
 
 Everything marked local only is gitignored. Recordings, frames and weights never go into git; model weights
-are distributed through S3.
+are distributed through S3 (`anpr-publish-model`).
 
 ## Notebooks
 

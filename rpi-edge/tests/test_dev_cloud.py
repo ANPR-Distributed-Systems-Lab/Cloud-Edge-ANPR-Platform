@@ -33,3 +33,15 @@ def test_a_missing_version_is_not_published(tmp_path):
     (tmp_path / "models").mkdir()
     status, answer = DevCloud(tmp_path / "models", default_config(), 202, False).models()
     assert status == 409 and answer["code"] == "MODEL_NOT_PUBLISHED"
+
+
+def test_the_alert_list_has_the_shape_of_operations_service(tmp_path):
+    from detection.contract.alerts import AlertList
+
+    (tmp_path / "alerts.json").write_text(json.dumps([{"alertId": "0192f3a4-7c1e-7000-b5c3-1d2e3f4a5b6c",
+                                                       "plate": "WA12345", "alertText": None}]))
+    body, etag = DevCloud(tmp_path, default_config(), 202, False, tmp_path / "alerts.json").alerts()
+    assert AlertList.from_document(json.loads(body)).items[0].plate == "WA12345"
+    assert etag.startswith('W/"')
+    empty, _ = DevCloud(tmp_path, default_config(), 202, False).alerts()
+    assert AlertList.from_document(json.loads(empty)).items == ()

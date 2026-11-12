@@ -6,6 +6,7 @@ camera settings, and a new set of models (cloud/model_updater.py) is used from t
 import threading
 import time
 from collections import Counter
+from collections.abc import Callable
 
 from common import system_info
 from common.jsonlog import log
@@ -21,9 +22,10 @@ CAMERA_RETRY_SECONDS = 5.0
 
 
 def run_loop(camera: Camera | ReplayCamera, pipeline: Pipeline, configuration: ConfigurationStore, models: ModelSlot,
-             outbox: Outbox, stop: threading.Event) -> None:
-    """Analyses frames until stopped; expects a configuration and models to be there. Any failure closes the
-    camera, which opens again a little later."""
+             outbox: Outbox, stop: threading.Event,
+             on_frame: Callable[[FrameResult], None] = lambda result: None) -> None:
+    """Analyses frames until stopped; expects a configuration and models to be there. on_frame gets every
+    result once it is buffered (feedback.py). Any failure closes the camera, which opens again a little later."""
     applied_version = None
     summary = Summary()
     while not stop.is_set():
@@ -40,6 +42,7 @@ def run_loop(camera: Camera | ReplayCamera, pipeline: Pipeline, configuration: C
             loaded = models.get()
             result = pipeline.process(frame, current, loaded)
             _buffer(result, outbox)
+            on_frame(result)
             summary.add(result, time.monotonic() - started)
             if summary.due():
                 log("detection_summary", **summary.flush(), pending=outbox.pending(), quarantined=outbox.quarantined(),

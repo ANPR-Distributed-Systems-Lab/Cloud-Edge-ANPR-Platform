@@ -1,8 +1,9 @@
 """A stand-in for the platform, to run the detection mode without AWS (README.md, "The detection mode without AWS").
 
-    python tools/dev_cloud.py <models-dir> [--config tools/dev-device-config.json] [--port 8100] [--ingest-status 202]
+    python tools/dev_cloud.py <models-dir> [--config tools/dev-device-config.json] [--alerts FILE] [--port 8100]
+                              [--ingest-status 202]
 
-Serves the three endpoints the device uses, under one base URL (API_BASE_URL=http://localhost:8100):
+Serves the endpoints the device uses, under one base URL (API_BASE_URL=http://localhost:8100):
 
   GET  /api/v1/device/config        the JSON file given by --config, re-read on every request; edit it to change
                                     the device's configuration (ETag and 304 as in device-management)
@@ -10,6 +11,9 @@ Serves the three endpoints the device uses, under one base URL (API_BASE_URL=htt
                                     laid out like the models bucket: <model>/<version>/<file>; 409 when missing
   POST /api/v1/ingest/detections    answers --ingest-status (202, or e.g. 503 / 400 to see retries / quarantine)
                                     and prints counts only, never plates (--show-plates to print them)
+  GET  /api/v1/alerts               the alert list of operations-service (AlertPage) from the JSON file given by
+                                    --alerts, re-read on every request (ETag and 304); an empty list without it.
+                                    The file holds plates: keep it outside the repository.
 
 No token is checked or needed. Standard library only.
 """
@@ -31,15 +35,21 @@ def default_config() -> Path:
 
 
 class DevCloud:
-    def __init__(self, models_dir: Path, config_file: Path, ingest_status: int, show_plates: bool) -> None:
+    def __init__(self, models_dir: Path, config_file: Path, ingest_status: int, show_plates: bool,
+                 alerts_file: Path | None = None) -> None:
         self.models_dir = models_dir
         self.config_file = config_file
         self.ingest_status = ingest_status
         self.show_plates = show_plates
+        self.alerts_file = alerts_file
 
     def configuration(self) -> tuple[bytes, str]:
-        body = self.config_file.read_bytes()
-        return body, '"' + hashlib.sha256(body).hexdigest()[:16] + '"'
+        return _with_etag(self.config_file.read_bytes())
+
+    def alerts(self) -> tuple[bytes, str]:
+        items = json.loads(self.alerts_file.read_bytes()) if self.alerts_file else []
+        page = {"items": items, "page": {"page": 0, "size": len(items), "totalElements": len(items), "totalPages": 1}}
+        return _with_etag(json.dumps(page).encode())
 
     def models(self) -> tuple[int, dict]:
         config = json.loads(self.config_file.read_bytes())
@@ -62,12 +72,16 @@ class DevCloud:
         return path if path.is_file() and self.models_dir in path.parents else None
 
 
+def _with_etag(body: bytes) -> tuple[bytes, str]:
+    return body, 'W/"' + hashlib.sha256(body).hexdigest()[:16] + '"'
+
+
 def handler(cloud: DevCloud):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             path = self.path.split("?")[0]
-            if path == "/api/v1/device/config":
-                body, etag = cloud.configuration()
+            if path in ("/api/v1/device/config", "/api/v1/alerts"):
+                body, etag = cloud.configuration() if path.endswith("config") else cloud.alerts()
                 if self.headers.get("If-None-Match") == etag:
                     self._send(304, b"", {"ETag": etag})
                 else:
@@ -115,12 +129,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("models_dir", type=Path)
     parser.add_argument("--config", type=Path, default=default_config())
+    parser.add_argument("--alerts", type=Path, help="JSON array of AlertResponse items (holds plates)")
     parser.add_argument("--port", type=int, default=8100)
     parser.add_argument("--host", default="127.0.0.1", help="0.0.0.0 to accept other machines (no auth!)")
     parser.add_argument("--ingest-status", type=int, default=202)
     parser.add_argument("--show-plates", action="store_true", help="print plate texts (personal data)")
     args = parser.parse_args()
-    cloud = DevCloud(args.models_dir.resolve(), args.config.resolve(), args.ingest_status, args.show_plates)
+    cloud = DevCloud(args.models_dir.resolve(), args.config.resolve(), args.ingest_status, args.show_plates,
+                     args.alerts.resolve() if args.alerts else None)
     status, answer = cloud.models()
     print(json.dumps({"models": status, "detector": answer.get("detector", {}).get("version"),
                       "ocr": answer.get("ocr", {}).get("version"), "config": str(cloud.config_file)}), flush=True)

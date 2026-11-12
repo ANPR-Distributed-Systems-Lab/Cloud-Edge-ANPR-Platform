@@ -3,64 +3,35 @@ confirms, the 4x20 LCD shows status and the IP address to open in the browser.
 
 Every part is optional: whatever fails to initialise is logged and skipped, the web UI keeps working.
 """
-import socket
 import threading
-import time
 
 from collection.camera_service import CameraService
 from common.jsonlog import log
+from common.peripherals import Beeper, Lcd, open_led
+from common.system_info import local_ip
 
-LCD_COLS = 20
-LCD_ROWS = 4
-
-
-def local_ip() -> str:
-    """IP of the interface that would be used to reach the network (no packet is sent)."""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        sock.connect(("192.0.2.1", 9))
-        return sock.getsockname()[0]
-    except OSError:
-        return "no network"
-    finally:
-        sock.close()
+BUTTON_PIN = 22
 
 
 class Hardware:
     def __init__(self, camera: CameraService) -> None:
         self.camera = camera
-        self.led = self.buzzer = self.button = self.lcd = None
         self._stop = threading.Event()
         self._busy = threading.Lock()
+        self.led, self.beeper, self.lcd = open_led(), Beeper.open(), Lcd.open()
+        self.button = None
         try:
-            from gpiozero import LED, Button, Buzzer
+            from gpiozero import Button
 
-            self.led, self.buzzer = LED(17), Buzzer(27)
-            self.button = Button(22, bounce_time=0.05)
+            self.button = Button(BUTTON_PIN, bounce_time=0.05)
             self.button.when_pressed = lambda: threading.Thread(target=self._toggle, daemon=True).start()
         except Exception as e:
             log("gpio_unavailable", error=repr(e))
-        try:
-            from RPLCD.i2c import CharLCD
-
-            self.lcd = CharLCD(i2c_expander="PCF8574", address=0x27, port=1, cols=LCD_COLS, rows=LCD_ROWS,
-                               dotsize=8, charmap="A02", auto_linebreaks=False)
-            self.lcd.clear()
-        except Exception as e:
-            log("lcd_unavailable", error=repr(e))
         threading.Thread(target=self._loop, name="hardware", daemon=True).start()
 
     def _beep(self, count: int = 1, length: float = 0.12) -> None:
-        if self.buzzer is None:
-            return
-        try:
-            for _ in range(count):
-                self.buzzer.on()
-                time.sleep(length)
-                self.buzzer.off()
-                time.sleep(0.1)
-        except Exception as e:
-            log("buzzer_error", error=repr(e))
+        if self.beeper is not None:
+            self.beeper.beep(count, length)
 
     def _toggle(self) -> None:
         if not self._busy.acquire(blocking=False):  # ignore presses while the previous one is still being handled
@@ -116,9 +87,7 @@ class Hardware:
                 if self.led is not None:
                     self.led.value = 1 if self.camera.recording_status() is not None else 0
                 if self.lcd is not None:
-                    for row, text in enumerate(self._lines()):
-                        self.lcd.cursor_pos = (row, 0)
-                        self.lcd.write_string(text.ljust(LCD_COLS)[:LCD_COLS])
+                    self.lcd.show(self._lines())
             except OSError as e:  # I2C glitches happen, the next second tries again
                 log("lcd_error", error=str(e))
             except Exception as e:

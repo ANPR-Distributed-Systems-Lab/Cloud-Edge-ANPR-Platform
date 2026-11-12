@@ -37,7 +37,7 @@ model cache of the detection mode).
 
 ```
 main.py             entry point: runs the mode chosen by EDGE_MODE
-common/             shared by both modes: JSON logs, atomic JSON files, auto exposure, Pi health
+common/             shared by both modes: JSON logs, atomic JSON files, auto exposure, Pi health, LCD / buzzer / LED
 collection/         the data collection mode (web UI in collection/ui/)
 detection/          the detection mode: contract/, config/, vision/, rules/, delivery/, cloud/ (DETECTION.md, section 2)
 tests/              unit tests (pytest), no camera, network or GPU
@@ -91,7 +91,8 @@ API_BASE_URL=http://localhost:8100
 The container uses the host network, so `localhost` on the Pi is the end of the tunnel. The configuration and the
 models are kept on the Pi, so it keeps detecting without the PC; the stand-in only has to be reachable when
 batches go out (they wait in the outbox otherwise). `dev_cloud.py --ingest-status 503` (or `400`) shows the
-retries (or the quarantine). The stand-in is for development only: against AWS, `API_BASE_URL` is the API Gateway
+retries (or the quarantine), and `--alerts <file>` serves an alert list (a JSON array of alerts in the shape of
+operations-service; it holds plates, so keep it outside the repository). The stand-in is for development only: against AWS, `API_BASE_URL` is the API Gateway
 and the Cognito settings are filled in (`.env.example`).
 
 ### Replaying frames

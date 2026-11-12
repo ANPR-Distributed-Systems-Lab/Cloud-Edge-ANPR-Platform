@@ -6,6 +6,7 @@ from pathlib import Path
 CONFIG_PATH = "/api/v1/device/config"
 MODELS_PATH = "/api/v1/device/models"
 INGEST_PATH = "/api/v1/ingest/detections"
+ALERTS_PATH = "/api/v1/alerts"
 
 
 class EnvironmentIncomplete(ValueError):
@@ -32,6 +33,10 @@ class Environment:
     @property
     def ingest_url(self) -> str:
         return self.api_base_url + INGEST_PATH
+
+    @property
+    def alerts_url(self) -> str:
+        return self.api_base_url + ALERTS_PATH
 
     @property
     def credentials_file(self) -> Path:

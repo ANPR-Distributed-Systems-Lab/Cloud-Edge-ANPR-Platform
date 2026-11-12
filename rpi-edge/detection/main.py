@@ -1,13 +1,15 @@
 """Detection mode: camera -> detector -> send rule -> OCR -> outbox -> batches to the cloud. See DETECTION.md.
 
 This module only assembles the parts. Threads: the frame loop (loop.py, this thread), the configuration poller,
-the model updater and the sender. The loop starts once there is a configuration (from the cloud or the copy on
-the device) and a set of models (the cache or a download).
+the model updater, the sender, the alert poller and the feedback in the car (LCD, buzzer, LED). The loop starts
+once there is a configuration (from the cloud or the copy on the device) and a set of models (the cache or a
+download).
 """
 import signal
 import threading
 
 from common.jsonlog import log
+from detection.cloud.alert_poll import AlertPoller
 from detection.cloud.api import Api
 from detection.cloud.cognito import CognitoAuth
 from detection.cloud.config_poll import ConfigPoller
@@ -18,8 +20,10 @@ from detection.config.environment import Environment, EnvironmentIncomplete
 from detection.config.store import ConfigurationStore
 from detection.delivery.outbox import Outbox
 from detection.delivery.sender import Sender
+from detection.feedback import Feedback, StatusSources
 from detection.loop import run_loop
 from detection.pipeline import Pipeline
+from detection.rules.alerts import AlertWatch
 from detection.vision.camera import Camera
 from detection.vision.models import ModelSlot
 from detection.vision.replay import ReplayCamera
@@ -39,7 +43,9 @@ def main() -> None:
     api = Api(http, auth, env.api_base_url)
     configuration = ConfigurationStore(env.config_dir)
     models = ModelSlot()
+    alerts = AlertWatch()
     outbox = Outbox(env.state_dir / "outbox.sqlite3")
+    feedback = Feedback.open(StatusSources(configuration, models, outbox, api.health, alerts))
     log("detection_starting", cloud=env.api_base_url, authenticated=auth is not None, pending=outbox.pending())
 
     workers = _start_workers({
@@ -47,10 +53,12 @@ def main() -> None:
         "model-updater": ModelUpdater(ModelStore(env.state_dir / "models", api, http, env.models_url),
                                       configuration, models).run,
         "sender": Sender(outbox, api, env.ingest_url, configuration).run,
+        "alert-poll": AlertPoller(api, env.alerts_url, alerts, configuration).run,
+        "feedback": feedback.run,
     }, stop)
     if configuration.wait_until_configured(stop) and models.wait(stop):
         camera = ReplayCamera(env.replay_dir) if env.replay_dir else Camera()
-        run_loop(camera, Pipeline(), configuration, models, outbox, stop)
+        run_loop(camera, Pipeline(), configuration, models, outbox, stop, on_frame=feedback.frame_done)
 
     log("shutting_down")
     for worker in workers:

@@ -62,8 +62,10 @@ def test_the_loop_buffers_events_and_reopens_a_failed_camera(tmp_path, monkeypat
     slot = ModelSlot()
     slot.put(LoadedModels(ModelVersions("v2", "v3"), None, None))
     camera, outbox, pipeline = FakeCamera(stop, frames=3), Outbox(tmp_path / "outbox.sqlite3"), OneEventPerFrame()
-    run_loop(camera, pipeline, store, slot, outbox, stop)
+    seen = []
+    run_loop(camera, pipeline, store, slot, outbox, stop, on_frame=seen.append)
     assert camera.opened == 2  # once at the start, once after the failure
+    assert len(seen) == 3  # every analysed frame reaches the feedback
     assert outbox.pending() == 3 and not camera.is_open
     assert pipeline.versions == [ModelVersions("v2", "v3")] * 3
 

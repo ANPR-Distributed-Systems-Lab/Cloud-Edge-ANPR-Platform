@@ -1,5 +1,6 @@
-"""Pi health values worth watching in a hot car on a power bank: CPU temperature and throttling flags."""
+"""Pi health values worth watching in a hot car on a power bank: CPU temperature, throttling flags, the IP."""
 import os
+import socket
 import struct
 
 
@@ -42,3 +43,15 @@ def power_flags() -> dict | None:
         "undervoltage_occurred": bool(flags & 0x10000),
         "throttled_occurred": bool(flags & 0x40000),
     }
+
+
+def local_ip() -> str:
+    """IP of the interface that would be used to reach the network (no packet is sent)."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.connect(("192.0.2.1", 9))
+        return sock.getsockname()[0]
+    except OSError:
+        return "no network"
+    finally:
+        sock.close()

@@ -10,10 +10,10 @@ camera (4056x3040 BGR) -> detector (ONNX) -> geometry rule -> rectified crop -> 
 ```
 
 Status (2026-11-12): detection, OCR, the outbox and batch sending run on the Pi against a development stand-in
-of the platform (`tools/dev_cloud.py`), see [Measured on the Pi](#9-measured-on-the-pi). The AWS side exists in
+of the platform (`tools/dev_cloud.py`), see [Measured on the Pi](#10-measured-on-the-pi). The AWS side exists in
 code (the models bucket and route in `infrastructure/`, `GET /api/v1/device/models` and the configuration fields in
 device-management, Cognito sign-in here) and is covered by tests, but has not run against AWS yet, see
-[What is still missing](#10-what-is-still-missing). How to switch the Pi into this mode is in [README.md](README.md).
+[What is still missing](#11-what-is-still-missing). How to switch the Pi into this mode is in [README.md](README.md).
 
 ## 1. Decisions
 
@@ -30,6 +30,7 @@ Decided 2026-11-12. Each line is the decision, the reason follows in the section
 | Models | The versions are part of the configuration; device-management signs S3 download URLs for them; immutable versions, SHA-256 checked, cached on the SD card; a new version is swapped in without a restart ([section 6](#6-models)) |
 | Buffer | SQLite (WAL, `synchronous=FULL`) on the SD card; only detections to be sent; 30 days at most ([section 7](#7-outbox-and-sending)) |
 | Sending | Batches in the shape of the ingest contract; its section 4 decides delete / quarantine / retry ([section 7](#7-outbox-and-sending)) |
+| Alerts | The owner's alert list is polled into memory; an accepted detection of a listed plate shows on the LCD with three beeps ([section 8](#8-alerts-and-the-driver)) |
 | Messages | Every document exchanged with the platform is a frozen dataclass in `detection/contract/`, checked against its contract on the way in ([section 2](#2-pipeline)) |
 
 ## 2. Pipeline
@@ -41,12 +42,14 @@ detection/
   main.py         assembles the parts and starts the threads
   loop.py         the frame loop: capture, pipeline, outbox, a summary every 30 s
   pipeline.py     one frame -> the events to buffer (detector, send rule, OCR)
-  contract/       every message with the platform as a dataclass: configuration, models, ingest, problem
+  feedback.py     the LCD, the buzzer and the LED in the car: status screen, alert screen
+  contract/       every message with the platform as a dataclass: configuration, models, alerts, ingest, problem
   config/         environment.py (rpi-edge/.env), store.py (the configuration and its copy on the device)
   vision/         frame, camera, replay, preprocess, onnx (sessions), detector, ocr, models (loaded set, swap)
-  rules/          plates (Polish format), send_rule (geometry, reading, cooldown)
+  rules/          plates (Polish format), send_rule (geometry, reading, cooldown), alerts (the alert list)
   delivery/       outbox (SQLite), sender (batches)
-  cloud/          transport (HTTP), cognito, api (token, trace id), config_poll, model_store, model_updater
+  cloud/          transport (HTTP), cognito, api (token, trace id, health), config_poll, model_store,
+                  model_updater, alert_poll
 ```
 
 What goes where, by type (all in `detection/contract/`):
@@ -55,6 +58,7 @@ What goes where, by type (all in `detection/contract/`):
 |---|---|---|---|
 | `DeviceConfiguration` | in | `GET /api/v1/device/config` | `config/store.py`, then every part reads `configuration.current` |
 | `DeviceModels` | in | `GET /api/v1/device/models` | `cloud/model_store.py` |
+| `AlertList` | in | `GET /api/v1/alerts` (operations-service) | `cloud/alert_poll.py`, kept by `rules/alerts.py` |
 | `DetectionEvent`, `DetectionBatch` | out | `POST /api/v1/ingest/detections` | `pipeline.py` creates events, `delivery/outbox.py` stores them, `delivery/sender.py` sends batches |
 | `Problem` | in | any error answer | the sender (quarantine by `fields[].index`), the poller and the model store (logged codes) |
 
@@ -240,15 +244,45 @@ detections in both ONNX Runtime and PyTorch, corners within 0.024 px). Output `(
 - The device has no battery-backed clock. Without network after a cold start, `detectedAt` may be wrong until the
   time syncs, and the ingest may refuse such detections (`TIMESTAMP_TOO_OLD` / `TIMESTAMP_IN_FUTURE`, quarantined).
 
-## 8. Logs
+## 8. Alerts and the driver
+
+Decided 2026-11-12, in the shape proposed then.
+
+**Alert list** (`cloud/alert_poll.py`, `rules/alerts.py`). The device polls `GET /api/v1/alerts` of
+operations-service every `intervals.alertsPollSeconds` with `If-None-Match`; a device gets every alert of its
+owner in one answer (`contract/alerts.py`: alert id, plate, alert text). The list holds plates, so it is kept in
+memory only: never on the SD card, never in the log. After a restart without network there are no alerts until
+the first successful poll (the screen shows `AL ?`).
+
+**Matching.** Only accepted detections are matched, after the send rule and the cooldown, so a passing car raises
+one alert, from a reading good enough to be sent. A match logs `alert_matched` with the `traceId` of the detection
+and the `alertId`, never the plate. The detection itself is sent as any other.
+
+**Feedback** (`detection/feedback.py`, peripherals in `common/peripherals.py`, the same as the collection mode):
+
+```
+DET 1.6fps D2 O3        frames per second (last 10 s), model versions; WAIT CONFIG / WAIT MODELS before
+NET ok      Q 3         the platform answers (ok / offline / --), detections waiting in the outbox
+GPS --      AL 5        GPS (not connected yet), alerts on the list (? before the first list)
+192.168.1.20 54C        the IP, the CPU temperature
+```
+
+- An alert replaces the status screen for 15 s: `*** ALERT ***`, the plate, the alert text over two lines (the LCD
+  has no Polish letters: ą becomes a, ł becomes l), and the buzzer gives three beeps of 0.4 s.
+- One short beep when the first frame is analysed: the mode is running. The LED is on while frames are analysed.
+- `NET` follows the latest request to the platform (`cloud/api.py`, `CloudHealth`): offline after a request
+  without an answer, ok after one with any answer.
+- Every part is optional: without an LCD, buzzer or LED the mode works the same and only the log tells.
+
+## 9. Logs
 
 JSON lines (`common/jsonlog.py`: `ts`, `level`, `event`, fields), per the project convention. In the business flow
 `traceId` is the `detectionId` (`detection_buffered`) or the `batchId` (`batch_sent`, `batch_failed`,
-`detections_quarantined`). Plate texts, frames, passwords, tokens and the query strings of presigned URLs are never
-logged. `detection_summary` every 30 s: frames, fps, events, rejections per reason, median timings, pending and
+`detections_quarantined`), and `alert_matched` carries the `traceId` of the detection. Plate texts (also of the
+alert list), frames, passwords, tokens and the query strings of presigned URLs are never logged. `detection_summary` every 30 s: frames, fps, events, rejections per reason, median timings, pending and
 quarantined detections, CPU temperature.
 
-## 9. Measured on the Pi
+## 10. Measured on the Pi
 
 Pi 5 (8 GB), detector v2 at 1280x960 and OCR v3, both FP32 on ONNX Runtime with 4 threads, 2026-11-12:
 
@@ -259,9 +293,13 @@ Pi 5 (8 GB), detector v2 at 1280x960 and OCR v3, both FP32 on ONNX Runtime with 
 
 - In the replay, every stage of the send rule fired (`too_small`, `near_edge`, `unreadable`, `bad_format`,
   `low_confidence`, `cooldown`), and the accepted detections reached the mock ingest in batches (202).
-- After the move to the cloud-only configuration (same day, on the PC with `tools/dev_cloud.py` and a recorded
-  session): configuration from the stand-in, the three model files downloaded and checked, then on a restart both
-  taken from the copies on disk; 1.4-1.5 fps, batches accepted (202).
+- After the move to the cloud-only configuration, with alerts and feedback (2026-11-13, on the Pi through the
+  SSH tunnel to `tools/dev_cloud.py`): 175 tests pass inside the image; a replay downloads the configuration, the
+  alert list and the three model files and sends its detections (1.4-1.5 fps, 202); with a plate of that replay put
+  on the alert list, the next replay raised `alert_matched`; on the live camera (1.6-1.75 fps) a new detector
+  version in the configuration was downloaded and swapped in without a change in the frame rate; with the tunnel
+  closed, a restart ran on the copies of the configuration and the models. The collection mode still starts with
+  the shared peripherals.
 - Store-and-forward: with the mock stopped, detections stayed in the outbox (`batch_not_sent`, backoff). After a
   `docker kill` (no clean shutdown) the container came back with them (`pending: 4`), and they went out in one
   batch once the mock was back.
@@ -269,7 +307,7 @@ Pi 5 (8 GB), detector v2 at 1280x960 and OCR v3, both FP32 on ONNX Runtime with 
   the detector input size (ml-models roadmap, item 6). Cheaper inference (INT8, a smaller input, fewer OCR threads)
   is not tried yet.
 
-## 10. What is still missing
+## 11. What is still missing
 
 - **Full ingest body**: `location` (GPS module) and `imageKey` (upload of the frame through
   `POST /api/v1/images/presigned-urls`) are required by the ingest contract. Until they exist, a batch sent to the
@@ -278,4 +316,4 @@ Pi 5 (8 GB), detector v2 at 1280x960 and OCR v3, both FP32 on ONNX Runtime with 
   the new contract, models v2 and v3 published, the device paired and its credentials placed on the Pi.
 - **ml-models**: the final thresholds and detector input size (the `detection_summary` timings on the Pi feed that
   benchmark).
-- **Device**: metrics (`POST /api/v1/device/metrics`), alerts, LCD / buzzer feedback in this mode.
+- **Device**: metrics (`POST /api/v1/device/metrics`); the GPS line of the screen.

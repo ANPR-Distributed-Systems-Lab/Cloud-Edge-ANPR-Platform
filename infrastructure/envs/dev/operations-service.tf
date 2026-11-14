@@ -128,7 +128,7 @@ module "operations_service" {
   desired_count = 0
 
   # Tasks the "start environment" workflow runs for this service (0 = never started automatically).
-  start_count = 1
+  start_count = 0
 }
 
 # ---------------------------------------------------------------- deploy role

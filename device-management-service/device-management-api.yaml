@@ -174,10 +174,12 @@ paths:
       operationId: createImageUploadUrls
       summary: Presigned URLs for uploading frame photos
       description: |
-        Called by the device only. For each frame the service assigns the S3 key
-        images/{deviceId}/{yyyy}/{MM}/{dd}/{frameId}.jpg (date of capturedAt, UTC) and signs a PUT URL for it.
-        The device uploads the JPEG with an HTTP PUT to uploadUrl with the header Content-Type: image/jpeg, and sends
-        imageKey unchanged in its detections. Asking again for the same frame returns the same key with a new URL.
+        Called by the device only. The S3 key of a photo is fixed by the contract,
+        images/{deviceId}/{yyyy}/{MM}/{dd}/{frameId}.jpg (date of capturedAt, UTC), so the device knows it before it
+        asks and sends it in its detections right away. For each frame the service signs a PUT URL for that key under
+        the prefix of the caller and returns the key; the device checks that it is the one it computed.
+        The device uploads the JPEG with an HTTP PUT to uploadUrl with the header Content-Type: image/jpeg.
+        Asking again for the same frame returns the same key with a new URL.
         A URL is valid for 30 minutes (expiresAt). capturedAt may be at most 5 minutes in the future and at most 30 days
         old, the same limits as detectedAt of a detection; validation is atomic.
       requestBody:
@@ -697,7 +699,7 @@ components:
         frameId: { type: string, format: uuid }
         imageKey:
           type: string
-          description: S3 key of the photo - send it unchanged as imageKey of the detections of this frame
+          description: S3 key of the photo, the same key the device computed and sent as imageKey of the detections of this frame
         uploadUrl:
           type: string
           format: uri

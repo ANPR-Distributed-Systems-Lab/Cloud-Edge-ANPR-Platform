@@ -89,7 +89,7 @@ The **owner** of a request is resolved like this: a `user` caller is its own own
 | The device and its configuration (`GET /api/v1/device`, `GET /api/v1/device/config`) | user and device | No device id in the path. A device gets itself (`X-Account-Id` = `deviceId`), a user gets the device owned by `X-Account-Id`. A device that is not registered (deleted) gets 404 |
 | Editing the configuration (`PUT /api/v1/device/config`), metrics chart (`GET /api/v1/device/metrics`) | user | The device owned by `X-Account-Id` |
 | Reporting metrics (`POST /api/v1/device/metrics`) | device | The calling device, which must be registered |
-| Image upload URLs (`/api/v1/images/presigned-urls`) | device | Keys are assigned by device-management under the caller's prefix, `images/{deviceId}/{yyyy}/{MM}/{dd}/{frameId}.jpg`; ingest refuses a key of another device |
+| Image upload URLs (`/api/v1/images/presigned-urls`) | device | The key follows the contract, `images/{deviceId}/{yyyy}/{MM}/{dd}/{frameId}.jpg`; the device computes it and device-management signs the URL for the key under the caller's prefix; ingest refuses a key of another device |
 | Creating and deleting devices (`/api/v1/admin/devices`) | administrator | IAM (SigV4) |
 
 ## 6. Where the link is stored

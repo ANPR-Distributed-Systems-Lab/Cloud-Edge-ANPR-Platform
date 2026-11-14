@@ -72,7 +72,7 @@ A frame with several plates is several detections that share `frameId` and `imag
 | `detections[].plate` | yes | `^[A-Z0-9]{3,8}$`: uppercase letters and digits, no spaces (same convention as the labeling guide) |
 | `detections[].ocrConfidence` | yes | Number, 0 to 1 inclusive |
 | `detections[].detectorConfidence` | yes | Number, 0 to 1 inclusive |
-| `detections[].imageKey` | yes | S3 object key (never a URL, presigned URLs expire and carry a signature): `images/{deviceId}/{yyyy}/{MM}/{dd}/{frameId}.jpg`, where `deviceId` is the calling device and `frameId` the frame of this detection. Assigned by device-management together with the presigned upload URL (`POST /api/v1/images/presigned-urls`), never built by the device |
+| `detections[].imageKey` | yes | S3 object key (never a URL, presigned URLs expire and carry a signature): `images/{deviceId}/{yyyy}/{MM}/{dd}/{frameId}.jpg`, where `deviceId` is the calling device, the date is the UTC date of the capture of the frame (`detectedAt`) and `frameId` the frame of this detection. The layout is fixed by this contract, so the device computes the key itself and can send the detection before the photo exists (section 7). device-management signs the upload URL (`POST /api/v1/images/presigned-urls`) for the same key and returns it, and the device checks that the two agree |
 | `detections[].corners` | yes | 4 points `[x, y]`, normalized to 0-1 on the image referenced by `imageKey`, order top-left, top-right, bottom-right, bottom-left (clockwise, convex, non-degenerate) |
 | `detections[].location` | yes | Object, see below |
 | `location.lat` | yes | Number, -90 to 90, WGS84 decimal degrees |
@@ -184,7 +184,11 @@ message is retried and, after the retries, moves to the DLQ. See
 ## 7. Image upload ordering
 
 The image may be uploaded to S3 after the detection arrives (separate local queues on the edge), so the
-UI must tolerate a missing object for a short time.
+UI must tolerate a missing object for a short time. The order on the edge: the detection is sent with the key it
+computed; in the background the edge asks device-management for the presigned URL of the frame, compares the key in
+the answer with its own (a difference is an error on the edge: the photo is not uploaded), and uploads the JPEG with
+`Content-Type: image/jpeg`. A photo that never arrives (a power cut before it was saved, a refused request) leaves a
+detection whose key points to no object.
 
 ## 8. Implementation status
 

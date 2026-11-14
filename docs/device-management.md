@@ -24,7 +24,7 @@ token a route is for (`infrastructure/envs/dev/api.tf`), and the service checks 
 | `PUT /api/v1/device/config` | person | Replaces the whole configuration; `version` from the last read, `409 CONCURRENT_MODIFICATION` when stale |
 | `POST /api/v1/device/metrics` | device | 1 to 100 measurements, validated as a whole; `204` |
 | `GET /api/v1/device/metrics` | person | The `limit` (up to 1000) most recent measurements of the last 7 days, optionally before `before`, oldest first |
-| `POST /api/v1/images/presigned-urls` | device | 1 to 100 frames; a key `images/{deviceId}/{yyyy}/{MM}/{dd}/{frameId}.jpg` and a PUT URL valid for 30 minutes per frame |
+| `POST /api/v1/images/presigned-urls` | device | 1 to 100 frames; the PUT URL, valid for 30 minutes, of the key `images/{deviceId}/{yyyy}/{MM}/{dd}/{frameId}.jpg` of each (the device computes the same key and sends its detection before the upload) |
 | `GET /api/v1/device/models` | device | The model versions of its configuration; per file the SHA-256, the size and a GET URL valid for 30 minutes; `409 MODEL_NOT_PUBLISHED` for a version that is not published (section 3) |
 | `POST /api/v1/admin/devices` | administrator (SigV4) | Creates a device for a person |
 | `DELETE /api/v1/admin/devices/{deviceId}` | administrator (SigV4) | Deletes a device |

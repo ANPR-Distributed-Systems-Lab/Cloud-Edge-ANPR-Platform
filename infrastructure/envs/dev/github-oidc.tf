@@ -39,3 +39,25 @@ module "terraform_role" {
   github_repository_id = var.github_repository_id
   github_environment   = "${var.environment}-terraform"
 }
+
+# Role of the "Reset environment" workflow: empties the data of the environment. It has its own GitHub
+# environment, so that only trusted branches can use this destructive role (see the module).
+module "reset_role" {
+  source = "../../modules/github-reset-role"
+
+  name                 = "${local.name}-reset"
+  oidc_provider_arn    = aws_iam_openid_connect_provider.github.arn
+  github_repository    = var.github_repository
+  github_owner_id      = var.github_owner_id
+  github_repository_id = var.github_repository_id
+  github_environment   = "${var.environment}-reset"
+
+  name_prefix        = local.name
+  ecs_cluster_name   = module.cluster.cluster_name
+  storage_bucket_arn = module.storage_bucket.arn
+  user_pool_arn      = module.user_pool.user_pool_arn
+  database_parameter_arns = [
+    module.operations_rds.ssm_parameter_arns["SPRING_DATASOURCE_URL"],
+    module.operations_rds.ssm_parameter_arns["SPRING_DATASOURCE_USERNAME"],
+  ]
+}

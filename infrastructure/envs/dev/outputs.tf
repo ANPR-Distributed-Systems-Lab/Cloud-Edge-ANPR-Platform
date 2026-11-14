@@ -118,3 +118,13 @@ output "terraform_role_arn" {
   description = "Value for the AWS_TERRAFORM_ROLE_ARN variable in the GitHub environment dev-terraform."
   value       = module.terraform_role.role_arn
 }
+
+output "db_access_host_instance_id" {
+  description = "Target of the SSM sessions to the databases (scripts/db_tunnel.py finds it by itself)."
+  value       = module.db_access_host.instance_id
+}
+
+output "reset_role_arn" {
+  description = "Set as AWS_RESET_ROLE_ARN in the GitHub environment dev-reset."
+  value       = module.reset_role.role_arn
+}

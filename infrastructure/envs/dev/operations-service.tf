@@ -11,7 +11,7 @@ module "operations_ecr" {
 }
 
 # ---------------------------------------------------------------- database
-# Private: reachable only from the service's tasks.
+# Private: reachable only from the service's tasks and from the database access host (db-access.tf).
 # Developers work against a local PostgreSQL (docker-compose); this one serves the deployed environment.
 
 module "operations_rds" {
@@ -21,7 +21,10 @@ module "operations_rds" {
   vpc_id     = module.network.vpc_id
   subnet_ids = module.network.private_subnet_ids
 
-  allowed_security_group_ids = [module.operations_service.task_security_group_id]
+  allowed_security_group_ids = [
+    module.operations_service.task_security_group_id,
+    module.db_access_host.security_group_id,
+  ]
 
   ssm_prefix      = "/anpr/${var.environment}/operations-service"
   database_name   = "operations"

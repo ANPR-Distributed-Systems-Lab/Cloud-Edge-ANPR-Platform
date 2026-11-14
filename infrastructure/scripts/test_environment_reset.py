@@ -152,6 +152,25 @@ def test_empties_only_the_storage_bucket(reset):
     reset.empty_bucket()
 
 
+def test_the_summary_says_whether_anything_was_changed(monkeypatch, tmp_path, capsys):
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    reset = make_reset(monkeypatch, dry_run=True)
+    reset.record("anpr-dev-devices", "2 item(s) would be deleted")
+
+    reset.write_summary()
+
+    text = summary.read_text(encoding="utf-8")
+    assert "Dry run: NOTHING was changed" in text
+    assert "| anpr-dev-devices | 2 item(s) would be deleted |" in text
+    assert "typed in the field" in text
+
+    reset.dry_run = False
+    reset.write_summary()
+    assert "Reset done" in summary.read_text(encoding="utf-8")
+    assert "create your account again" in capsys.readouterr().out
+
+
 def test_nothing_is_deleted_without_the_confirmation(monkeypatch):
     created = []
     monkeypatch.setattr(environment_reset, "Reset", lambda prefix, dry_run: created.append(dry_run) or type("R", (), {"run": lambda self: None})())

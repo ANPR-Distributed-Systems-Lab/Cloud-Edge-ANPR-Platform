@@ -35,9 +35,9 @@ variable "subnet_id" {
 }
 
 variable "instance_type" {
-  description = "Graviton, the cheapest size: the host only forwards ports and runs psql."
+  description = "Graviton. The host only forwards ports and runs psql, but installing packages needs more than the 0.5 GB of a t4g.nano (dnf is killed)."
   type        = string
-  default     = "t4g.nano"
+  default     = "t4g.micro"
 }
 
 variable "database_port" {
@@ -144,11 +144,15 @@ resource "aws_instance" "this" {
   iam_instance_profile        = aws_iam_instance_profile.this.name
   associate_public_ip_address = true
 
-  # Installed once, at the first boot: psql is what the reset and manual checks run.
+  # Installed at the first boot: psql is what the reset and manual checks run. The host keeps no
+  # state, so a changed script replaces it.
   user_data = <<-EOT
     #!/bin/bash
+    set -euo pipefail
     dnf install -y postgresql17
   EOT
+
+  user_data_replace_on_change = true
 
   metadata_options {
     http_tokens = "required" # IMDSv2 only
@@ -169,7 +173,7 @@ resource "aws_instance" "this" {
 
   lifecycle {
     # A newer image is published every few weeks; the instance is not replaced because of it.
-    ignore_changes = [ami, user_data]
+    ignore_changes = [ami]
   }
 }
 

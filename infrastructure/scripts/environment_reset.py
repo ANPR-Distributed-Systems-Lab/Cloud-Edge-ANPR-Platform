@@ -49,6 +49,7 @@ def reset_schema_script(host, port, database, user, region, password_parameter):
     connection = f"host={host} port={port} dbname={database} user={user} sslmode=require"
     return [
         "set -euo pipefail",
+        "cloud-init status --wait > /dev/null || true  # a host that has just booted is still installing psql",
         "command -v psql >/dev/null || { echo 'psql is not installed on this host' >&2; exit 1; }",
         f"export PGPASSWORD=\"$(aws ssm get-parameter --region {region} --with-decryption "
         f"--name {shlex.quote(password_parameter)} --query Parameter.Value --output text)\"",

@@ -2,7 +2,9 @@
 
     python db_tunnel.py [--profile dev] [--port 5433] [--database anpr-dev-operations]
 
-While it runs, connect pgAdmin (or psql) to localhost:<port>. Ctrl+C closes the tunnel.
+While it runs, connect pgAdmin (or psql) to 127.0.0.1:<port>. Ctrl+C closes the tunnel.
+Use the address 127.0.0.1, not the name localhost: the tunnel listens on IPv4 only, and clients try the IPv6
+address of localhost first, which times out.
 The database and the access host must be running (the "Start environment" workflow switches both on).
 
 The script prints the user name and the command that reads the password; it never prints the password.
@@ -65,7 +67,7 @@ def main():
 
     profile_option = f" --profile {args.profile}" if args.profile else ""
     print(f"Tunnel to {args.database} through {host}.")
-    print(f"  pgAdmin / psql: host localhost, port {args.port}, user {user}")
+    print(f"  pgAdmin / psql: host 127.0.0.1 (not localhost), port {args.port}, database operations, user {user}")
     print("  password: aws ssm get-parameter --with-decryption --query Parameter.Value --output text "
           f"--name {args.ssm_prefix}/datasource-password{profile_option}")
     print("Ctrl+C closes the tunnel.", flush=True)

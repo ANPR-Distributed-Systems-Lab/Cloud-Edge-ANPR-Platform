@@ -68,6 +68,7 @@ def test_the_schema_script_reads_the_password_on_the_host_and_stops_at_the_first
     text = "\n".join(script)
     assert "--name /anpr/dev/operations-service/datasource-password" in text
     assert "ON_ERROR_STOP=1" in text and "set -euo pipefail" in text
+    assert "cloud-init status --wait" in text  # a freshly booted host may still be installing psql
     assert "DROP SCHEMA public CASCADE" in text and "CREATE SCHEMA public" in text
     assert "host=db.internal port=5432 dbname=operations user=admin sslmode=require" in text
 

@@ -20,6 +20,7 @@ AWS credentials and region come from the environment (CI: OIDC role; locally: AW
 """
 
 import argparse
+import os
 import re
 import shlex
 import sys
@@ -62,6 +63,7 @@ class Reset:
     def __init__(self, prefix, dry_run):
         self.prefix = prefix
         self.dry_run = dry_run
+        self.report = []  # (what, outcome) of every step, for the job summary
         # Services, databases and instances are handled by the same code as in start/stop.
         self.environment = Environment(prefix, prefix, dry_run)
         self.session = boto3.Session()
@@ -100,8 +102,31 @@ class Reset:
             self.environment.wait_for_services(list(services))
 
         log("Done." if not self.dry_run else "Dry run finished, nothing was changed.")
+        self.write_summary()
         if not self.dry_run:
             warn("All Cognito users were deleted: create your account again with create_user.py.")
+
+    def record(self, what, outcome):
+        """Logs one step and keeps it for the summary. `outcome` is what was (or would be) done."""
+        log(f"{what}: {outcome}")
+        self.report.append((what, outcome))
+
+    def write_summary(self):
+        """The result as a table on the workflow run page (GitHub job summary)."""
+        title = "Dry run: NOTHING was changed" if self.dry_run else "Reset done"
+        lines = [f"### {title}", "", "| What | Result |", "|---|---|"]
+        lines += [f"| {what} | {outcome} |" for what, outcome in self.report]
+        if self.dry_run:
+            lines += ["", f"Run the workflow again with `{self.prefix}` typed in the field to delete this."]
+        else:
+            lines += ["", "All Cognito users are gone: create your account again with create_user.py."]
+
+        text = "\n".join(lines)
+        print(text, flush=True)
+        summary_file = os.environ.get("GITHUB_STEP_SUMMARY")
+        if summary_file:
+            with open(summary_file, "a", encoding="utf-8") as f:
+                f.write(text + "\n")
 
     def require_running_environment(self):
         status = self.environment.database_status(self.database_id)
@@ -121,8 +146,10 @@ class Reset:
         password_parameter = f"{self.ssm_prefix}/datasource-password"
         script = reset_schema_script(db_host, port, database, user, self.region, password_parameter)
 
-        log(f"{self.database_id}: drop and recreate schema 'public' of database '{database}'")
+        done = "would be dropped and recreated" if self.dry_run else "dropped and recreated"
+        outcome = f"schema 'public' of database '{database}' {done}"
         if self.dry_run:
+            self.record(self.database_id, outcome)
             return
         self.wait_until_online(host)
         command_id = self.ssm.send_command(
@@ -176,7 +203,7 @@ class Reset:
                     continue
                 for group in batches(items, DYNAMODB_BATCH):
                     self.delete_items(table, group)
-            log(f"{table}: {deleted} item(s) {'would be deleted' if self.dry_run else 'deleted'}")
+            self.record(table, f"{deleted} item(s) {'would be deleted' if self.dry_run else 'deleted'}")
 
     def delete_items(self, table, keys):
         requests = [{"DeleteRequest": {"Key": key}} for key in keys]
@@ -196,7 +223,7 @@ class Reset:
             if keys and not self.dry_run:
                 for group in batches(keys, S3_BATCH):
                     self.s3.delete_objects(Bucket=bucket, Delete={"Objects": group, "Quiet": True})
-        log(f"{bucket}: {deleted} object(s) {'would be deleted' if self.dry_run else 'deleted'}")
+        self.record(bucket, f"{deleted} object(s) {'would be deleted' if self.dry_run else 'deleted'}")
 
     # ------------------------------------------------------------ Cognito
 
@@ -218,7 +245,7 @@ class Reset:
             deleted += 1
             if not self.dry_run:
                 self.cognito.admin_delete_user(UserPoolId=pool, Username=username)
-        log(f"Cognito pool {pool}: {deleted} user(s) {'would be deleted' if self.dry_run else 'deleted'}")
+        self.record(f"Cognito pool {pool}", f"{deleted} user(s) {'would be deleted' if self.dry_run else 'deleted'}")
 
     # ------------------------------------------------------------ SQS
 
@@ -231,8 +258,9 @@ class Reset:
     def purge_queues(self):
         for url in self.queue_urls():
             waiting = self.sqs.get_queue_attributes(QueueUrl=url, AttributeNames=["ApproximateNumberOfMessages"])
-            log(f"{url.rsplit('/', 1)[-1]}: about {waiting['Attributes']['ApproximateNumberOfMessages']} message(s) "
-                f"{'would be purged' if self.dry_run else 'purged'}")
+            count = waiting["Attributes"]["ApproximateNumberOfMessages"]
+            done = "would be purged" if self.dry_run else "purged"
+            self.record(url.rsplit("/", 1)[-1], f"about {count} message(s) {done}")
             if self.dry_run:
                 continue
             try:

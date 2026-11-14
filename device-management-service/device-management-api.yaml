@@ -436,7 +436,7 @@ components:
     BatchingConfiguration:
       type: object
       description: How the device groups its local queues before sending them
-      required: [detectionsBatchSize, locationsBatchSize, imageUrlsBatchSize, maxBatchDelaySeconds]
+      required: [detectionsBatchSize, locationsBatchSize, imageUrlsBatchSize, imageUploadsLowPriority, maxBatchDelaySeconds]
       properties:
         detectionsBatchSize:
           type: integer
@@ -453,6 +453,13 @@ components:
           minimum: 1
           maximum: 100
           description: Frames per presigned URL request
+        imageUploadsLowPriority:
+          type: boolean
+          description: |
+            Photos have the lowest priority on the link: the device uploads one only while its detections, locations
+            and metrics have nothing to send and no request of theirs is in flight, so a slow upload never delays a
+            detection. The photos wait on the device (30 days, 2000 photos at most) and go out in the pauses. False:
+            photos are uploaded as soon as they are saved, competing with everything else.
         maxBatchDelaySeconds:
           type: integer
           minimum: 1

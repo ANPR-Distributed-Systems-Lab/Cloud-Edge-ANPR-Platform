@@ -15,7 +15,7 @@ _CONFIGURATION = {
     "updatedAt": "2026-11-12T10:00:00Z",
     "plateCooldownSeconds": 60,
     "batching": {"detectionsBatchSize": 20, "locationsBatchSize": 100, "imageUrlsBatchSize": 20,
-                 "maxBatchDelaySeconds": 10},
+                 "imageUploadsLowPriority": True, "maxBatchDelaySeconds": 10},
     "ml": {"detectorMinConfidence": 0.40, "ocrMinConfidence": 0.80, "readableMinProbability": 0.80,
            "minPlateWidthPx": 70, "minEdgeMarginPx": 10},
     "models": {"detector": "v2", "ocr": "v3"},

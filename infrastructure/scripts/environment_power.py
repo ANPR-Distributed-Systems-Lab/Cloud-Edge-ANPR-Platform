@@ -1,12 +1,13 @@
-"""Switch the environment on or off: its ECS services and its RDS databases.
+"""Switch the environment on or off: its ECS services, its RDS databases and the database access host.
 
     python environment_power.py start   [--dry-run]
     python environment_power.py stop    [--dry-run]
     python environment_power.py status
 
 start   databases first (services need them), then every service with the number of
-        tasks from its "finops:start-count" tag (set by Terraform as start_count)
-stop    every service to 0 tasks first, then the databases
+        tasks from its "finops:start-count" tag (set by Terraform as start_count); EC2 instances
+        tagged "finops:switch=true" (the database access host) start together with the databases
+stop    every service to 0 tasks first, then the databases and the tagged EC2 instances
 status  prints the current state as tables (also written to the GitHub job summary)
 
 Safe to run repeatedly: anything already in the wanted state is left alone.
@@ -26,12 +27,15 @@ import time
 import boto3
 
 START_COUNT_TAG = "finops:start-count"
+SWITCH_TAG = "finops:switch"  # on an EC2 instance: it is switched on and off with the environment
 
 # DescribeServices and the services_stable waiter accept at most 10 services per call.
 SERVICES_PER_CALL = 10
 
 DB_POLL_SECONDS = 20
 DB_TIMEOUT_SECONDS = 25 * 60
+
+INSTANCE_WAIT = {"Delay": 10, "MaxAttempts": 30}  # up to 5 minutes
 
 # RDS states nobody can fix from here; a human has to look at the instance.
 BROKEN_DB_STATES = ("failed", "incompatible-", "inaccessible-encryption-credentials", "storage-full")
@@ -68,10 +72,16 @@ class Environment:
         self.dry_run = dry_run
         self.ecs = boto3.client("ecs")
         self.rds = boto3.client("rds")
+        self.ec2 = boto3.client("ec2")
 
     # ------------------------------------------------------------ the three commands
 
     def start(self):
+        instances = self.instances()
+        log(f"EC2 instances tagged {SWITCH_TAG}=true: {len(instances)}")
+        for instance in instances:  # they boot while the databases start
+            self.start_instance(instance)
+
         databases = self.database_ids()
         log(f"Databases with prefix '{self.db_prefix}-': {len(databases)}")
         for db in databases:
@@ -84,12 +94,18 @@ class Environment:
         log(f"Services in cluster '{self.cluster}': {len(arns)}")
         changed = [name_of(arn) for arn in arns if self.start_service(arn)]
         self.wait_for_services(changed)
+        self.wait_for_instances("instance_running", instances)
 
     def stop(self):
         services = self.service_names()
         log(f"Services in cluster '{self.cluster}': {len(services)}")
         changed = [name for name in services if self.stop_service(name)]
         self.wait_for_services(changed)  # tasks are gone before the databases go down
+
+        instances = self.instances()
+        log(f"EC2 instances tagged {SWITCH_TAG}=true: {len(instances)}")
+        for instance in instances:
+            self.stop_instance(instance)
 
         databases = self.database_ids()
         log(f"Databases with prefix '{self.db_prefix}-': {len(databases)}")
@@ -102,6 +118,10 @@ class Environment:
         lines = ["### Databases", "| Database | Status |", "|---|---|"]
         for db in self.database_ids():
             lines.append(f"| {db} | {self.database_status(db)} |")
+
+        lines += ["", "### EC2 instances", "| Instance | State |", "|---|---|"]
+        for instance in self.instances():
+            lines.append(f"| {instance['name']} | {instance['state']} |")
 
         lines += ["", "### Services", "| Service | Desired | Running |", "|---|---|---|"]
         for service in self.describe_services(self.service_names()):
@@ -176,6 +196,63 @@ class Environment:
 
         log(f"{db}: stopping")
         self.apply(f"stop database {db}", self.rds.stop_db_instance, DBInstanceIdentifier=db)
+
+    # ------------------------------------------------------------ EC2 instances
+
+    def instances(self):
+        """The instances that exist and carry the switch tag: id, Name tag and state."""
+        found = []
+        pages = self.ec2.get_paginator("describe_instances").paginate(
+            Filters=[
+                {"Name": f"tag:{SWITCH_TAG}", "Values": ["true"]},
+                {"Name": "instance-state-name", "Values": ["pending", "running", "stopping", "stopped"]},
+            ]
+        )
+        for page in pages:
+            for reservation in page["Reservations"]:
+                for instance in reservation["Instances"]:
+                    tags = {t["Key"]: t["Value"] for t in instance.get("Tags", [])}
+                    found.append(
+                        {
+                            "id": instance["InstanceId"],
+                            "name": tags.get("Name", instance["InstanceId"]),
+                            "state": instance["State"]["Name"],
+                        }
+                    )
+        return sorted(found, key=lambda i: i["name"])
+
+    def wait_for_instances(self, waiter_name, instances):
+        if self.dry_run or not instances:
+            return
+        ids = [i["id"] for i in instances]
+        log(f"Waiting until {len(ids)} instance(s): {waiter_name.replace('instance_', '')}")
+        self.ec2.get_waiter(waiter_name).wait(InstanceIds=ids, WaiterConfig=INSTANCE_WAIT)
+
+    def start_instance(self, instance):
+        name, state = instance["name"], instance["state"]
+        if state == "stopping":  # an instance cannot be started while it is still stopping
+            log(f"{name}: stopping, waiting for it to stop first")
+            self.wait_for_instances("instance_stopped", [instance])
+            state = "stopped"
+
+        if state == "stopped":
+            log(f"{name}: starting")
+            self.apply(f"start instance {name}", self.ec2.start_instances, InstanceIds=[instance["id"]])
+        else:
+            log(f"{name}: {state}, nothing to start")
+
+    def stop_instance(self, instance):
+        name, state = instance["name"], instance["state"]
+        if state in ("stopped", "stopping"):
+            log(f"{name}: already {state}")
+            return
+
+        if state == "pending":  # an instance cannot be stopped while it is still starting
+            log(f"{name}: starting, waiting until running first")
+            self.wait_for_instances("instance_running", [instance])
+
+        log(f"{name}: stopping")
+        self.apply(f"stop instance {name}", self.ec2.stop_instances, InstanceIds=[instance["id"]])
 
     # ------------------------------------------------------------ services
 

@@ -5,6 +5,7 @@ device signs in with its username and password once, then renews the access toke
 and falls back to the password when the refresh token is refused (expired, revoked). Tokens stay in memory.
 """
 import json
+import threading
 import time
 from pathlib import Path
 
@@ -28,16 +29,20 @@ class CognitoAuth:
         self._access: str | None = None
         self._expires_at = 0.0
         self._refresh: str | None = None
+        # Every thread that talks to the platform asks for the token: one signs in, the others wait and reuse it.
+        self._lock = threading.Lock()
 
     def token(self) -> str:
         """A valid access token, renewed or obtained when needed."""
-        if self._access is None or self.clock() >= self._expires_at - RENEW_BEFORE_SECONDS:
-            self._renew()
-        return self._access
+        with self._lock:
+            if self._access is None or self.clock() >= self._expires_at - RENEW_BEFORE_SECONDS:
+                self._renew()
+            return self._access
 
     def invalidate(self) -> None:
         """Called after a 401: the next token() renews even if the token looks valid."""
-        self._access = None
+        with self._lock:
+            self._access = None
 
     def _renew(self) -> None:
         if self._refresh is not None:

@@ -16,6 +16,7 @@ public final class TestData {
         batching.setDetectionsBatchSize(20);
         batching.setLocationsBatchSize(100);
         batching.setImageUrlsBatchSize(20);
+        batching.setImageUploadsLowPriority(true);
         batching.setMaxBatchDelaySeconds(10);
 
         DeviceSettings.Ml ml = new DeviceSettings.Ml();

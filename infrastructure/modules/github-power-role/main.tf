@@ -1,12 +1,14 @@
 # IAM role that the "start environment" and "stop environment" workflows assume (via
-# OpenID Connect) to switch the environment on and off: ECS task counts and RDS instances.
+# OpenID Connect) to switch the environment on and off: ECS task counts, RDS instances and the
+# database access host.
 #
 # Separate from the deploy role on purpose: it cannot push images or register task
 # definitions, and the deploy role cannot start or stop anything.
 #
 # Scope is by naming convention, so new services and databases are covered without
-# touching this role: every ECS service in the cluster and every RDS instance whose
-# identifier starts with the environment prefix (e.g. anpr-dev-).
+# touching this role: every ECS service in the cluster, every RDS instance whose
+# identifier starts with the environment prefix (e.g. anpr-dev-) and every EC2 instance
+# tagged finops:switch = true.
 
 variable "name" {
   description = "Role name, e.g. anpr-dev-env-power."
@@ -127,6 +129,26 @@ data "aws_iam_policy_document" "permissions" {
     sid       = "RdsStartStop"
     actions   = ["rds:StartDBInstance", "rds:StopDBInstance"]
     resources = ["arn:aws:rds:${local.region}:${local.account_id}:db:${var.rds_name_prefix}-*"]
+  }
+
+  # Describing instances is read-only and cannot be limited to a resource either.
+  statement {
+    sid       = "Ec2Describe"
+    actions   = ["ec2:DescribeInstances"]
+    resources = ["*"]
+  }
+
+  # Only instances that carry the tag finops:switch = true (the database access host).
+  statement {
+    sid       = "Ec2StartStop"
+    actions   = ["ec2:StartInstances", "ec2:StopInstances"]
+    resources = ["arn:aws:ec2:${local.region}:${local.account_id}:instance/*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/finops:switch"
+      values   = ["true"]
+    }
   }
 }
 

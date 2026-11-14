@@ -100,3 +100,8 @@ def test_without_a_position_nothing_is_read_and_the_rejections_are_counted():
     assert result.events == [] and result.frame_id is None
     assert dict(result.rejected) == {"no_location": 2}
     assert reader.crops == []  # no OCR for a plate that could not be sent
+
+
+def test_a_frame_without_plates_and_without_a_position_counts_nothing():
+    result = Pipeline(clock=lambda: 0.0).process(frame(), CONFIG, models(FakeDetector([]), FakeReader()), None)
+    assert dict(result.rejected) == {}

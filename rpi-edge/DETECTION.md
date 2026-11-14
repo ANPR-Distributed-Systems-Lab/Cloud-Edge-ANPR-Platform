@@ -258,6 +258,8 @@ the same code, told by a `Stream` what to send where:
 - A batch leaves when the stream's batch size of items wait (`batching.detectionsBatchSize` 20,
   `batching.locationsBatchSize` 100) or the oldest has waited `batching.maxBatchDelaySeconds` (10 s). Metrics leave
   at once, up to 100 per request (the contract), since one measurement is made per interval.
+- There is no priority between these three: each has its own thread and queue, so a slow or failing endpoint never
+  holds another one back. Photos are the exception and rank below all of them ([section 9](#9-photos)).
 - The batch id (UUID v5 of the item ids, so a resend reuses it without storing it) is also the `X-Trace-Id` of the
   request. `detectionId` (UUID v7) is the trace id of a detection. Metrics use a stable id of their `recordedAt`s.
 - Outcomes, as the ingest contract (section 4) asks, decided in `delivery/answers.py` for every sender and the
@@ -318,6 +320,14 @@ leaves at once, without waiting for the upload (decided 2026-11-13; the contract
    quarantined (`image_quarantined`, reason `IMAGE_KEY_MISMATCH`). Then it PUTs the file with
    `Content-Type: image/jpeg` and no `Authorization` header (the URL carries its own signature). A failed or refused
    PUT keeps the file and the row; the next attempt asks for fresh URLs, which also covers an expired one.
+   **Priority** (`batching.imageUploadsLowPriority`, on by default, decided 2026-11-14): a photo is the largest thing
+   the device sends and a PUT cannot be paused, so photos give way to everything else. While a sender has items
+   waiting or a request in flight (`Sender.is_active`), the uploader neither asks for URLs nor starts a PUT, and looks
+   again after 2 s; the PUT of a photo that has started finishes. Between two photos of a batch the check is repeated,
+   and the rest of the batch waits with fresh URLs next time. A sender that rests after a failure does not count, so a
+   failing endpoint cannot keep the photos from going out. A long wait is logged once a minute
+   (`image_uploads_deferred`, with the number of waiting photos); the retention (30 days, 2000 photos) still applies.
+   `false` uploads a photo as soon as it is saved, competing with the other streams.
 3. **Delete**: a file is deleted with its row, whether it was uploaded, quarantined or dropped by the retention.
 
 ## 10. Device metrics

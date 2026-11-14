@@ -54,6 +54,9 @@ public class DeviceSettings {
         private Integer locationsBatchSize;
         @NotNull
         private Integer imageUrlsBatchSize;
+        /** Photos are uploaded only while the other streams of the device are idle (rpi-edge/DETECTION.md, section 9). */
+        @NotNull
+        private Boolean imageUploadsLowPriority;
         @NotNull
         private Integer maxBatchDelaySeconds;
     }

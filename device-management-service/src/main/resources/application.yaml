@@ -66,6 +66,7 @@ app:
         detections-batch-size: 20
         locations-batch-size: 100
         image-urls-batch-size: 20
+        image-uploads-low-priority: true
         max-batch-delay-seconds: 10
       # The send rule: starting points of the ml-models analysis on val (ML_ASSUMPTIONS.md, section 9); the
       # final thresholds are still open there.

@@ -30,6 +30,7 @@ class DeviceConfigurationIT extends ApiTestSupport {
                 .andExpect(jsonPath("$.updatedAt").exists())
                 .andExpect(jsonPath("$.plateCooldownSeconds").value(60))
                 .andExpect(jsonPath("$.batching.detectionsBatchSize").value(20))
+                .andExpect(jsonPath("$.batching.imageUploadsLowPriority").value(true))
                 .andExpect(jsonPath("$.ml.ocrMinConfidence").value(0.8))
                 .andExpect(jsonPath("$.ml.readableMinProbability").value(0.8))
                 .andExpect(jsonPath("$.ml.minEdgeMarginPx").value(10))
@@ -74,6 +75,7 @@ class DeviceConfigurationIT extends ApiTestSupport {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.intervals.metricsSeconds").value(15))
                 .andExpect(jsonPath("$.models.ocr").value("v4"))
+                .andExpect(jsonPath("$.batching.imageUploadsLowPriority").value(false))
                 .andExpect(jsonPath("$.camera.vflip").value(false));
     }
 
@@ -155,7 +157,8 @@ class DeviceConfigurationIT extends ApiTestSupport {
                 {
                   "version": %d,
                   "plateCooldownSeconds": 30,
-                  "batching": { "detectionsBatchSize": 10, "locationsBatchSize": 50, "imageUrlsBatchSize": 10, "maxBatchDelaySeconds": 5 },
+                  "batching": { "detectionsBatchSize": 10, "locationsBatchSize": 50, "imageUrlsBatchSize": 10,
+                                "imageUploadsLowPriority": false, "maxBatchDelaySeconds": 5 },
                   "ml": { "detectorMinConfidence": 0.4, "ocrMinConfidence": 0.7, "readableMinProbability": 0.75,
                           "minPlateWidthPx": 80, "minEdgeMarginPx": 5 },
                   "models": { "detector": "v2", "ocr": "v4" },

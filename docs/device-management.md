@@ -69,6 +69,9 @@ here.
   file (`internal/models`). The device downloads them, checks the SHA-256 and switches without a restart. The
   defaults are not checked at startup: until v2 and v3 are published, a new device's `GET /api/v1/device/models`
   answers `409 MODEL_NOT_PUBLISHED`.
+- `batching.imageUploadsLowPriority` (default `true`) makes the device upload photos only while its detections,
+  locations and metrics have nothing to send; the photos wait on the device meanwhile. It is required like every
+  other field (`rpi-edge/DETECTION.md`, section 9).
 - The resolution is fixed at 4056x3040, so `camera.fps` is at most 11.7.
 - `ETag` is the quoted version (`"3"`) and `If-None-Match` is compared weakly (RFC 9110).
 

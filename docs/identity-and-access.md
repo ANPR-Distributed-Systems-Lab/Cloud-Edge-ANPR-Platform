@@ -35,7 +35,7 @@ Naming pitfall, because the word "account" is used in two ways:
 
 - One user pool (Essentials tier, which the pre token generation trigger needs to change access tokens).
   Nobody signs up on their own: administrators create the users, people with
-  `infrastructure/scripts/create_user.py` (a permanent password the administrator types in) and devices through
+  `infrastructure/scripts/identity/create_user.py` (a permanent password the administrator types in) and devices through
   device-management (section 7).
 - Groups `users` and `devices`. Membership is assigned by the backend only and a client cannot change it.
   Every account is in exactly one group.
@@ -147,9 +147,8 @@ owner of the device and returns all alerts of that account (supports `ETag` / `I
 ## 9. Changes to the bootstrap
 
 The rows about infrastructure (user pool, gateway, routes, ingest Lambda, messaging, task role permissions)
-are applied on `dev` and checked end to end by `infrastructure/scripts/identity_smoke_test.py`, with one
-exception: the body validation of the ingest Lambda (on `main`) is not deployed yet. Of the rows about service
-code, operations-service only recognises device callers so far (and answers 501 to them on the alert list);
+are applied on `dev`, with one exception: the body validation of the ingest Lambda (on `main`) is not deployed
+yet. Of the rows about service code, operations-service only recognises device callers so far (and answers 501 to them on the alert list);
 device-management is implemented and tested locally, not deployed.
 
 | Area | Bootstrap | Target |

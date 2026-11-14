@@ -415,7 +415,7 @@ Pi 5 (8 GB), detector v2 at 1280x960 and OCR v3, both FP32 on ONNX Runtime with 
 ## 14. What is still missing
 
 - **First run against AWS**: `terraform apply` of the models bucket and route, device-management deployed with the
-  new contract, models v2 and v3 published, the device paired (`infrastructure/scripts/create_device.py`) and its
+  new contract, models v2 and v3 published, the device paired (`infrastructure/scripts/identity/create_device.py`) and its
   credentials placed on the Pi. The Cognito sign-in and the real ingest, device-locations and metrics endpoints have
   only run against fakes and the stand-in. The deployed ingest Lambda and operations-service may be older than the
   contracts here (alerts for devices, photo URLs in detections).

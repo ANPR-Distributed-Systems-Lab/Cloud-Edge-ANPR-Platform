@@ -25,7 +25,7 @@ from botocore.exceptions import ClientError
 
 # The group of people, as in local.account_type_by_group (infrastructure/envs/dev/auth.tf).
 USERS_GROUP = "users"
-DEFAULT_TERRAFORM_DIR = os.path.join(os.path.dirname(__file__), "..", "envs", "dev")
+DEFAULT_TERRAFORM_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "envs", "dev")
 
 
 class AccountError(Exception):

@@ -2,7 +2,7 @@
 #
 #   laptop --aws ssm start-session (port forwarding)--> access host --> database
 #
-# Used by pgAdmin on a laptop (scripts/db_tunnel.py) and by the reset of the environment. Every
+# Used by pgAdmin on a laptop (scripts/environment/db_tunnel.py) and by the reset of the environment. Every
 # database lists the host's security group as an allowed client (see operations-service.tf). The
 # environment start/stop workflows switch the host on and off with the databases.
 

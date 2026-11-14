@@ -4,7 +4,7 @@ name: Reset environment
 # (schema dropped, Flyway builds it again), the DynamoDB tables, the storage bucket, every Cognito user
 # and every SQS queue. The models bucket is not touched. The ECS services are scaled to 0 meanwhile and
 # get their task counts back. The environment must be running: start it first.
-# The logic lives in infrastructure/scripts/environment_reset.py.
+# The logic lives in infrastructure/scripts/environment/environment_reset.py.
 #
 # Run it with the field empty first: it only prints what would be deleted. To delete, type the
 # environment name (anpr-dev) in the field.
@@ -61,4 +61,4 @@ jobs:
       - name: Reset
         env:
           CONFIRM: ${{ inputs.confirm }}
-        run: python infrastructure/scripts/environment_reset.py --prefix "$PREFIX" ${CONFIRM:+--confirm "$CONFIRM"}
+        run: python infrastructure/scripts/environment/environment_reset.py --prefix "$PREFIX" ${CONFIRM:+--confirm "$CONFIRM"}

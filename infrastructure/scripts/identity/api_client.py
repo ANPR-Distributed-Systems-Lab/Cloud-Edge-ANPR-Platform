@@ -1,23 +1,69 @@
-"""Helpers shared by create_device.py and check_platform.py: the environment (Terraform outputs and AWS session),
-calls of the platform API and the translation of its error answers into messages for the human.
-
-The low-level calls (HTTP, Signature V4, Terraform outputs) are those of identity_smoke_test.py.
+"""Helpers shared by the scripts that talk to a deployed environment (create_device.py and check_platform.py): the
+environment (Terraform outputs and AWS session), the HTTP calls of the platform API and the translation of its error
+answers into messages for the human.
 """
 
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import sys
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 
 import boto3
+from botocore.auth import SigV4Auth
+from botocore.awsrequest import AWSRequest
 from botocore.exceptions import BotoCoreError, ClientError
 
-from identity_smoke_test import DEFAULT_TERRAFORM_DIR, call, signed_call, terraform_outputs
+DEFAULT_TERRAFORM_DIR = Path(__file__).resolve().parents[2] / "envs" / "dev"
 
 
 class PlatformError(Exception):
     """A failure the human can act on. Its message never contains a password or a token."""
+
+
+# ---------------------------------------------------------------- Terraform and HTTP
+
+
+def terraform_outputs(directory, profile):
+    env = {**os.environ, "AWS_PROFILE": profile} if profile else None
+    result = subprocess.run(
+        ["terraform", f"-chdir={directory}", "output", "-json"], capture_output=True, text=True, env=env
+    )
+    if result.returncode != 0:
+        raise PlatformError(f"terraform output failed in {directory}:\n{result.stderr.strip()}")
+    return {name: output["value"] for name, output in json.loads(result.stdout).items()}
+
+
+def send(request):
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return response.status, response.read().decode()
+    except urllib.error.HTTPError as error:
+        return error.code, error.read().decode()
+
+
+def call(method, url, token=None, body=None):
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    data = None if body is None else json.dumps(body).encode()
+    return send(urllib.request.Request(url, data=data, headers=headers, method=method))
+
+
+def signed_call(session, region, method, url, body=None):
+    """A request signed with the AWS credentials of the caller (Signature V4), as an administrator sends it."""
+    data = None if body is None else json.dumps(body).encode()
+    aws_request = AWSRequest(method=method, url=url, data=data, headers={"Content-Type": "application/json"})
+    SigV4Auth(session.get_credentials().get_frozen_credentials(), "execute-api", region).add_auth(aws_request)
+    return send(urllib.request.Request(url, data=data, headers=dict(aws_request.headers), method=method))
+
+
+# ---------------------------------------------------------------- the environment
 
 
 @dataclass(frozen=True)

@@ -1,6 +1,6 @@
 # IAM role that the "Reset environment" workflow assumes (via OpenID Connect) to empty the data of the
 # environment: database, DynamoDB tables, storage bucket, Cognito users and SQS queues
-# (infrastructure/scripts/environment_reset.py).
+# (infrastructure/scripts/environment/environment_reset.py).
 #
 # Destructive on purpose, so it is narrow: every statement is limited to the resources of this
 # environment (the name prefix, one bucket, one user pool), it changes no infrastructure, and it can be

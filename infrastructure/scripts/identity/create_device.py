@@ -29,7 +29,7 @@ from pathlib import Path
 
 from api_client import PlatformError, add_environment_arguments, expect, open_environment, run_cli, signed_request
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 DEVICE_USERNAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{2,62}$")  # CreateDeviceRequest.username
 DEFAULT_DEVICE_USERNAME = "rpi-01"
 

@@ -42,7 +42,8 @@ class Pipeline:
         found = models.detector.detect(frame.image, configuration.ml.detector_min_confidence)
         result.detect_ms = (time.perf_counter() - started) * 1000
         if location is None:
-            result.rejected[NO_LOCATION] += len(found)
+            if found:  # only a plate that could not be read counts, not a frame without one
+                result.rejected[NO_LOCATION] += len(found)
             return result
 
         for detection in found:

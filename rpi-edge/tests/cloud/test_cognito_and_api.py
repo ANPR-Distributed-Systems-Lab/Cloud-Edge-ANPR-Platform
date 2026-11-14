@@ -1,5 +1,7 @@
 """Cognito sign-in of the device and the Api wrapper, against scripted HTTP answers (no AWS)."""
 import json
+import threading
+import time
 
 import pytest
 from fakes import FakeHttp, response
@@ -38,6 +40,26 @@ def test_sign_in_uses_the_password_flow_of_the_public_client(credentials):
     assert sent["headers"]["Content-Type"] == "application/x-amz-json-1.1"
     assert sent["body"] == {"AuthFlow": "USER_PASSWORD_AUTH", "ClientId": "client-123",
                             "AuthParameters": {"USERNAME": "rpi-01", "PASSWORD": "secret-pw"}}
+
+
+class SlowHttp(FakeHttp):
+    """Answers after a pause, so that threads asking at the same time overlap."""
+
+    def request(self, method, url, headers=None, body=None):
+        time.sleep(0.05)
+        return super().request(method, url, headers, body)
+
+
+def test_threads_asking_at_once_sign_in_once(credentials):
+    http = SlowHttp(tokens())  # a second sign-in would find no answer left
+    auth = auth_with(http, credentials, [0.0])
+    results = []
+    threads = [threading.Thread(target=lambda: results.append(auth.token())) for _ in range(5)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert results == ["access-1"] * 5 and len(http.requests) == 1
 
 
 def test_the_token_is_reused_then_renewed_with_the_refresh_token(credentials):

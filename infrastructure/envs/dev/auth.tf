@@ -10,7 +10,7 @@
 # function receives the claims (see api.tf and events.tf). The account that owns a device is not in the
 # token: services learn it from the device-events topic (device-events.tf).
 #
-# People are created by administrators with infrastructure/scripts/create_user.py (group "users").
+# People are created by administrators with infrastructure/scripts/identity/create_user.py (group "users").
 # Devices are created by device-management-service when an administrator creates them (group "devices").
 
 locals {

@@ -120,7 +120,7 @@ output "terraform_role_arn" {
 }
 
 output "db_access_host_instance_id" {
-  description = "Target of the SSM sessions to the databases (scripts/db_tunnel.py finds it by itself)."
+  description = "Target of the SSM sessions to the databases (scripts/environment/db_tunnel.py finds it by itself)."
   value       = module.db_access_host.instance_id
 }
 

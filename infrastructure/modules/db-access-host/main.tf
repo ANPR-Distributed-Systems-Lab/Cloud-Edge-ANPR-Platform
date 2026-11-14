@@ -167,7 +167,7 @@ resource "aws_instance" "this" {
   tags = {
     Name = var.name
 
-    # Read by the environment start/stop workflows (infrastructure/scripts/environment_power.py).
+    # Read by the environment start/stop workflows (infrastructure/scripts/environment/environment_power.py).
     "finops:switch" = "true"
   }
 

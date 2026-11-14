@@ -1,8 +1,9 @@
 # device-management-service
 
 Control plane of the edge fleet: the registry of devices and their owners, the configuration of each device
-(View 4), its health metrics (View 5) and the presigned URLs the devices upload their photos with. It owns
-three DynamoDB tables and is the only publisher of the device events.
+(View 4), its health metrics (View 5), the presigned URLs the devices upload their photos with and the presigned
+URLs they download their models with. It owns three DynamoDB tables and is the only publisher of the device
+events.
 
 Status: implemented on the branch `feature/device-management-service-bootstrap`, with unit tests and integration
 tests against DynamoDB Local. Its infrastructure (tables, routes, permissions) is applied on `dev`; the service
@@ -23,21 +24,23 @@ token a route is for (`infrastructure/envs/dev/api.tf`), and the service checks 
 | `PUT /api/v1/device/config` | person | Replaces the whole configuration; `version` from the last read, `409 CONCURRENT_MODIFICATION` when stale |
 | `POST /api/v1/device/metrics` | device | 1 to 100 measurements, validated as a whole; `204` |
 | `GET /api/v1/device/metrics` | person | The `limit` (up to 1000) most recent measurements of the last 7 days, optionally before `before`, oldest first |
-| `POST /api/v1/images/presigned-urls` | device | 1 to 100 frames; a key `images/{deviceId}/{yyyy}/{MM}/{dd}/{frameId}.jpg` and a PUT URL valid for 30 minutes per frame |
+| `POST /api/v1/images/presigned-urls` | device | 1 to 100 frames; the PUT URL, valid for 30 minutes, of the key `images/{deviceId}/{yyyy}/{MM}/{dd}/{frameId}.jpg` of each (the device computes the same key and sends its detection before the upload) |
+| `GET /api/v1/device/models` | device | The model versions of its configuration; per file the SHA-256, the size and a GET URL valid for 30 minutes; `409 MODEL_NOT_PUBLISHED` for a version that is not published (section 3) |
 | `POST /api/v1/admin/devices` | administrator (SigV4) | Creates a device for a person |
 | `DELETE /api/v1/admin/devices/{deviceId}` | administrator (SigV4) | Deletes a device |
 
 Errors are RFC 9457 problems with `code` and `requestId`, the same shape as operations-service and the ingest
 Lambda. Validation errors list every problem in `fields[]`; `index` is the position of the item in a batch. The
 field codes are shared by every service and the ingest Lambda (`REQUIRED`, `RANGE`, `SIZE`, `PATTERN`), plus
-`TIMESTAMP_IN_FUTURE`, `TIMESTAMP_TOO_OLD`, `DUPLICATE_RECORDED_AT` and `PASSWORD_POLICY` here.
+`TIMESTAMP_IN_FUTURE`, `TIMESTAMP_TOO_OLD`, `DUPLICATE_RECORDED_AT`, `PASSWORD_POLICY` and `MODEL_NOT_PUBLISHED`
+here.
 
 ## 2. Data (DynamoDB)
 
 | Table | Keys | Item |
 |---|---|---|
 | `devices` | PK `deviceId`; index `accountId-index` (PK `accountId`) | `accountId` (owner), `username` (Cognito login), `createdAt`, `version` (ownership version, sent in the device events) |
-| `device-configurations` | PK `deviceId` | `version` (optimistic locking, raised on every write), `updatedAt` and the settings as top-level attributes: `plateCooldownSeconds`, `batching`, `ml`, `intervals`, `camera` |
+| `device-configurations` | PK `deviceId` | `version` (optimistic locking, raised on every write), `updatedAt` and the settings as top-level attributes: `plateCooldownSeconds`, `batching`, `ml`, `models`, `intervals`, `camera` |
 | `device-metrics` | PK `deviceId`, SK `recordedAt` (epoch ms of the measurement) | The metrics of one measurement and `expiresAt` (epoch seconds, table TTL) |
 
 - A device and its configuration are written and deleted together in one transaction, so a registered device
@@ -50,10 +53,22 @@ field codes are shared by every service and the ingest Lambda (`REQUIRED`, `RANG
 
 ## 3. Configuration
 
-- A new device starts with the defaults of the service (`app.configuration.defaults` in `application.yaml`).
-  They must satisfy the ranges of the contract, which `DefaultSettingsIT` checks.
-- The exposure and white balance defaults are those of `rpi-edge/settings.py`. Enum values are uppercase in the API (`MANUAL`,
-  `DAYLIGHT`), and the device converts them to its own lowercase names.
+- The configuration is the only source of the device's settings (decided 2026-11-12): the send rule
+  thresholds (`ml`: detector and OCR confidence, P(readable), plate width, edge margin), the model versions
+  (`models`), the cooldown, batching, intervals and the camera, including the flips of how it is mounted. The
+  device keeps a copy and has no defaults of its own (`rpi-edge/DETECTION.md`, section 4).
+- A new device starts with the defaults of the service (`app.configuration.defaults` in `application.yaml`):
+  the ML starting points of `ml-models/ML_ASSUMPTIONS.md` (0.40 / 0.80 / 0.80 / 70 px / 10 px, still open there),
+  the published models v2 / v3 and the camera settings tested on the Pi. They must satisfy the ranges of the
+  contract, which `DefaultSettingsIT` checks. Enum values are uppercase in the API (`MANUAL`, `DAYLIGHT`).
+- `models.detector` and `models.ocr` must name published versions: a `PUT` naming another one is
+  `400 VALIDATION_FAILED` with the field code `MODEL_NOT_PUBLISHED`. A version is published when
+  `models/{model}/{version}/release.json` exists in the models bucket (`infrastructure/envs/dev/models.tf`,
+  written by `anpr-publish-model` of ml-models); it lists the files of the version with their SHA-256 and size.
+  `GET /api/v1/device/models` reads it for the versions of the device's configuration and signs a GET URL per
+  file (`internal/models`). The device downloads them, checks the SHA-256 and switches without a restart. The
+  defaults are not checked at startup: until v2 and v3 are published, a new device's `GET /api/v1/device/models`
+  answers `409 MODEL_NOT_PUBLISHED`.
 - The resolution is fixed at 4056x3040, so `camera.fps` is at most 11.7.
 - `ETag` is the quoted version (`"3"`) and `If-None-Match` is compared weakly (RFC 9110).
 
@@ -112,13 +127,14 @@ com.anpr.devicemanagement
 │                         provisioning (create/delete and the ports AccountDirectory and DeviceEvents)
 ├── identity/             Cognito adapter of AccountDirectory
 ├── messaging/            SNS adapter of DeviceEvents
+├── storage/              S3 adapter of ModelReleases (the release descriptions of the models)
 ├── config/               AWS clients and properties
-├── local/                profile local: table creation and stand-ins for Cognito and SNS (section 9)
+├── local/                profile local: table creation and stand-ins for Cognito, SNS and the models bucket (section 9)
 └── shared/               errors, caller identity, trace id, timestamp window
 ```
 
-`internal/` never imports from `api/`, `identity/`, `messaging/` or `local/`: the provisioning defines the ports,
-and the adapters implement them.
+`internal/` never imports from `api/`, `identity/`, `messaging/`, `storage/` or `local/`: the internal areas define
+the ports, and the adapters implement them.
 
 ## 8. Known limitations
 
@@ -138,7 +154,9 @@ Run the application from the IDE with the profile `local` (`SPRING_PROFILES_ACTI
   Docker volume) and the application creates the missing tables, with the same keys and index as Terraform.
 - Cognito and SNS are replaced by stand-ins: every account id counts as a person, device accounts are kept in
   memory, and device events are logged instead of published (CLAUDE.md, section 4).
-- Upload URLs are signed with dummy credentials: they have the right form, but there is no local S3 behind them.
+- Upload and download URLs are signed with dummy credentials: they have the right form, but there is no local S3
+  behind them. Every model version counts as published, with zero checksums; to run a device without AWS, use
+  `rpi-edge/tools/dev_cloud.py` instead.
 - The profile refuses to start without a local DynamoDB endpoint, so the stand-ins can never run in AWS.
 
 There is no API Gateway locally, so requests carry the identity headers it would inject:

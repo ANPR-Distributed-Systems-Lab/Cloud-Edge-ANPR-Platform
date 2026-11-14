@@ -5,6 +5,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.cognitoidentityprovider.CognitoIdentityProviderClient;
+import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.sns.SnsClient;
 
@@ -25,7 +26,14 @@ public class AwsClientsConfig {
         return SnsClient.builder().region(Region.of(aws.region())).build();
     }
 
-    /** Signing is local: no request is sent to S3 until the device uploads with the URL. */
+    /** Reads the release descriptions of the models (internal/models); there is no S3 in the local profile. */
+    @Bean
+    @Profile("!local")
+    S3Client s3Client(AwsProperties aws) {
+        return S3Client.builder().region(Region.of(aws.region())).build();
+    }
+
+    /** Signing is local: no request is sent to S3 until the device uploads or downloads with the URL. */
     @Bean
     @Profile("!local")
     S3Presigner s3Presigner(AwsProperties aws) {

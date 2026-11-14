@@ -1,0 +1,19 @@
+[
+  {
+    "name": "plate",
+    "color": "#ff3b30",
+    "type": "polygon",
+    "attributes": [
+      {"name": "text", "mutable": false, "input_type": "text", "default_value": "", "values": [""]},
+      {"name": "readable", "mutable": false, "input_type": "select", "default_value": "yes", "values": ["yes", "no"]},
+      {"name": "occlusion", "mutable": false, "input_type": "select", "default_value": "none", "values": ["none", "partial"]},
+      {"name": "type", "mutable": false, "input_type": "select", "default_value": "standard", "values": ["standard", "two-line", "motorcycle", "other"]}
+    ]
+  },
+  {
+    "name": "plate_ignore",
+    "color": "#8e8e93",
+    "type": "polygon",
+    "attributes": []
+  }
+]

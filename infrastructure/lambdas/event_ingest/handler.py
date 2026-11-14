@@ -56,7 +56,8 @@ UUID_PATTERN = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-f
 # RFC 3339 in UTC with "Z", at most millisecond precision.
 TIMESTAMP_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z")
 PLATE_PATTERN = re.compile(r"[A-Z0-9]{3,8}")
-# images/{deviceId}/{yyyy}/{MM}/{dd}/{frameId}.jpg, assigned by device-management with the presigned upload URL.
+# images/{deviceId}/{yyyy}/{MM}/{dd}/{frameId}.jpg: fixed by the contract; the device computes it and device-management
+# signs the upload URL for the same key.
 IMAGE_KEY_PATTERN = re.compile(
     r"images/(?P<device>[0-9a-fA-F-]{36})/\d{4}/\d{2}/\d{2}/(?P<frame>[0-9a-fA-F-]{36})\.jpg"
 )

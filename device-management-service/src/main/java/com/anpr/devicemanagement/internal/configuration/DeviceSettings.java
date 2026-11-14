@@ -33,6 +33,10 @@ public class DeviceSettings {
 
     @Valid
     @NotNull
+    private Models models;
+
+    @Valid
+    @NotNull
     private Intervals intervals;
 
     @Valid
@@ -54,7 +58,7 @@ public class DeviceSettings {
         private Integer maxBatchDelaySeconds;
     }
 
-    /** Thresholds below which the device drops a detection instead of sending it. */
+    /** The send rule of the device: which detections it reads and sends. */
     @DynamoDbBean
     @Getter
     @Setter
@@ -64,7 +68,22 @@ public class DeviceSettings {
         @NotNull
         private Double ocrMinConfidence;
         @NotNull
+        private Double readableMinProbability;
+        @NotNull
         private Integer minPlateWidthPx;
+        @NotNull
+        private Integer minEdgeMarginPx;
+    }
+
+    /** The published model versions the device runs (internal/models). */
+    @DynamoDbBean
+    @Getter
+    @Setter
+    public static class Models {
+        @NotNull
+        private String detector;
+        @NotNull
+        private String ocr;
     }
 
     @DynamoDbBean
@@ -94,6 +113,11 @@ public class DeviceSettings {
         private WhiteBalance whiteBalance;
         @NotNull
         private Double fps;
+        /** How the camera is mounted: the image is flipped back before it reaches the models. */
+        @NotNull
+        private Boolean hflip;
+        @NotNull
+        private Boolean vflip;
     }
 
     @DynamoDbBean
@@ -126,7 +150,7 @@ public class DeviceSettings {
         private Double blueGain;
     }
 
-    /** The modes of the software auto exposure on the device (rpi-edge/autoexposure.py). */
+    /** The modes of the software auto exposure on the device (rpi-edge/common/autoexposure.py). */
     public enum ExposureMode {
         MANUAL, AUTO, AUTO_GAIN, AUTO_EXPOSURE
     }

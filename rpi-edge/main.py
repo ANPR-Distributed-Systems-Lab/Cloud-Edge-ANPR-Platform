@@ -1,42 +1,27 @@
-"""Data collection tool: tune the camera from a browser, take test shots, record frames to a USB stick.
+"""Entry point of the container: runs the mode chosen by EDGE_MODE (rpi-edge/.env, see README.md).
 
-Open http://<pi-address>:8000/ . See DATA_COLLECTION.md.
+  collection  records full-resolution frames for training (DATA_COLLECTION.md)
+  detection   reads plates and sends them to the cloud (DETECTION.md)
 """
 import os
-import signal
-import threading
+import sys
 
-from camera_service import CameraService
-from hardware import Hardware
-from jsonlog import log
-from settings import SettingsStore
-from storage import Storage
-from web import App, make_server
+from common.jsonlog import log
 
-PORT = int(os.environ.get("PORT", 8000))
+MODES = ("collection", "detection")
 
 
 def main() -> None:
-    store = SettingsStore()
-    storage = Storage()
-    camera = CameraService(store, storage)
-    stop = threading.Event()
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        signal.signal(sig, lambda *_: stop.set())
-
-    camera.start()
-    http = make_server(App(store, storage, camera), PORT)
-    threading.Thread(target=http.serve_forever, name="http", daemon=True).start()
-    hardware = Hardware(camera)
-    log("started", port=PORT)
-
-    stop.wait()
-
-    log("shutting_down")
-    hardware.close()
-    camera.close()  # stops recording first, so the last frames are flushed
-    storage.eject()
-    http.shutdown()
+    mode = os.environ.get("EDGE_MODE") or "collection"
+    if mode not in MODES:
+        log("unknown_mode", level="error", mode=mode, allowed=MODES)
+        sys.exit(2)
+    log("mode_selected", mode=mode)
+    if mode == "collection":
+        from collection.main import main as run
+    else:
+        from detection.main import main as run
+    run()
 
 
 if __name__ == "__main__":

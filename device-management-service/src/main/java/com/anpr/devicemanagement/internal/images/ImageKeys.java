@@ -10,7 +10,8 @@ import java.util.UUID;
 
 /**
  * The S3 key layout of photos, {@code images/{deviceId}/{yyyy}/{MM}/{dd}/{frameId}.jpg} with the UTC date of capture
- * (docs/api/ingest-detections.md). The ingest Lambda checks the same layout, so it is a contract, not configuration.
+ * (docs/api/ingest-detections.md). The ingest Lambda checks the same layout and the device computes it
+ * (rpi-edge/detection/contract/images.py), so it is a contract, not configuration.
  */
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 final class ImageKeys {

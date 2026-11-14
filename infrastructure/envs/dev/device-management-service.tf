@@ -1,6 +1,7 @@
 # device-management-service: everything the service owns, in one place.
 # Image repository, DynamoDB tables, ECS service and the role its deploy workflow uses.
-# Its API routes are registered in api.tf; the images bucket it signs URLs for is in storage.tf;
+# Its API routes are registered in api.tf; the images bucket it signs URLs for is in storage.tf, the models
+# bucket in models.tf;
 # the topic it publishes pairing events to is in device-events.tf. The contract is
 # device-management-service/device-management-api.yaml, the design docs/device-management.md.
 
@@ -94,6 +95,28 @@ data "aws_iam_policy_document" "device_management_app" {
     resources = ["${module.storage_bucket.arn}/${local.images_prefix}*"]
   }
 
+  # Model downloads (models.tf): the service reads release.json of a version and signs GET URLs for its
+  # files, which carry these permissions.
+  statement {
+    sid       = "ReadModels"
+    actions   = ["s3:GetObject"]
+    resources = ["${module.models_bucket.arn}/${local.models_prefix}*"]
+  }
+
+  # Without ListBucket S3 answers 403 instead of 404 for a missing key, and an unpublished model version
+  # could not be told from a permission problem.
+  statement {
+    sid       = "ListModels"
+    actions   = ["s3:ListBucket"]
+    resources = [module.models_bucket.arn]
+
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = ["${local.models_prefix}*"]
+    }
+  }
+
   # Creating a device: the service checks that the owner is a person (finds the user by sub and reads
   # its groups), creates the Cognito user of the device and puts it in the group of devices. Deleting
   # a device (or undoing a failed creation) deletes that user. The application only ever deletes
@@ -147,6 +170,7 @@ module "device_management_service" {
     DEVICE_CONFIGURATIONS_TABLE = module.device_configurations_table.name
     DEVICE_METRICS_TABLE        = module.device_metrics_table.name
     IMAGES_BUCKET               = module.storage_bucket.name
+    MODELS_BUCKET               = module.models_bucket.name
     DEVICE_EVENTS_TOPIC_ARN     = aws_sns_topic.device_events.arn
     USER_POOL_ID                = module.user_pool.user_pool_id
     USERS_GROUP                 = one([for group, type in local.account_type_by_group : group if type == "user"])

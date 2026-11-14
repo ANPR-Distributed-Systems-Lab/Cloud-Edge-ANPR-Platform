@@ -1,5 +1,6 @@
 package com.anpr.devicemanagement.local;
 
+import com.anpr.devicemanagement.internal.models.ModelReleases;
 import com.anpr.devicemanagement.internal.provisioning.AccountDirectory;
 import com.anpr.devicemanagement.internal.provisioning.DeviceEvents;
 import com.anpr.devicemanagement.support.DynamoDbLocalSupport;
@@ -38,11 +39,14 @@ class LocalProfileIT extends DynamoDbLocalSupport {
     private AccountDirectory accounts;
     @Autowired
     private DeviceEvents events;
+    @Autowired
+    private ModelReleases releases;
 
     @Test
     void usesTheLocalStandIns() {
         assertThat(accounts).isInstanceOf(LocalAccountDirectory.class);
         assertThat(events).isInstanceOf(LoggingDeviceEvents.class);
+        assertThat(releases).isInstanceOf(LocalModelReleases.class);
     }
 
     @Test

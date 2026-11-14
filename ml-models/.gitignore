@@ -1,0 +1,27 @@
+# Raw recordings (tens of GB, stored locally only)
+data/
+
+# Model weights (distributed through S3, see ML_ASSUMPTIONS.md); Ultralytics may also drop *.pt into the working dir
+models/
+*.pt
+*.onnx
+
+# Generated training datasets (anpr-yolo-dataset), rebuilt from labeling/exports
+datasets/
+
+# Labeling infrastructure: generated or downloaded locally
+labeling/cvat/
+labeling/batches/
+labeling/exports/
+labeling/frame_index.csv
+
+# Working notebooks (the jupytext .py files are committed; finished reports are kept with outputs)
+*.ipynb
+!notebooks/reports/*.ipynb
+.ipynb_checkpoints/
+
+# Training runs and W&B's local files (runs/wandb/, runs/wandb-local/)
+wandb/
+runs/
+
+.venv/

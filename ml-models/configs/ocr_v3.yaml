@@ -1,0 +1,47 @@
+# OCR v3: the region head turned into a readability head (readable / unreadable), trained on the same crops
+# as v2. Unlike v2, the rejects never reach the text loss: the text head learns from readable plates only, as
+# in v1, and the readability head alone decides what is declined. Training settings are v1's, so the
+# difference to v1 and v2 measures how the rejects are learned. Variants tried on scratch runs (2026-11-11):
+# readability weight 0.5, checkpoint on the text loss alone, label smoothing on the readability head, and the
+# head trained alone on a frozen v1; none moved the send rule's precision / recall beyond a few val plates.
+run_name: v3
+
+dataset:
+  name: ocr_128x64_v1             # shared with v2
+  exports: [train_001, train_002, val_001, val_002]
+  size: [128, 64]
+  margin: 0.08
+  jitter_copies: 8
+  jitter_sigma: 0.015
+  seed: 42
+  reject:
+    sources: [unreadable, ignore] # plates labeled readable = no, plate_ignore regions
+    min_px: 70                    # narrower detections never reach the OCR on the edge node
+
+model:
+  name: cct_s_v2_global
+  readability_head: true          # the second head classifies readable / unreadable instead of the country
+
+train:                            # fast-plate-ocr's CLI defaults, except where noted
+  epochs: 60                      # fine-tuning from a model that already reads ~90 % of the plates
+  batch: 64
+  lr: 0.0005                      # half the default (meant for training from scratch)
+  final_lr_factor: 0.01           # cosine decay to 1 % of lr
+  warmup_fraction: 0.05
+  weight_decay: 0.01
+  clipnorm: 1.0
+  label_smoothing: 0.01
+  plate_loss_weight: 0.9          # the rest goes to the readability head
+  ema: true                       # checkpoints hold the exponential moving average of the weights
+  monitor: val_loss               # the readability head overfits after a few epochs while the reads are
+                                  # already at their best; the text loss alone picks a later epoch with
+                                  # the same reads and a worse readability head
+  patience: 20
+  seed: 42
+
+wandb:
+  enabled: true
+  project: anpr-ocr
+  entity: null
+  mode: online
+  log_images: true

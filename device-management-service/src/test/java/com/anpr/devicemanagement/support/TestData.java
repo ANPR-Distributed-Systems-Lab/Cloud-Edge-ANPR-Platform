@@ -21,7 +21,13 @@ public final class TestData {
         DeviceSettings.Ml ml = new DeviceSettings.Ml();
         ml.setDetectorMinConfidence(0.5);
         ml.setOcrMinConfidence(0.6);
+        ml.setReadableMinProbability(0.8);
         ml.setMinPlateWidthPx(60);
+        ml.setMinEdgeMarginPx(10);
+
+        DeviceSettings.Models models = new DeviceSettings.Models();
+        models.setDetector("v2");
+        models.setOcr("v3");
 
         DeviceSettings.Intervals intervals = new DeviceSettings.Intervals();
         intervals.setMetricsSeconds(metricsSeconds);
@@ -46,11 +52,14 @@ public final class TestData {
         camera.setExposure(exposure);
         camera.setWhiteBalance(whiteBalance);
         camera.setFps(2.0);
+        camera.setHflip(true);
+        camera.setVflip(false);
 
         DeviceSettings settings = new DeviceSettings();
         settings.setPlateCooldownSeconds(60);
         settings.setBatching(batching);
         settings.setMl(ml);
+        settings.setModels(models);
         settings.setIntervals(intervals);
         settings.setCamera(camera);
         return settings;

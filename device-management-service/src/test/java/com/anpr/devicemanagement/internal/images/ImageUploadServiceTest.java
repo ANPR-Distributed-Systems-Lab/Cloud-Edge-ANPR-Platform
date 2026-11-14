@@ -53,7 +53,7 @@ class ImageUploadServiceTest {
                 .region(Region.EU_CENTRAL_1)
                 .credentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create("test", "test")))
                 .build();
-        AwsProperties aws = new AwsProperties("eu-central-1", null, new AwsProperties.S3("images-bucket"), null, null);
+        AwsProperties aws = new AwsProperties("eu-central-1", null, new AwsProperties.S3("images-bucket", "models-bucket"), null, null);
         ImagesProperties properties = new ImagesProperties(Duration.ofMinutes(30), Duration.ofDays(30), Duration.ofMinutes(5));
         service = new ImageUploadService(deviceLookup, presigner, aws, properties, Clock.fixed(NOW, ZoneOffset.UTC));
     }

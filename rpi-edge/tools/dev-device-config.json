@@ -1,0 +1,23 @@
+{
+  "deviceId": "00000000-0000-4000-8000-000000000000",
+  "version": 1,
+  "updatedAt": "2026-11-12T00:00:00Z",
+  "plateCooldownSeconds": 60,
+  "batching": {"detectionsBatchSize": 20, "locationsBatchSize": 100, "imageUrlsBatchSize": 20, "maxBatchDelaySeconds": 10},
+  "ml": {
+    "detectorMinConfidence": 0.40,
+    "ocrMinConfidence": 0.80,
+    "readableMinProbability": 0.80,
+    "minPlateWidthPx": 70,
+    "minEdgeMarginPx": 10
+  },
+  "models": {"detector": "v2", "ocr": "v3"},
+  "intervals": {"metricsSeconds": 60, "configPollSeconds": 60, "alertsPollSeconds": 60, "locationSampleSeconds": 5},
+  "camera": {
+    "exposure": {"mode": "AUTO", "exposureUs": 500, "gain": 2.0, "maxExposureUs": 540, "maxGain": 4.0, "targetBrightness": 0.4},
+    "whiteBalance": {"mode": "DAYLIGHT", "redGain": 2.0, "blueGain": 1.6},
+    "fps": 3.0,
+    "hflip": true,
+    "vflip": true
+  }
+}

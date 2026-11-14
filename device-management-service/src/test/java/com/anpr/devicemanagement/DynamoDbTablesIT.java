@@ -86,7 +86,8 @@ class DynamoDbTablesIT extends DynamoDbLocalSupport {
         Map<String, AttributeValue> item = rawItem(configurationsTable.tableName(),
                 Map.of("deviceId", AttributeValue.fromS(deviceId.toString())));
 
-        assertThat(item).containsKeys("version", "updatedAt", "plateCooldownSeconds", "batching", "ml", "intervals", "camera");
+        assertThat(item).containsKeys("version", "updatedAt", "plateCooldownSeconds", "batching", "ml", "models", "intervals",
+                "camera");
         assertThat(item.get("camera").m().get("exposure").m().get("mode").s()).isEqualTo("MANUAL");
     }
 

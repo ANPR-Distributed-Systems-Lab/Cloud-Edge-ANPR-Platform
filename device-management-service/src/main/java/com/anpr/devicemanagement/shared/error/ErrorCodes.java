@@ -15,6 +15,8 @@ public final class ErrorCodes {
     public static final String ACCOUNT_HAS_DEVICE = "ACCOUNT_HAS_DEVICE";
     public static final String USERNAME_TAKEN = "USERNAME_TAKEN";
     public static final String CONCURRENT_MODIFICATION = "CONCURRENT_MODIFICATION";
+    /** A configuration names a model version that is not published (409, or a field code of a 400). */
+    public static final String MODEL_NOT_PUBLISHED = "MODEL_NOT_PUBLISHED";
     public static final String INTERNAL_ERROR = "INTERNAL_ERROR";
 
     // Field codes in fields[] of VALIDATION_FAILED, the same names as in the ingest Lambda.

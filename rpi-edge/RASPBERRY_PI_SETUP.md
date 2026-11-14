@@ -429,6 +429,41 @@ lcd = CharLCD(
 lcd.write_string('Hello RPi!')
 ```
 
+### Pins in use
+
+What the in-car hardware is wired to (both modes use the same peripherals, `common/peripherals.py`):
+
+| Peripheral | Signal | BCM GPIO | Physical pin | Used by |
+|---|---|---|---|---|
+| LCD 4x20 (HD44780 + PCF8574, address `0x27`) | SDA / SCL, 5V, GND | GPIO2 / GPIO3 | 3 / 5, 2 or 4, any GND | both modes |
+| LED | anode through a resistor | GPIO17 | 11 | both modes |
+| Buzzer | signal | GPIO27 | 13 | both modes |
+| Tact switch | to GND | GPIO22 | 15 | collection (start / stop recording) |
+| GNSS module (Waveshare LC76G) | module TX -> Pi RXD, module RX -> Pi TXD, VCC to 3.3V, GND | GPIO15 / GPIO14 (UART0, `/dev/ttyAMA0`) | 10 / 8, 1, 34 | detection (position, track) |
+
+### GNSS module (Waveshare LC76G)
+
+Wiring as in the table. VCC goes to pin 1 (3.3 V): the module takes 2.55-3.6 V, so its TX is a 3.3 V signal that
+the Pi can read (powered from 5 V, the level of TX would have to be checked first). PPS, RST, SDA and SCL stay
+unconnected. The antenna needs a view of the sky: behind a window a fix takes a minute, indoors there is none.
+
+On the host, once (`sudo` on the Pi), then a reboot:
+
+```bash
+echo 'dtparam=uart0=on' | sudo tee -a /boot/firmware/config.txt
+```
+
+On a Pi 5 this adds `/dev/ttyAMA0` on GPIO14/15 next to the debug console `ttyAMA10`; no login shell runs on it. The
+user is in the group `dialout`, so no `sudo` is needed to read it. Check the stream (the LC76G talks at 115200 baud by
+default; the wiki of Waveshare uses 9600 in its examples, which gives garbage):
+
+```bash
+stty -F /dev/ttyAMA0 115200 raw -echo && timeout 5 cat /dev/ttyAMA0
+```
+
+The detection mode reads it when `GPS_DEVICE=/dev/ttyAMA0` is in `rpi-edge/.env` (`DETECTION.md`, section 8). One
+process at a time can read the port: stop the container before reading it by hand.
+
 ## Troubleshooting
 
 **`permission denied` on `docker run` despite being added to the `docker`

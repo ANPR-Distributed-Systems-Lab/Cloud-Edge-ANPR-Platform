@@ -6,8 +6,23 @@ variable "name" {
   type        = string
 }
 
+variable "versioning" {
+  description = "Keep earlier versions of overwritten or deleted objects (for content that must never be lost)."
+  type        = bool
+  default     = false
+}
+
 resource "aws_s3_bucket" "this" {
   bucket = var.name
+}
+
+resource "aws_s3_bucket_versioning" "this" {
+  count  = var.versioning ? 1 : 0
+  bucket = aws_s3_bucket.this.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
 }
 
 # Objects always belong to the bucket owner; ACLs are disabled, access is IAM only.

@@ -14,6 +14,7 @@ def test_the_document_maps_onto_typed_fields():
     assert config.camera.exposure.max_exposure_us == 540
     assert config.camera.hflip is True
     assert config.intervals.config_poll_seconds == 60
+    assert config.batching.image_uploads_low_priority is True
 
 
 def test_equal_documents_give_equal_configurations():
@@ -27,6 +28,7 @@ def test_equal_documents_give_equal_configurations():
     ({"camera": {"exposure": {"mode": "auto"}}}, "camera.exposure.mode must be one of"),  # the enums are upper case
     ({"camera": {"hflip": 1}}, "camera.hflip must be true or false"),
     ({"batching": {"detectionsBatchSize": True}}, "batching.detectionsBatchSize"),
+    ({"batching": {"imageUploadsLowPriority": "yes"}}, "batching.imageUploadsLowPriority must be true or false"),
     ({"camera": {"whiteBalance": None}}, "camera.whiteBalance must be an object"),
     ({"models": {"ocr": "../v3"}}, "models.ocr must match"),  # a version becomes a directory name
     ({"deviceId": "rpi-01"}, "deviceId must match"),

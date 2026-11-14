@@ -10,7 +10,7 @@ from detection.contract.images import image_key
 from detection.delivery.photos import MAX_WAITING_FRAMES, FrameSaver
 from detection.delivery.queue import PersistentQueue
 from detection.delivery.sender import FORBIDDEN_WAIT_SECONDS
-from detection.delivery.uploads import IMAGE_CODEC, ImageJob, ImageUploader
+from detection.delivery.uploads import DEFERRED_LOG_SECONDS, GATE_RECHECK_SECONDS, IMAGE_CODEC, ImageJob, ImageUploader
 from detection.pipeline import FrameResult
 from detection.vision.frame import Frame
 
@@ -20,10 +20,12 @@ FRAMES = ("0192f3a4-7c1e-7000-b5c3-1d2e3f4a5b01", "0192f3a4-7c1e-7000-b5c3-1d2e3
 
 
 class FixedConfiguration:
-    current = configuration(batching={"imageUrlsBatchSize": 2, "maxBatchDelaySeconds": 10})
+    def __init__(self, low_priority=True):
+        self.current = configuration(batching={"imageUrlsBatchSize": 2, "maxBatchDelaySeconds": 10,
+                                               "imageUploadsLowPriority": low_priority})
 
 
-def setup(tmp_path, *answers, frames=FRAMES):
+def setup(tmp_path, *answers, frames=FRAMES, link_busy=lambda: False, low_priority=True, clock=lambda: 0.0):
     queue = PersistentQueue(tmp_path / "i.sqlite3", "images", IMAGE_CODEC, 30, 100, lambda: CAPTURED.timestamp())
     jobs = []
     for frame_id in frames:
@@ -32,7 +34,9 @@ def setup(tmp_path, *answers, frames=FRAMES):
         jobs.append(ImageJob(frame_id, CAPTURED, path))
     queue.add(jobs)
     api = FakeApi(*answers)
-    return queue, api, ImageUploader(queue, api, api.http, URL, FixedConfiguration()), jobs
+    uploader = ImageUploader(queue, api, api.http, URL, FixedConfiguration(low_priority), link_busy=link_busy,
+                             clock=clock)
+    return queue, api, uploader, jobs
 
 
 def urls(frames=FRAMES, **override):
@@ -112,6 +116,40 @@ def test_photos_past_the_retention_are_dropped_with_their_files(tmp_path):
     queue.retention_seconds = -1
     uploader.send_once()
     assert queue.pending() == 0 and not any(job.path.exists() for job in jobs)
+
+
+def test_while_another_stream_uses_the_link_nothing_is_requested_or_uploaded(tmp_path):
+    queue, api, uploader, jobs = setup(tmp_path, link_busy=lambda: True)
+    assert uploader.send_once() == GATE_RECHECK_SECONDS
+    assert api.requests == [] and api.http.uploads == []
+    assert queue.pending() == 2 and all(job.path.exists() for job in jobs)
+
+
+def test_without_the_low_priority_setting_photos_do_not_wait(tmp_path):
+    queue, api, uploader, _ = setup(tmp_path, response(200, urls()), link_busy=lambda: True, low_priority=False)
+    uploader.send_once()
+    assert queue.pending() == 0 and len(api.http.uploads) == 2
+
+
+def test_a_detection_that_comes_in_between_two_photos_holds_the_second_back(tmp_path):
+    queue, api, uploader, jobs = setup(tmp_path, response(200, urls()), response(200, urls()))
+    uploader.link_busy = lambda: len(api.http.uploads) == 1  # busy after the first PUT, free again after the pause
+    assert uploader.send_once() == GATE_RECHECK_SECONDS
+    assert [q.item.frame_id for q in queue.oldest(5)] == [FRAMES[1]] and jobs[1].path.exists()
+    uploader.link_busy = lambda: False
+    queue.clock = lambda: CAPTURED.timestamp() + 11  # a single photo leaves once it has waited maxBatchDelaySeconds
+    uploader.send_once()
+    assert queue.pending() == 0 and len(api.requests) == 2  # fresh URLs for the photo that had to wait
+
+
+def test_a_long_wait_is_reported_once_a_minute_with_the_number_of_photos(tmp_path, capsys):
+    now = [0.0]
+    _, _, uploader, _ = setup(tmp_path, link_busy=lambda: True, clock=lambda: now[0])
+    for second in (0, 2, 4, DEFERRED_LOG_SECONDS + 1):
+        now[0] = second
+        uploader.send_once()
+    out = capsys.readouterr().out
+    assert out.count("image_uploads_deferred") == 2 and '"pending": 2' in out
 
 
 def frame_result(frame_id="f1", events=1):

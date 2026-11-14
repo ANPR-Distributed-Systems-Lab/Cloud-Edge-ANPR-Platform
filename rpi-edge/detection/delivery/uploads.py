@@ -12,8 +12,15 @@ uploader asks device-management for presigned PUT URLs (POST /api/v1/images/pres
                    which also covers an expired URL
 
 Files are deleted with their rows (uploaded, quarantined or past the retention).
+
+Priority (batching.imageUploadsLowPriority, on by default): a photo is the largest thing the device sends and a
+PUT cannot be paused, so photos give way to everything else. While another stream (detections, locations, metrics)
+has something to send or a request in flight, the uploader neither asks for URLs nor starts a PUT, and looks again
+every GATE_RECHECK_SECONDS. The photos wait in the queue and go out in the pauses; a PUT that has started finishes.
 """
 import threading
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -52,15 +59,24 @@ IMAGE_CODEC = ItemCodec(ImageJob.to_document, ImageJob.from_document, lambda j: 
                         lambda j: j.captured_at.timestamp())
 
 
+GATE_RECHECK_SECONDS = 2.0
+DEFERRED_LOG_SECONDS = 60.0  # how often a long wait is reported
+
+
 class ImageUploader:
     def __init__(self, queue: PersistentQueue[ImageJob], api: Api, http: Http, url: str,
-                 configuration: ConfigurationStore) -> None:
+                 configuration: ConfigurationStore, link_busy: Callable[[], bool] = lambda: False,
+                 clock: Callable[[], float] = time.monotonic) -> None:
+        """`link_busy` tells whether any other stream is using the link (Sender.is_active of each of them)."""
         self.queue = queue
         self.api = api
         self.http = http
         self.url = url
         self.configuration = configuration
+        self.link_busy = link_busy
+        self.clock = clock
         self.backoff = Backoff(BACKOFF_FIRST_SECONDS, BACKOFF_MAX_SECONDS)
+        self._deferred_logged_at: float | None = None
 
     def run(self, stop: threading.Event) -> None:
         while not stop.is_set():
@@ -81,10 +97,14 @@ class ImageUploader:
         configuration = self.configuration.current
         if configuration is None:
             return IDLE_SECONDS
+        low_priority = configuration.batching.image_uploads_low_priority
+        if low_priority and self.link_busy():
+            return self._defer()
         batch, wait = self.queue.take_due(configuration.batching.image_urls_batch_size,
                                           configuration.batching.max_batch_delay_seconds)
         if batch is None:
             return min(wait, IDLE_SECONDS) if wait > 0 else IDLE_SECONDS
+        self._deferred_logged_at = None
         request = ImageUploadRequest(tuple(FrameToUpload(j.frame_id, j.captured_at) for j in batch.items))
         try:
             response = self.api.request("POST", self.url, trace_id=request.trace_id, body=request.to_document(),
@@ -92,12 +112,22 @@ class ImageUploader:
         except (NetworkError, AuthError) as e:
             log("image_urls_not_requested", level="warning", traceId=request.trace_id, error=str(e))
             return self.backoff.next_delay()
-        return self._handle(response, batch, request.trace_id, configuration.device_id)
+        return self._handle(response, batch, request.trace_id, configuration.device_id, low_priority)
 
-    def _handle(self, response: Response, batch: Batch[ImageJob], trace_id: str, device_id: str) -> float:
+    def _defer(self) -> float:
+        """Gives way to the other streams; reports a long wait now and then, with how many photos are waiting."""
+        now = self.clock()
+        if self.queue.pending() and (self._deferred_logged_at is None
+                                     or now - self._deferred_logged_at >= DEFERRED_LOG_SECONDS):
+            self._deferred_logged_at = now
+            log("image_uploads_deferred", pending=self.queue.pending(), reason="other streams are using the link")
+        return GATE_RECHECK_SECONDS
+
+    def _handle(self, response: Response, batch: Batch[ImageJob], trace_id: str, device_id: str,
+                low_priority: bool) -> float:
         outcome = outcome_of(response.status)
         if outcome is Outcome.ACCEPTED:
-            return self._upload(response, batch, trace_id, device_id)
+            return self._upload(response, batch, trace_id, device_id, low_priority)
         if outcome is Outcome.REFUSED:
             problem = Problem.of(response.status, response.body)
             bad = [q for i, q in enumerate(batch.queued) if i in problem.indexes] or list(batch.queued)
@@ -112,7 +142,8 @@ class ImageUploader:
         log("image_urls_failed", level="warning", traceId=trace_id, status=response.status)
         return max(self.backoff.next_delay(), retry_after(response.headers) or 0.0)
 
-    def _upload(self, response: Response, batch: Batch[ImageJob], trace_id: str, device_id: str) -> float:
+    def _upload(self, response: Response, batch: Batch[ImageJob], trace_id: str, device_id: str,
+                low_priority: bool) -> float:
         try:
             urls = ImageUploadUrls.from_document(response.json())
         except (ContractError, ValueError) as e:
@@ -126,6 +157,8 @@ class ImageUploader:
                 log("image_quarantined", level="error", traceId=trace_id, frameId=job.frame_id, reason=problem)
                 self._quarantine([queued], response.status, problem)
                 continue
+            if low_priority and self.link_busy():  # a detection came in meanwhile: the rest waits, URLs are cheap
+                return self._defer()
             try:
                 status = self.http.upload(urls.for_frame(job.frame_id).upload_url, job.path, CONTENT_TYPE)
             except NetworkError as e:

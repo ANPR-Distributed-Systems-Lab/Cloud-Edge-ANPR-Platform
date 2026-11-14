@@ -15,7 +15,8 @@ MODEL_VERSION = r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}"  # also a directory name in t
 class BatchingConfiguration:
     detections_batch_size: int = bounded(1, 100)  # detections per ingest request
     locations_batch_size: int = bounded(1, 500)  # GPS points per request (not used yet)
-    image_urls_batch_size: int = bounded(1, 100)  # frames per presigned URL request (not used yet)
+    image_urls_batch_size: int = bounded(1, 100)  # frames per presigned URL request
+    image_uploads_low_priority: bool  # photos go out only while the other streams are idle (delivery/uploads.py)
     max_batch_delay_seconds: int = bounded(1, 300)  # a batch that is not full leaves after this long
 
 

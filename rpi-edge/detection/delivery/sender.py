@@ -12,6 +12,7 @@ device-management endpoints share:
 Anything else (404, wrong URL) keeps the data and backs off as well (delivery/answers.py).
 """
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -46,11 +47,15 @@ class Stream[T]:
 
 
 class Sender[T]:
-    def __init__(self, stream: Stream[T], api: Api, configuration: ConfigurationStore) -> None:
+    def __init__(self, stream: Stream[T], api: Api, configuration: ConfigurationStore,
+                 clock: Callable[[], float] = time.monotonic) -> None:
         self.stream = stream
         self.api = api
         self.configuration = configuration
+        self.clock = clock
         self.backoff = Backoff(BACKOFF_FIRST_SECONDS, BACKOFF_MAX_SECONDS)
+        self._in_flight = False  # a request of this stream is on the link
+        self._resting_until = 0.0  # after a failure the stream waits and does not use the link
 
     def run(self, stop: threading.Event) -> None:
         while not stop.is_set():
@@ -60,6 +65,14 @@ class Sender[T]:
                 log("sender_error", level="error", stream=self.stream.name, error=repr(e))
                 wait = self.backoff.next_delay()
             stop.wait(wait)
+
+    def is_active(self) -> bool:
+        """Whether this stream uses the link or is about to: a request in flight, or items waiting to be sent (also
+        for their batch to be due). A stream that rests after a failure does not count, so an endpoint that keeps
+        failing never keeps the photos from going out."""
+        if self._in_flight:
+            return True
+        return self.stream.queue.pending() > 0 and self.clock() >= self._resting_until
 
     def send_once(self) -> float:
         """One step: maybe one request. Returns the seconds to wait before the next step."""
@@ -71,14 +84,22 @@ class Sender[T]:
         if batch is None:
             return wait
         request = self.stream.request(batch.items)
+        self._in_flight = True
         try:
             response = self.api.request("POST", self.stream.url, trace_id=request.trace_id,
                                         body=request.to_document(), headers={"Content-Type": "application/json"})
         except (NetworkError, AuthError) as e:
             log("batch_not_sent", level="warning", stream=self.stream.name, traceId=request.trace_id,
                 count=len(batch.queued), error=str(e))
-            return self.backoff.next_delay()
+            return self._rest(self.backoff.next_delay())
+        finally:
+            self._in_flight = False
         return self._handle(response, batch, request.trace_id)
+
+    def _rest(self, seconds: float) -> float:
+        """Waits `seconds` after a failure, without counting as a user of the link."""
+        self._resting_until = self.clock() + seconds
+        return seconds
 
     def _next_batch(self) -> tuple[Batch[T] | None, float]:
         """A batch to send now, or None and how long to wait for one."""
@@ -97,6 +118,7 @@ class Sender[T]:
         if outcome is Outcome.ACCEPTED:
             self.stream.queue.delete(batch.row_ids)
             self.backoff.reset()
+            self._resting_until = 0.0
             left = batch.pending - count
             log("batch_sent", stream=self.stream.name, traceId=trace_id, count=count, status=status, pending=left)
             full_batch = self.stream.batch_size(self.configuration.current)
@@ -107,9 +129,9 @@ class Sender[T]:
         if outcome is Outcome.FORBIDDEN:
             log("batch_forbidden", level="error", stream=self.stream.name, traceId=trace_id, count=count,
                 hint="the token is not a device token: check COGNITO_CLIENT_ID and the device account")
-            return FORBIDDEN_WAIT_SECONDS
+            return self._rest(FORBIDDEN_WAIT_SECONDS)
         log("batch_failed", level="warning", stream=self.stream.name, traceId=trace_id, count=count, status=status)
-        return max(self.backoff.next_delay(), retry_after(response.headers) or 0.0)
+        return self._rest(max(self.backoff.next_delay(), retry_after(response.headers) or 0.0))
 
     def _quarantine(self, batch: Batch[T], problem: Problem, trace_id: str) -> None:
         bad = [q.row_id for i, q in enumerate(batch.queued) if i in problem.indexes] or batch.row_ids

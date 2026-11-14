@@ -3,7 +3,8 @@
   "version": 1,
   "updatedAt": "2026-11-12T00:00:00Z",
   "plateCooldownSeconds": 60,
-  "batching": {"detectionsBatchSize": 20, "locationsBatchSize": 100, "imageUrlsBatchSize": 20, "maxBatchDelaySeconds": 10},
+  "batching": {"detectionsBatchSize": 20, "locationsBatchSize": 100, "imageUrlsBatchSize": 20,
+               "imageUploadsLowPriority": true, "maxBatchDelaySeconds": 10},
   "ml": {
     "detectorMinConfidence": 0.40,
     "ocrMinConfidence": 0.80,

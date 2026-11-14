@@ -96,6 +96,50 @@ def test_403_keeps_the_data_and_waits_long(tmp_path):
     assert box.pending() == 3
 
 
+class ProbingApi(FakeApi):
+    """Records whether the stream counts as using the link at the moment its request is on the way."""
+
+    def __init__(self, *answers):
+        super().__init__(*answers)
+        self.sender = None
+        self.active_during_request = []
+
+    def request(self, method, url, trace_id, body=None, headers=None):
+        self.active_during_request.append(self.sender.is_active())
+        return super().request(method, url, trace_id, body, headers)
+
+
+def test_a_stream_is_active_while_it_has_items_or_a_request_in_flight(tmp_path):
+    box, api, sender = setup(tmp_path, count=2, age=0.0)  # 2 of 3: its batch is not due yet
+    assert sender.is_active()  # waiting to be sent
+    probing = ProbingApi(response(202))
+    probing.sender = Sender(sender.stream, probing, sender.configuration)
+    box.add([detection_event(9, 1000.0)])  # now 3: due
+    probing.sender.send_once()
+    assert probing.active_during_request == [True] and box.pending() == 0
+    assert not probing.sender.is_active()  # empty and nothing in flight
+
+
+def test_a_stream_that_rests_after_a_failure_does_not_hold_the_photos_back(tmp_path):
+    now = [0.0]
+    box, api, sender = setup(tmp_path, response(503))
+    sender = Sender(sender.stream, api, sender.configuration, clock=lambda: now[0])
+    rest = sender.send_once()
+    assert box.pending() == 3 and not sender.is_active()  # backing off
+    now[0] += rest + 1
+    assert sender.is_active()  # its time has come again
+
+
+def test_a_forbidden_stream_rests_for_a_long_time(tmp_path):
+    now = [0.0]
+    box, api, sender = setup(tmp_path, response(403, {"code": "FORBIDDEN"}))
+    sender = Sender(sender.stream, api, sender.configuration, clock=lambda: now[0])
+    sender.send_once()
+    assert not sender.is_active()
+    now[0] = FORBIDDEN_WAIT_SECONDS + 1
+    assert sender.is_active()
+
+
 def test_nothing_to_send_makes_no_request(tmp_path):
     box, api, sender = setup(tmp_path, count=0)
     sender.send_once()

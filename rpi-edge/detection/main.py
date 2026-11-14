@@ -73,6 +73,7 @@ def main() -> None:
     log("detection_starting", cloud=env.api_base_url, authenticated=auth is not None, gps=_gps_kind(env),
         pending=queues.detections.pending())
 
+    senders = {s.name: Sender(s, api, configuration) for s in streams(queues, env)}
     workers = _start_workers({
         "config-poll": ConfigPoller(api, env.config_url, configuration).run,
         "model-updater": ModelUpdater(ModelStore(env.state_dir / "models", api, http, env.models_url),
@@ -82,8 +83,9 @@ def main() -> None:
         "locations": LocationRecorder(gps, queues.locations, configuration).run,
         "metrics": MetricsSampler(queues, gps, frames, configuration, env.state_dir).run,
         "photos": photos.run,
-        "uploader": ImageUploader(queues.images, api, http, env.image_urls_url, configuration).run,
-        **{f"send-{s.name}": Sender(s, api, configuration).run for s in streams(queues, env)},
+        "uploader": ImageUploader(queues.images, api, http, env.image_urls_url, configuration,
+                                  link_busy=lambda: any(s.is_active() for s in senders.values())).run,
+        **{f"send-{name}": sender.run for name, sender in senders.items()},
         "feedback": feedback.run,
     }, stop)
     if configuration.wait_until_configured(stop) and models.wait(stop):

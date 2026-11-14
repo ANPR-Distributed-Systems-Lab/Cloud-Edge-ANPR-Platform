@@ -104,17 +104,13 @@ data "aws_iam_policy_document" "device_management_app" {
   }
 
   # Without ListBucket S3 answers 403 instead of 404 for a missing key, and an unpublished model version
-  # could not be told from a permission problem.
+  # could not be told from a permission problem. No s3:prefix condition: that key exists only in list requests,
+  # so on the check S3 makes for a missing object the condition would not match and the 403 would stay. The
+  # bucket holds nothing but models, so there is nothing to scope.
   statement {
     sid       = "ListModels"
     actions   = ["s3:ListBucket"]
     resources = [module.models_bucket.arn]
-
-    condition {
-      test     = "StringLike"
-      variable = "s3:prefix"
-      values   = ["${local.models_prefix}*"]
-    }
   }
 
   # Creating a device: the service checks that the owner is a person (finds the user by sub and reads

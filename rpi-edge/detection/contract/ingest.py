@@ -1,36 +1,19 @@
 """Detections for the ingest Lambda (POST /api/v1/ingest/detections, docs/api/ingest-detections.md).
 
   {"batchId": "...", "detections": [{"detectionId", "frameId", "detectedAt", "plate", "ocrConfidence",
-                                     "detectorConfidence", "corners"}, ...]}
-
-The contract's location and imageKey are not sent yet (no GPS, no photo upload).
+                                     "detectorConfidence", "imageKey", "corners", "location"}, ...]}
 """
-import os
-import time
-import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 
 import numpy as np
 
-# Fixed namespace of batch ids, so the same set of detections always gets the same batchId.
-BATCH_NAMESPACE = uuid.UUID("6f1d3a52-6a0e-4c4e-9a43-0c5b7d1e2f30")
+from detection.contract.images import image_key
+from detection.contract.locations import Location
+from detection.contract.wire import iso_ms, parse_iso_ms, stable_id, uuid7
+
 CONFIDENCE_DECIMALS = 4
 CORNER_DECIMALS = 5  # about 0.02 px on the 4056 px wide frame
-
-
-def uuid7() -> str:
-    """Time-ordered UUID (RFC 9562, version 7): 48 bits of Unix milliseconds, then random bits.
-    Python gets uuid.uuid7() only in 3.14; the Pi runs Debian trixie's 3.13."""
-    value = (time.time_ns() // 1_000_000) << 80 | int.from_bytes(os.urandom(10), "big")
-    value = (value & ~(0xF << 76)) | (0x7 << 76)  # version 7
-    value = (value & ~(0x3 << 62)) | (0x2 << 62)  # RFC variant
-    return str(uuid.UUID(int=value))
-
-
-def iso_ms(moment: datetime) -> str:
-    """RFC 3339 UTC with milliseconds and Z, as the ingest contract requires."""
-    return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.") + f"{moment.microsecond // 1000:03d}Z"
 
 
 @dataclass(frozen=True)
@@ -42,11 +25,14 @@ class DetectionEvent:
     plate: str
     ocr_confidence: float
     detector_confidence: float
+    image_key: str  # S3 key of the photo of the frame (contract/images.py); the photo may arrive later
     corners: tuple[tuple[float, float], ...]  # TL, TR, BR, BL as fractions of the frame width and height
+    location: Location
 
     @classmethod
-    def of(cls, frame_id: str, captured_at: datetime, plate: str, ocr_confidence: float, detector_confidence: float,
-           corners_px: np.ndarray, frame_size: tuple[int, int]) -> "DetectionEvent":
+    def of(cls, *, device_id: str, frame_id: str, captured_at: datetime, plate: str, ocr_confidence: float,
+           detector_confidence: float, corners_px: np.ndarray, frame_size: tuple[int, int],
+           location: Location) -> "DetectionEvent":
         """A new detection, rounded as it is stored and sent; frame_size is (width, height)."""
         width, height = frame_size
         return cls(
@@ -56,8 +42,10 @@ class DetectionEvent:
             plate=plate,
             ocr_confidence=round(float(ocr_confidence), CONFIDENCE_DECIMALS),
             detector_confidence=round(float(detector_confidence), CONFIDENCE_DECIMALS),
+            image_key=image_key(device_id, frame_id, captured_at),
             corners=tuple((round(float(x) / width, CORNER_DECIMALS), round(float(y) / height, CORNER_DECIMALS))
                           for x, y in corners_px),
+            location=location,
         )
 
     def to_document(self) -> dict:
@@ -68,7 +56,9 @@ class DetectionEvent:
             "plate": self.plate,
             "ocrConfidence": self.ocr_confidence,
             "detectorConfidence": self.detector_confidence,
+            "imageKey": self.image_key,
             "corners": [list(corner) for corner in self.corners],
+            "location": self.location.to_document(),
         }
 
     @classmethod
@@ -77,11 +67,13 @@ class DetectionEvent:
         return cls(
             detection_id=document["detectionId"],
             frame_id=document["frameId"],
-            detected_at=datetime.strptime(document["detectedAt"], "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=UTC),
+            detected_at=parse_iso_ms(document["detectedAt"]),
             plate=document["plate"],
             ocr_confidence=document["ocrConfidence"],
             detector_confidence=document["detectorConfidence"],
+            image_key=document["imageKey"],
             corners=tuple((x, y) for x, y in document["corners"]),
+            location=Location.from_document(document["location"]),
         )
 
 
@@ -91,9 +83,12 @@ class DetectionBatch:
 
     @property
     def batch_id(self) -> str:
-        """A resend of the same detections reuses the batchId, as the contract asks, without storing it; it is
-        also the trace id of the request."""
-        return str(uuid.uuid5(BATCH_NAMESPACE, ",".join(d.detection_id for d in self.detections)))
+        """A resend of the same detections reuses the batchId, as the contract asks, without storing it."""
+        return stable_id(d.detection_id for d in self.detections)
+
+    @property
+    def trace_id(self) -> str:
+        return self.batch_id
 
     def to_document(self) -> dict:
         return {"batchId": self.batch_id, "detections": [d.to_document() for d in self.detections]}

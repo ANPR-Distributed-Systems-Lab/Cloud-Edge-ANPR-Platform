@@ -12,13 +12,16 @@ def response(status: int, body=None, headers: dict | None = None) -> Response:
 
 class FakeHttp:
     """request() returns the queued answers in order (an exception instance is raised instead);
-    download() serves the bytes registered per URL."""
+    download() serves the bytes registered per URL; upload() answers 200 unless `upload_answers` says otherwise
+    (a status, or an exception instance to raise) and records what was PUT."""
 
     def __init__(self, *answers) -> None:
         self.answers = list(answers)
         self.requests: list[dict] = []
         self.files: dict[str, bytes] = {}
         self.downloads: list[str] = []
+        self.upload_answers: list = []
+        self.uploads: list[dict] = []
 
     def request(self, method, url, headers=None, body=None):
         self.requests.append({"method": method, "url": url, "headers": headers or {}, "body": body})
@@ -33,6 +36,13 @@ class FakeHttp:
             raise NetworkError(f"GET {url}: no route")
         target.write_bytes(self.files[url])
         return hashlib.sha256(self.files[url]).hexdigest()
+
+    def upload(self, url, path, content_type):
+        self.uploads.append({"url": url, "bytes": path.read_bytes(), "content_type": content_type})
+        answer = self.upload_answers.pop(0) if self.upload_answers else 200
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
 
 
 class FakeApi:

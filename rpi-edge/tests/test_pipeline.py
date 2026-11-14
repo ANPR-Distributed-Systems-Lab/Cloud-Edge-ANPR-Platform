@@ -2,7 +2,7 @@ import re
 from datetime import UTC, datetime
 
 import numpy as np
-from samples import configuration
+from samples import DEVICE_ID, LOCATION, configuration
 
 from detection.contract.configuration import ModelVersions
 from detection.pipeline import Pipeline
@@ -50,13 +50,15 @@ def frame():
 def test_an_accepted_reading_becomes_an_event():
     detector = FakeDetector([Detection(0.88, PLATE)])
     reader = FakeReader(Reading("WA12345", 0.9412, 0.97))
-    result = Pipeline(clock=lambda: 0.0).process(frame(), CONFIG, models(detector, reader))
+    result = Pipeline(clock=lambda: 0.0).process(frame(), CONFIG, models(detector, reader), LOCATION)
 
     assert detector.min_confidence == CONFIG.ml.detector_min_confidence
     assert reader.crops == [(64, 128, 3)]
     [event] = result.events
     assert UUID.fullmatch(event.detection_id) and UUID.fullmatch(event.frame_id)
     assert event.detected_at == frame().captured_at
+    assert event.location == LOCATION and result.frame_id == event.frame_id
+    assert event.image_key == f"images/{DEVICE_ID}/2026/11/12/{event.frame_id}.jpg"
     assert event.plate == "WA12345"
     assert event.ocr_confidence == 0.9412 and event.detector_confidence == 0.88
     corners = np.array(event.corners)
@@ -67,7 +69,7 @@ def test_an_accepted_reading_becomes_an_event():
 def test_rejected_detections_are_counted_and_not_read_twice():
     detector = FakeDetector([Detection(0.9, SMALL), Detection(0.9, PLATE), Detection(0.9, PLATE + [0, 100])])
     reader = FakeReader(Reading("WA12345", 0.5, 0.97), Reading("KR1AC23", 0.95, 0.4))
-    result = Pipeline(clock=lambda: 0.0).process(frame(), CONFIG, models(detector, reader))
+    result = Pipeline(clock=lambda: 0.0).process(frame(), CONFIG, models(detector, reader), LOCATION)
     assert result.events == []
     assert dict(result.rejected) == {"too_small": 1, "low_confidence": 1, "unreadable": 1}
     assert len(reader.crops) == 2  # the small plate never reached the OCR
@@ -78,7 +80,7 @@ def test_two_plates_of_one_frame_share_the_frame_id_and_cooldown_applies_across_
     pipeline = Pipeline(clock=lambda: now[0])
     first = pipeline.process(frame(), CONFIG, models(
         FakeDetector([Detection(0.9, PLATE), Detection(0.9, PLATE + [0, 200])]),
-        FakeReader(Reading("WA12345", 0.9, 0.9), Reading("KR1AC23", 0.9, 0.9))))
+        FakeReader(Reading("WA12345", 0.9, 0.9), Reading("KR1AC23", 0.9, 0.9))), LOCATION)
     assert len(first.events) == 2
     assert first.events[0].frame_id == first.events[1].frame_id
     assert first.events[0].detection_id != first.events[1].detection_id
@@ -86,6 +88,15 @@ def test_two_plates_of_one_frame_share_the_frame_id_and_cooldown_applies_across_
     now[0] = 30.0  # within plateCooldownSeconds (60), and with a new set of models
     second = pipeline.process(frame(), CONFIG, models(
         FakeDetector([Detection(0.9, PLATE), Detection(0.9, PLATE + [0, 200])]),
-        FakeReader(Reading("WA12345", 0.9, 0.9), Reading("PO123AC", 0.9, 0.9))))
+        FakeReader(Reading("WA12345", 0.9, 0.9), Reading("PO123AC", 0.9, 0.9))), LOCATION)
     assert [e.plate for e in second.events] == ["PO123AC"]
     assert second.rejected["cooldown"] == 1
+
+
+def test_without_a_position_nothing_is_read_and_the_rejections_are_counted():
+    detector = FakeDetector([Detection(0.9, PLATE), Detection(0.9, PLATE + [0, 200])])
+    reader = FakeReader()
+    result = Pipeline(clock=lambda: 0.0).process(frame(), CONFIG, models(detector, reader), None)
+    assert result.events == [] and result.frame_id is None
+    assert dict(result.rejected) == {"no_location": 2}
+    assert reader.crops == []  # no OCR for a plate that could not be sent

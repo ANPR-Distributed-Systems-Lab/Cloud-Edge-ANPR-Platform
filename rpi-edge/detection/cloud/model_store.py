@@ -20,10 +20,10 @@ from detection.cloud.api import Api
 from detection.cloud.cognito import AuthError
 from detection.cloud.transport import Http, NetworkError
 from detection.contract.configuration import ModelVersions
-from detection.contract.ingest import uuid7
 from detection.contract.models import DeviceModels, ModelFile
 from detection.contract.parsing import ContractError
 from detection.contract.problem import Problem
+from detection.contract.wire import uuid7
 from detection.vision.models import ModelSet
 
 # What the device needs of each model; ml-models publishes these files (anpr-publish-model).

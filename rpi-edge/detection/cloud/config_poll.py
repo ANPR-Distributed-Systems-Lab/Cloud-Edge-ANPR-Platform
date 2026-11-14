@@ -11,9 +11,9 @@ from detection.cloud.api import Api
 from detection.cloud.cognito import AuthError
 from detection.cloud.transport import NetworkError
 from detection.config.store import ConfigurationStore
-from detection.contract.ingest import uuid7
 from detection.contract.parsing import ContractError
 from detection.contract.problem import Problem
+from detection.contract.wire import uuid7
 
 UNCONFIGURED_POLL_SECONDS = 10.0
 

@@ -3,8 +3,9 @@
 Status screen, refreshed every second:
 
     DET 1.5fps D2 O3        frames analysed per second, model versions (WAIT CONFIG / WAIT MODELS before)
-    NET ok      Q 3         whether the platform answers (ok / offline / --), detections waiting in the outbox
-    GPS --      AL 5        GPS (not connected yet), alerts on the list (? before the first list)
+    NET ok      Q 3         whether the platform answers (ok / offline / --), detections waiting to be sent
+    GPS 3D 13   AL 5        GNSS fix and satellites used (-- no module, nofix N: N satellites in view), alerts on
+                            the list (? before the first list)
     192.168.1.20 52C        the IP to reach the Pi, CPU temperature
 
 When an accepted detection is on the owner's alert list, the screen shows the plate and the alert text for
@@ -16,6 +17,7 @@ import time
 import unicodedata
 from collections import deque
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from common import system_info
 from common.jsonlog import log
@@ -24,9 +26,13 @@ from detection.cloud.api import CloudHealth
 from detection.config.store import ConfigurationStore
 from detection.contract.alerts import Alert
 from detection.contract.ingest import DetectionEvent
-from detection.delivery.outbox import Outbox
+from detection.contract.metrics import FixType
+from detection.delivery.queue import PersistentQueue
+from detection.gps.source import LocationSource
+from detection.gps.tracker import GpsStatus
 from detection.pipeline import FrameResult
 from detection.rules.alerts import AlertWatch
+from detection.vision.frame import Frame
 from detection.vision.models import ModelSlot
 
 REFRESH_SECONDS = 1.0
@@ -63,6 +69,7 @@ class StatusView:
     models: str  # e.g. "D2 O3"
     online: bool | None
     pending: int
+    gps: GpsStatus
     alerts: int | None  # None before the first alert list
     ip: str
     temp_c: float | None
@@ -74,7 +81,15 @@ def status_lines(view: StatusView) -> list[str]:
     alerts = "?" if view.alerts is None else _count(view.alerts)
     temp = "" if view.temp_c is None else f" {view.temp_c:.0f}C"
     return [first, f"{'NET ' + network:<{LEFT_COLUMN}}Q {_count(view.pending)}",
-            f"{'GPS --':<{LEFT_COLUMN}}AL {alerts}", f"{view.ip}{temp}"]
+            f"{gps_text(view.gps):<{LEFT_COLUMN}}AL {alerts}", f"{view.ip}{temp}"]
+
+
+def gps_text(status: GpsStatus) -> str:
+    if not status.receiving:
+        return "GPS --"
+    if status.fix is FixType.NONE:
+        return f"GPS nofix {status.satellites_in_view}"
+    return f"GPS {status.fix.value[-2:]} {status.satellites_used}"
 
 
 def alert_lines(alert: Alert) -> list[str]:
@@ -97,7 +112,8 @@ class StatusSources:
     """Where the status screen reads from; each part is updated by its own thread."""
     configuration: ConfigurationStore
     models: ModelSlot
-    outbox: Outbox
+    detections: PersistentQueue[DetectionEvent]
+    gps: LocationSource
     health: CloudHealth
     alerts: AlertWatch
 
@@ -119,8 +135,8 @@ class Feedback:
     def open(cls, sources: StatusSources) -> "Feedback":
         return cls(sources, Lcd.open(), Beeper.open(), open_led())
 
-    def frame_done(self, result: FrameResult) -> None:
-        """Called by the frame loop after every frame."""
+    def on_frame(self, frame: Frame, result: FrameResult) -> None:
+        """A frame observer of the loop (loop.py)."""
         self.frame_rate.tick()
         if not self._ready:
             self._ready = True
@@ -153,7 +169,8 @@ class Feedback:
         configuration, loaded = self.sources.configuration.current, self.sources.models.get()
         stage = "config" if configuration is None else "models" if loaded is None else "running"
         models = "" if loaded is None else f"D{_short(loaded.versions.detector)} O{_short(loaded.versions.ocr)}"
-        return StatusView(stage, fps, models, self.sources.health.online, self.sources.outbox.pending(),
+        return StatusView(stage, fps, models, self.sources.health.online, self.sources.detections.pending(),
+                          self.sources.gps.status(datetime.now(UTC)),
                           len(self.sources.alerts) if self.sources.alerts.loaded else None,
                           system_info.local_ip(), system_info.cpu_temp_c())
 

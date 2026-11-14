@@ -1,19 +1,25 @@
 # Detection mode (rpi-edge)
 
 The target mode of the edge node: the Raspberry Pi reads license plates from the camera and sends them to the
-platform. Frames never leave the device in this mode; only the detections do, through a local buffer
-(store-and-forward, root `CLAUDE.md`).
+platform, with its position, the photo of the frame, its track and its health. Everything that has to reach the
+platform goes through local queues (store-and-forward, root `CLAUDE.md`).
 
 ```
-camera (4056x3040 BGR) -> detector (ONNX) -> geometry rule -> rectified crop -> OCR (ONNX) -> per-frame rule
-       -> cooldown per plate -> outbox (SQLite) -> sender -> POST /api/v1/ingest/detections (batches)
+camera -> position of the frame (GNSS) -> detector -> geometry rule -> crop -> OCR -> per-frame rule -> cooldown
+   |                                                                                          |
+   | photo of the frame (JPEG on the SD card)                                                 v
+   v                                                                          queue: detections -> POST /api/v1/ingest/detections
+queue: images -> POST /api/v1/images/presigned-urls -> PUT to S3
+GNSS track       -> queue: locations -> POST /api/v1/ingest/device-locations
+health of device -> queue: metrics   -> POST /api/v1/device/metrics
 ```
 
-Status (2026-11-12): detection, OCR, the outbox and batch sending run on the Pi against a development stand-in
-of the platform (`tools/dev_cloud.py`), see [Measured on the Pi](#10-measured-on-the-pi). The AWS side exists in
-code (the models bucket and route in `infrastructure/`, `GET /api/v1/device/models` and the configuration fields in
-device-management, Cognito sign-in here) and is covered by tests, but has not run against AWS yet, see
-[What is still missing](#11-what-is-still-missing). How to switch the Pi into this mode is in [README.md](README.md).
+Status (2026-11-13): everything above runs on the Pi against a development stand-in of the platform
+(`tools/dev_cloud.py`, which checks the batches against the main rules of the ingest contracts), with the real GNSS
+module, see [Measured on the Pi](#13-measured-on-the-pi). The AWS side exists in code (the models bucket and route in
+`infrastructure/`, the endpoints and configuration fields in device-management, Cognito sign-in here) and is
+covered by tests, but has not run against AWS yet, see [What is still missing](#14-what-is-still-missing). How to
+switch the Pi into this mode is in [README.md](README.md).
 
 ## 1. Decisions
 
@@ -28,9 +34,13 @@ Decided 2026-11-12. Each line is the decision, the reason follows in the section
 | Configuration | Only the device configuration of device-management (thresholds, model versions, camera, batching), which also holds the defaults; the device keeps a copy and has no settings of its own ([section 4](#4-configuration)) |
 | Device identity | Cognito only (the `device` app client, username and password from pairing); no AWS keys on the device ([section 5](#5-device-account)) |
 | Models | The versions are part of the configuration; device-management signs S3 download URLs for them; immutable versions, SHA-256 checked, cached on the SD card; a new version is swapped in without a restart ([section 6](#6-models)) |
-| Buffer | SQLite (WAL, `synchronous=FULL`) on the SD card; only detections to be sent; 30 days at most ([section 7](#7-outbox-and-sending)) |
-| Sending | Batches in the shape of the ingest contract; its section 4 decides delete / quarantine / retry ([section 7](#7-outbox-and-sending)) |
-| Alerts | The owner's alert list is polled into memory; an accepted detection of a listed plate shows on the LCD with three beeps ([section 8](#8-alerts-and-the-driver)) |
+| Queues | One SQLite queue (WAL, `synchronous=FULL`) on the SD card per stream: detections, locations, metrics, photos; only what is to be sent; 30 days at most (metrics 6) ([section 7](#7-queues-and-sending)) |
+| Sending | Batches in the shape of each contract; section 4 of the ingest contract decides delete / quarantine / retry, the same code for every stream ([section 7](#7-queues-and-sending)) |
+| Position | The GNSS module on UART0; a detection carries the last fix at the capture of its frame (at most 30 s old, its age in `fixAgeMs`); a frame without one is not read ([section 8](#8-position-and-the-track)) |
+| Track | A point every `locationSampleSeconds` while moving, one a minute while stationary, to `device-locations` ([section 8](#8-position-and-the-track)) |
+| Photos | The key of the photo is computed on the device, so a detection leaves at once; the JPEG of the full frame follows in the background ([section 9](#9-photos)) |
+| Metrics | A measurement every `metricsSeconds`, queued like everything else ([section 10](#10-device-metrics)) |
+| Alerts | The owner's alert list is polled into memory; an accepted detection of a listed plate shows on the LCD with three beeps ([section 11](#11-alerts-and-the-driver)) |
 | Messages | Every document exchanged with the platform is a frozen dataclass in `detection/contract/`, checked against its contract on the way in ([section 2](#2-pipeline)) |
 
 ## 2. Pipeline
@@ -39,15 +49,19 @@ Code: `detection/`, one small module per step, grouped by what it deals with:
 
 ```
 detection/
-  main.py         assembles the parts and starts the threads
-  loop.py         the frame loop: capture, pipeline, outbox, a summary every 30 s
-  pipeline.py     one frame -> the events to buffer (detector, send rule, OCR)
+  main.py         assembles the parts and starts the threads (the docstring lists them)
+  loop.py         the frame loop: capture, position, pipeline, queue, observers; a summary every 30 s
+  pipeline.py     one frame and its position -> the events to buffer (detector, send rule, OCR)
   feedback.py     the LCD, the buzzer and the LED in the car: status screen, alert screen
-  contract/       every message with the platform as a dataclass: configuration, models, alerts, ingest, problem
+  metrics.py      the device measurements; throughput.py counts the frames
+  contract/       every message with the platform as a dataclass: configuration, models, alerts, ingest,
+                  locations, metrics, images, problem; wire.py has the ids and timestamps they share
   config/         environment.py (rpi-edge/.env), store.py (the configuration and its copy on the device)
+  gps/            nmea (sentences), tracker (fixes, state), source (module / fixed / none), serial_reader, recorder
   vision/         frame, camera, replay, preprocess, onnx (sessions), detector, ocr, models (loaded set, swap)
   rules/          plates (Polish format), send_rule (geometry, reading, cooldown), alerts (the alert list)
-  delivery/       outbox (SQLite), sender (batches)
+  delivery/       queue (SQLite), queues (the four queues and their streams), sender (batches), answers,
+                  backoff, photos (JPEG encoder), uploads (photo upload)
   cloud/          transport (HTTP), cognito, api (token, trace id, health), config_poll, model_store,
                   model_updater, alert_poll
 ```
@@ -59,8 +73,12 @@ What goes where, by type (all in `detection/contract/`):
 | `DeviceConfiguration` | in | `GET /api/v1/device/config` | `config/store.py`, then every part reads `configuration.current` |
 | `DeviceModels` | in | `GET /api/v1/device/models` | `cloud/model_store.py` |
 | `AlertList` | in | `GET /api/v1/alerts` (operations-service) | `cloud/alert_poll.py`, kept by `rules/alerts.py` |
-| `DetectionEvent`, `DetectionBatch` | out | `POST /api/v1/ingest/detections` | `pipeline.py` creates events, `delivery/outbox.py` stores them, `delivery/sender.py` sends batches |
-| `Problem` | in | any error answer | the sender (quarantine by `fields[].index`), the poller and the model store (logged codes) |
+| `DetectionEvent`, `DetectionBatch` | out | `POST /api/v1/ingest/detections` | `pipeline.py` creates events, `delivery/queue.py` stores them, `delivery/sender.py` sends batches |
+| `Location` | out | inside every detection | `gps/tracker.py` makes it from a fix, `pipeline.py` attaches it |
+| `LocationPoint`, `LocationBatch` | out | `POST /api/v1/ingest/device-locations` | `gps/recorder.py` creates points, the same queue and sender |
+| `DeviceMetric`, `MetricsBatch` | out | `POST /api/v1/device/metrics` | `metrics.py` creates measurements, the same queue and sender |
+| `ImageUploadRequest`, `ImageUploadUrls` | out, in | `POST /api/v1/images/presigned-urls` | `delivery/uploads.py` |
+| `Problem` | in | any error answer | the senders (quarantine by `fields[].index`), the pollers and the model store (logged codes) |
 
 A document becomes a dataclass in `from_document()`, which checks every field against the range, choices or
 pattern of its contract (`contract/parsing.py`) and names each problem; nothing else in the mode touches a raw
@@ -73,7 +91,8 @@ document. Tests mirror the folders under `tests/`.
 | Crop | `vision/preprocess.py` | `rectify_plate()`: 128x64 RGB with an 8 % margin, from the corners on the full-resolution frame |
 | OCR | `vision/ocr.py` | OCR v3 (fast-plate-ocr `cct-s-v2-global` with the readability head): text, the weakest slot probability, P(readable) |
 | Rule | `rules/send_rule.py`, `rules/plates.py` | [Section 3](#3-send-rule) |
-| Event | `pipeline.py`, `contract/ingest.py` | One `DetectionEvent` per accepted plate, in the shape of `docs/api/ingest-detections.md` |
+| Position | `gps/source.py` | The fix of the GNSS module at the capture of the frame, before the detector's results are read ([section 8](#8-position-and-the-track)) |
+| Event | `pipeline.py`, `contract/ingest.py` | One `DetectionEvent` per accepted plate, in the shape of `docs/api/ingest-detections.md`, with the key of its photo and its position |
 
 `vision/preprocess.py` is a copy of `ml-models/src/anpr_ml/common/preprocess.py`. `tests/vision/test_preprocess.py` holds
 the golden checksums of `ml-models/tests/test_common.py`. If the functions change in ml-models, they change here
@@ -98,6 +117,9 @@ matches the devices built so far).
 The shape recommended by the ML analysis (`ml-models/ML_ASSUMPTIONS.md`, section 9). The thresholds are still
 OPEN in ML; they are settings, not code.
 
+0. **A position, before everything else.** The platform requires a position with every detection, and the position
+   at the capture of the frame cannot be recovered later, so a frame without a fix (none within 30 s of its
+   capture, [section 8](#8-position-and-the-track)) is not read at all: its detections are counted as `no_location`.
 1. **Geometry, before the OCR** (`ml.minPlateWidthPx`, default 70 px on the original frame;
    `ml.minEdgeMarginPx`, default 10 px). Narrower plates are not read reliably, and a plate cut by the frame edge
    gives a wrong crop (the exported model does not clip corners to the frame). The corners must also be
@@ -120,7 +142,7 @@ motorcycle, temporary, historic, diplomatic and service plates fail and are not 
 pass (PLATE_FORMAT.md, last section).
 
 The rejections are counted per reason in the `detection_summary` log line every 30 s (`too_small`,
-`near_edge`, `bad_corners`, `no_text`, `unreadable`, `bad_format`, `low_confidence`, `cooldown`), with the
+`near_edge`, `bad_corners`, `no_location`, `no_text`, `unreadable`, `bad_format`, `low_confidence`, `cooldown`), with the
 median timings. That is the data for tuning the thresholds, without any plate text in the logs.
 
 ## 4. Configuration
@@ -212,39 +234,104 @@ A `url` may also be relative to the endpoint (`tools/dev_cloud.py` serves the fi
 detections in both ONNX Runtime and PyTorch, corners within 0.024 px). Output `(1, 100, 18)`. OCR v3 is
 `ml-models/runs/ocr/v3/model.onnx` with its `plate_config.yaml`, as exported by `anpr-train-ocr`.
 
-## 7. Outbox and sending
+## 7. Queues and sending
 
-**Outbox** (`delivery/outbox.py`, `/state/outbox.sqlite3`):
+**Queues** (`delivery/queue.py`, `delivery/queues.py`, one SQLite file each in `/state/outbox/`):
 
-- One row per accepted `DetectionEvent`, stored as the document that is sent and read back into the same
-  dataclass (`QueuedDetection`). Each frame's detections are added in one
-  committed transaction with `synchronous=FULL`, so they survive a power cut.
-- Only what is to be sent is stored: no frames, no rejected readings (plates are personal data).
-- Rows older than 30 days are dropped (the ingest refuses them anyway), and each table keeps at most 100 000 rows,
-  oldest dropped first (`detections_dropped` in the log).
-- `quarantine` keeps the detections the ingest refused for good (400, 413, 415), with the status and the error
-  code, for diagnosis. Same limits.
+| Queue | Item | Kept | Sent to |
+|---|---|---|---|
+| `detections` | `DetectionEvent` | 30 days, 100 000 rows | `POST /api/v1/ingest/detections` |
+| `locations` | `LocationPoint` | 30 days, 200 000 rows | `POST /api/v1/ingest/device-locations` |
+| `metrics` | `DeviceMetric` | 6 days (the platform refuses older), 20 000 rows | `POST /api/v1/device/metrics` |
+| `images` | `ImageJob`: the frame id, its capture time, the path of the JPEG | 30 days, 2 000 rows | presigned URL, then S3 ([section 9](#9-photos)) |
 
-**Sender** (`delivery/sender.py`), one thread:
+- An item is stored as the document that is sent and read back into the same dataclass. The items of one frame are
+  added in one committed transaction with `synchronous=FULL`, so they survive a power cut.
+- Only what is to be sent is stored: no rejected readings (plates and coordinates are personal data). Items past
+  the retention, and the oldest beyond the row limit, are dropped (`items_dropped` in the log).
+- `<name>_quarantine` keeps what the platform refused for good (400, 413, 415) with the status and the error code,
+  for diagnosis. Same limits.
 
-- A batch leaves when `batching.detectionsBatchSize` detections wait (20) or the oldest has waited
-  `batching.maxBatchDelaySeconds` (10 s). Body: `{"batchId": ..., "detections": [...]}`.
-- `batchId` is derived from the detection ids (UUID v5), so a resend of the same detections reuses it without
-  storing it. It is also the `X-Trace-Id` of the request. `detectionId` (UUID v7) is the trace id of a detection.
-- Outcomes, as the ingest contract (section 4) asks:
+**Senders** (`delivery/sender.py`): one `Sender` per JSON stream (detections, locations, metrics), one thread each,
+the same code, told by a `Stream` what to send where:
+
+- A batch leaves when the stream's batch size of items wait (`batching.detectionsBatchSize` 20,
+  `batching.locationsBatchSize` 100) or the oldest has waited `batching.maxBatchDelaySeconds` (10 s). Metrics leave
+  at once, up to 100 per request (the contract), since one measurement is made per interval.
+- The batch id (UUID v5 of the item ids, so a resend reuses it without storing it) is also the `X-Trace-Id` of the
+  request. `detectionId` (UUID v7) is the trace id of a detection. Metrics use a stable id of their `recordedAt`s.
+- Outcomes, as the ingest contract (section 4) asks, decided in `delivery/answers.py` for every sender and the
+  photo uploader:
 
   | Answer | Edge |
   |---|---|
   | 2xx | delete the batch |
-  | 400, 413, 415 | quarantine the detections named by `fields[].index`, or the whole batch when none is named; send the rest again at once |
+  | 400, 413, 415 | quarantine the items named by `fields[].index`, or the whole batch when none is named; send the rest again at once |
   | 401 | the token is renewed and the request retried once (`cloud/api.py`); if it fails again, back off |
   | 403 | not a device token: a configuration problem; keep the data, try again in 10 min, log an error |
-  | 429, 5xx, no answer, other statuses | keep the batch, back off exponentially (2 s doubling up to 5 min, with jitter), honour `Retry-After` |
+  | 429, 5xx, no answer, other statuses | keep the batch, back off exponentially (2 s doubling up to 5 min, with jitter, `delivery/backoff.py`), honour `Retry-After` |
 
 - The device has no battery-backed clock. Without network after a cold start, `detectedAt` may be wrong until the
-  time syncs, and the ingest may refuse such detections (`TIMESTAMP_TOO_OLD` / `TIMESTAMP_IN_FUTURE`, quarantined).
+  time syncs, and the platform may refuse such items (`TIMESTAMP_TOO_OLD` / `TIMESTAMP_IN_FUTURE`, quarantined).
+  The GNSS module gives the true time: when the clock of the device differs from it by 5 s or more, the tracker logs
+  `clock_skew` once a minute.
 
-## 8. Alerts and the driver
+## 8. Position and the track
+
+The GNSS module (Waveshare LC76G) is wired to UART0 (`RASPBERRY_PI_SETUP.md`, "Pins in use"), is read at 115200 baud
+from `GPS_DEVICE` (`/dev/ttyAMA0`) and needs no commands: it sends NMEA sentences once a second. Decided 2026-11-13.
+
+- **Parsing** (`gps/nmea.py`): RMC (time, position, speed, course), GGA (satellites used, HDOP), GSA (fix type) and
+  GSV (satellites in view) only; a sentence with a wrong checksum or a missing field is ignored, so noise never
+  becomes a position. `gps/serial_reader.py` feeds `gps/tracker.py` and reopens the port when it fails (the first
+  failure is logged once).
+- **A fix** (`gps/tracker.py`): a valid RMC. Its accuracy is HDOP x 5 m (`accuracyM`), its heading is dropped below
+  2 m/s (7 km/h), where the course over ground is noise (a stationary antenna near a window shows up to 0.7 m/s).
+  The fixes of the last minute are kept with the device time at which they arrived.
+- **The position of a frame** (`gps/source.py`, `locate()`): the latest fix that arrived at or before the capture of
+  the frame, if it is at most 30 s older; `fixAgeMs` is its age at the capture. Without such a fix the frame is
+  not read (rejection `no_location`, [section 3](#3-send-rule)): waiting would not help, since the position at that
+  moment cannot be reconstructed later, and a position older than 30 s is not the position of a moving car.
+- **The track** (`gps/recorder.py`): the latest fresh fix every `intervals.locationSampleSeconds` (5 s) while the
+  speed is 2 m/s or more, one point a minute while stationary, none without a fresh fix. The platform refuses a
+  point without a position.
+- **Sources** (`GPS_DEVICE`, `GPS_FIXED_LOCATION` in `.env`): the module; a fixed `lat,lon` for development and for
+  replaying recordings (no fix needed); or neither, then no frame is ever read and the log says why
+  (`gps_not_configured`).
+- Coordinates are personal data: they are never logged. The status screen shows only the state: `GPS 3D 13` (fix and
+  satellites used), `GPS nofix 7` (satellites in view), `GPS --` (the module is silent).
+
+## 9. Photos
+
+The detection carries the S3 key of the photo of its frame, `images/{deviceId}/{yyyy}/{MM}/{dd}/{frameId}.jpg`
+(`contract/images.py`). The layout is fixed by the contract, so the device computes the key itself and the detection
+leaves at once, without waiting for the upload (decided 2026-11-13; the contracts say so in
+`docs/api/ingest-detections.md`, section 7). The photo follows in the background:
+
+1. **Save** (`delivery/photos.py`): the frame loop hands every frame that produced detections to the encoder thread,
+   which writes the JPEG (full resolution, quality 90, 1.5-3 MB in the tests) to `/state/frames/<frameId>.jpg`
+   (through a `.part` file, so a power cut never leaves half a photo) and adds a row to the `images` queue. When the
+   encoder is three frames behind, further photos are not saved (`photo_not_saved`): a detection without a photo is
+   better than a slower detection. The size of the photo is to be decided later.
+2. **Upload** (`delivery/uploads.py`): in batches of `batching.imageUrlsBatchSize` the uploader asks device-management
+   for presigned URLs. For each frame the key in the answer must be the key the device computed, otherwise the photo is
+   quarantined (`image_quarantined`, reason `IMAGE_KEY_MISMATCH`). Then it PUTs the file with
+   `Content-Type: image/jpeg` and no `Authorization` header (the URL carries its own signature). A failed or refused
+   PUT keeps the file and the row; the next attempt asks for fresh URLs, which also covers an expired one.
+3. **Delete**: a file is deleted with its row, whether it was uploaded, quarantined or dropped by the retention.
+
+## 10. Device metrics
+
+`metrics.py` takes a measurement after the start and then every `intervals.metricsSeconds` (60 s): CPU temperature,
+CPU and RAM load (psutil), frames analysed per second since the previous measurement, the length of the detection,
+location and photo queues, free space of the state volume, uptime, and the GNSS state (`NONE` / `FIX_2D` / `FIX_3D`
+and satellites used). It queues the measurement like everything else, so after an outage they go out together. Values
+are brought into the ranges of the contract before sending, because one invalid measurement makes the service refuse
+the whole batch. Without a readable CPU temperature (a development PC) no measurement is made: the contract requires
+it, and a made-up value would chart as a fact. View 4 shows the device online while its latest measurement is
+young, so without metrics a working device would look offline.
+
+## 11. Alerts and the driver
 
 Decided 2026-11-12, in the shape proposed then.
 
@@ -262,8 +349,8 @@ and the `alertId`, never the plate. The detection itself is sent as any other.
 
 ```
 DET 1.6fps D2 O3        frames per second (last 10 s), model versions; WAIT CONFIG / WAIT MODELS before
-NET ok      Q 3         the platform answers (ok / offline / --), detections waiting in the outbox
-GPS --      AL 5        GPS (not connected yet), alerts on the list (? before the first list)
+NET ok      Q 3         the platform answers (ok / offline / --), detections waiting to be sent
+GPS 3D 13   AL 5        the GNSS fix and satellites used, alerts on the list (? before the first list)
 192.168.1.20 54C        the IP, the CPU temperature
 ```
 
@@ -274,15 +361,16 @@ GPS --      AL 5        GPS (not connected yet), alerts on the list (? before th
   without an answer, ok after one with any answer.
 - Every part is optional: without an LCD, buzzer or LED the mode works the same and only the log tells.
 
-## 9. Logs
+## 12. Logs
 
 JSON lines (`common/jsonlog.py`: `ts`, `level`, `event`, fields), per the project convention. In the business flow
-`traceId` is the `detectionId` (`detection_buffered`) or the `batchId` (`batch_sent`, `batch_failed`,
-`detections_quarantined`), and `alert_matched` carries the `traceId` of the detection. Plate texts (also of the
-alert list), frames, passwords, tokens and the query strings of presigned URLs are never logged. `detection_summary` every 30 s: frames, fps, events, rejections per reason, median timings, pending and
-quarantined detections, CPU temperature.
+`traceId` is the `detectionId` (`detection_buffered`) or the id of the batch (`batch_sent`, `batch_failed`,
+`items_quarantined`, each with `stream`: detections, locations or metrics), and `alert_matched` carries the
+`traceId` of the detection. Plate texts (also of the alert list), coordinates, frames, passwords, tokens and the
+query strings of presigned URLs are never logged. `detection_summary` every 30 s: frames, fps, events, rejections
+per reason (`no_location` among them), median timings, pending and quarantined detections, CPU temperature.
 
-## 10. Measured on the Pi
+## 13. Measured on the Pi
 
 Pi 5 (8 GB), detector v2 at 1280x960 and OCR v3, both FP32 on ONNX Runtime with 4 threads, 2026-11-12:
 
@@ -300,6 +388,13 @@ Pi 5 (8 GB), detector v2 at 1280x960 and OCR v3, both FP32 on ONNX Runtime with 
   version in the configuration was downloaded and swapped in without a change in the frame rate; with the tunnel
   closed, a restart ran on the copies of the configuration and the models. The collection mode still starts with
   the shared peripherals.
+- With the position, photos, track and metrics (2026-11-13, on the Pi through the SSH tunnel to `tools/dev_cloud.py`,
+  with the real GNSS module, its antenna behind a window): 248 tests pass inside the image (ARM); a replay of a val
+  session ran 150 s at 1.3-1.5 fps with 8 detections in 5 batches (202), 15 measurements (204), 6 track points
+  (202), 5 requests for photo URLs and 7 photos uploaded (11 MB), all of it accepted by the checks of the stand-in
+  (required fields, ranges, the format of `imageKey`); on the live camera, 1.6 fps with the same threads running;
+  the LCD and the buzzer opened without errors (not seen by the tester). The 6 track points instead of the 3 a
+  stationary device should record led to the moving threshold of 2 m/s.
 - Store-and-forward: with the mock stopped, detections stayed in the outbox (`batch_not_sent`, backoff). After a
   `docker kill` (no clean shutdown) the container came back with them (`pending: 4`), and they went out in one
   batch once the mock was back.
@@ -307,13 +402,16 @@ Pi 5 (8 GB), detector v2 at 1280x960 and OCR v3, both FP32 on ONNX Runtime with 
   the detector input size (ml-models roadmap, item 6). Cheaper inference (INT8, a smaller input, fewer OCR threads)
   is not tried yet.
 
-## 11. What is still missing
+## 14. What is still missing
 
-- **Full ingest body**: `location` (GPS module) and `imageKey` (upload of the frame through
-  `POST /api/v1/images/presigned-urls`) are required by the ingest contract. Until they exist, a batch sent to the
-  real ingest is refused with 400 and quarantined. That is why the real endpoint has not been called yet.
-- **First run against AWS**: `terraform apply` of the models bucket and route, device-management deployed with
-  the new contract, models v2 and v3 published, the device paired and its credentials placed on the Pi.
+- **First run against AWS**: `terraform apply` of the models bucket and route, device-management deployed with the
+  new contract, models v2 and v3 published, the device paired (`infrastructure/scripts/create_device.py`) and its
+  credentials placed on the Pi. The Cognito sign-in and the real ingest, device-locations and metrics endpoints have
+  only run against fakes and the stand-in. The deployed ingest Lambda and operations-service may be older than the
+  contracts here (alerts for devices, photo URLs in detections).
+- **Photos**: the size of the uploaded photo (full frame now); frames of a power cut that never reached the queue
+  leave a detection without a photo.
+- **GNSS**: time from the module to correct the clock of the device (only a warning now); the antenna in the car.
 - **ml-models**: the final thresholds and detector input size (the `detection_summary` timings on the Pi feed that
-  benchmark).
-- **Device**: metrics (`POST /api/v1/device/metrics`); the GPS line of the screen.
+  benchmark). The analysis rate is 1.4-1.7 fps.
+- **Later**: tracking a plate across frames, rotation of the device password (`docs/identity-and-access.md`).

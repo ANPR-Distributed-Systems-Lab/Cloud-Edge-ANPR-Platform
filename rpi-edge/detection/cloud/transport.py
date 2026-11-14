@@ -1,4 +1,4 @@
-"""The only module that touches the network. Tests replace Http with a fake that has the same two methods."""
+"""The only module that touches the network. Tests replace Http with a fake that has the same methods."""
 import hashlib
 import json
 import os
@@ -8,6 +8,7 @@ from pathlib import Path
 import requests
 
 TIMEOUT_SECONDS = 15
+UPLOAD_TIMEOUT_SECONDS = 120  # a photo of a full frame over a mobile connection
 
 
 class NetworkError(Exception):
@@ -52,6 +53,17 @@ class Http:
         except requests.RequestException as e:
             raise NetworkError(f"GET {_without_query(url)}: {type(e).__name__}") from None
         return digest.hexdigest()
+
+    def upload(self, url: str, path: Path, content_type: str) -> int:
+        """PUTs the file to a presigned URL and returns the HTTP status. No Authorization header: the URL carries its
+        own signature, which also covers the Content-Type."""
+        try:
+            with open(path, "rb") as f:
+                r = self.session.put(url, data=f, headers={"Content-Type": content_type},
+                                     timeout=UPLOAD_TIMEOUT_SECONDS)
+        except requests.RequestException as e:
+            raise NetworkError(f"PUT {_without_query(url)}: {type(e).__name__}") from None
+        return r.status_code
 
 
 def _without_query(url: str) -> str:

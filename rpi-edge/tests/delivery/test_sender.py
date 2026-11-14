@@ -1,12 +1,12 @@
 import pytest
 from fakes import FakeApi, response
-from samples import configuration
-from test_outbox import event
+from samples import configuration, detection_event
 
 from detection.cloud.transport import NetworkError
 from detection.contract.ingest import DetectionBatch
-from detection.delivery.outbox import Outbox
-from detection.delivery.sender import FORBIDDEN_WAIT_SECONDS, Sender
+from detection.delivery.queue import PersistentQueue
+from detection.delivery.queues import DETECTION_CODEC
+from detection.delivery.sender import FORBIDDEN_WAIT_SECONDS, Sender, Stream
 
 URL = "https://api.example/api/v1/ingest/detections"
 
@@ -18,22 +18,30 @@ class FixedConfiguration:
 
 def setup(tmp_path, *answers, count=3, age=0.0, **batching):
     now = 1000.0
-    box = Outbox(tmp_path / "o.sqlite3", clock=lambda: now)
-    box.add([event(n, now - age) for n in range(count)])
+    queue = PersistentQueue(tmp_path / "d.sqlite3", "detections", DETECTION_CODEC, 30, 1000, lambda: now)
+    queue.add([detection_event(n, now - age) for n in range(count)])
     api = FakeApi(*answers)
     config = FixedConfiguration(**({"detectionsBatchSize": 3, "maxBatchDelaySeconds": 10} | batching))
-    return box, api, Sender(box, api, URL, config)
+    stream = Stream("detections", URL, queue, DetectionBatch, lambda c: c.batching.detections_batch_size,
+                    lambda c: c.batching.max_batch_delay_seconds)
+    return queue, api, Sender(stream, api, config)
 
 
 def test_a_full_batch_is_sent_and_deleted_on_202(tmp_path):
     box, api, sender = setup(tmp_path, response(202, {"accepted": 3}))
-    expected = DetectionBatch(tuple(q.event for q in box.oldest(3)))
+    expected = DetectionBatch(tuple(q.item for q in box.oldest(3)))
     sender.send_once()
     [sent] = api.requests
     assert sent["method"] == "POST" and sent["url"] == URL
     assert sent["body"] == expected.to_document()
     assert sent["body"]["batchId"] == sent["headers"]["X-Trace-Id"]
     assert sent["headers"]["Content-Type"] == "application/json"
+    assert box.pending() == 0
+
+
+def test_a_204_is_a_success_too(tmp_path):
+    box, api, sender = setup(tmp_path, response(204))
+    sender.send_once()
     assert box.pending() == 0
 
 
@@ -47,11 +55,11 @@ def test_a_partial_batch_waits_until_the_delay_is_over(tmp_path):
     assert len(api.requests) == 1 and box.pending() == 0
 
 
-def test_only_the_detections_named_by_a_400_are_quarantined(tmp_path):
+def test_only_the_items_named_by_a_400_are_quarantined(tmp_path):
     problem = {"code": "VALIDATION_FAILED", "fields": [{"index": 1, "field": "detections[1].plate", "code": "PATTERN"}]}
     box, api, sender = setup(tmp_path, response(400, problem))
     assert sender.send_once() == 0.0  # the rest goes again right away
-    assert [q.event.detection_id for q in box.oldest(10)] == ["id-0", "id-2"]
+    assert [q.item.detection_id for q in box.oldest(10)] == ["id-0", "id-2"]
     assert box.quarantined() == 1
 
 

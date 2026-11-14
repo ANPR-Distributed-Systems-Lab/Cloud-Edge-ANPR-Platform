@@ -1,7 +1,15 @@
-"""Pi health values worth watching in a hot car on a power bank: CPU temperature, throttling flags, the IP."""
+"""Pi health values worth watching in a hot car on a power bank: CPU temperature and load, memory, disk, uptime,
+throttling flags, the IP."""
 import os
+import shutil
 import socket
 import struct
+import time
+from pathlib import Path
+
+import psutil
+
+MEGABYTE = 1_000_000
 
 
 def cpu_temp_c() -> float | None:
@@ -10,6 +18,23 @@ def cpu_temp_c() -> float | None:
             return int(f.read()) / 1000
     except (OSError, ValueError):
         return None
+
+
+def cpu_usage_percent() -> float:
+    """Load of all cores since the previous call (the first call after the start reports 0)."""
+    return psutil.cpu_percent(interval=None)
+
+
+def ram_usage_percent() -> float:
+    return psutil.virtual_memory().percent
+
+
+def disk_free_mb(path: Path) -> int:
+    return shutil.disk_usage(path).free // MEGABYTE
+
+
+def uptime_seconds() -> int:
+    return int(time.time() - psutil.boot_time())
 
 
 def _vcgencmd(command: str) -> str:

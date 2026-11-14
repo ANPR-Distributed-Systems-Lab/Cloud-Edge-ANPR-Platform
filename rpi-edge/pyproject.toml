@@ -3,10 +3,11 @@ name = "rpi-edge"
 version = "0.3.0"
 requires-python = ">=3.12"
 dependencies = [
-    # Hardware of the collection mode (GPIO, LCD) and Pi health
+    # Hardware of both modes (GPIO, LCD, the GNSS module on a serial port) and Pi health
     "gpiozero>=2.0.1.post3",
     "lgpio>=0.2.2.0 ; sys_platform == 'linux'",
     "psutil>=7.2.2",
+    "pyserial>=3.5",
     "rplcd>=1.4.0",
     "smbus2>=0.6.1 ; sys_platform == 'linux'",
     # Detection mode

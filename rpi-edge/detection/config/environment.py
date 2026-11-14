@@ -5,8 +5,12 @@ from pathlib import Path
 
 CONFIG_PATH = "/api/v1/device/config"
 MODELS_PATH = "/api/v1/device/models"
-INGEST_PATH = "/api/v1/ingest/detections"
 ALERTS_PATH = "/api/v1/alerts"
+INGEST_PATH = "/api/v1/ingest/detections"
+LOCATIONS_PATH = "/api/v1/ingest/device-locations"
+METRICS_PATH = "/api/v1/device/metrics"
+IMAGE_URLS_PATH = "/api/v1/images/presigned-urls"
+DEFAULT_GPS_BAUD = 115200  # the default of the Waveshare LC76G
 
 
 class EnvironmentIncomplete(ValueError):
@@ -21,22 +25,40 @@ class Environment:
     config_dir: Path
     state_dir: Path
     replay_dir: Path | None = None  # recorded frames instead of the camera (vision/replay.py)
+    gps_device: str | None = None  # serial port of the GNSS module, e.g. /dev/ttyAMA0
+    gps_baud: int = DEFAULT_GPS_BAUD
+    gps_fixed_location: tuple[float, float] | None = None  # (lat, lon) for development and replay, instead of a module
+
+    def url(self, path: str) -> str:
+        return self.api_base_url + path
 
     @property
     def config_url(self) -> str:
-        return self.api_base_url + CONFIG_PATH
+        return self.url(CONFIG_PATH)
 
     @property
     def models_url(self) -> str:
-        return self.api_base_url + MODELS_PATH
-
-    @property
-    def ingest_url(self) -> str:
-        return self.api_base_url + INGEST_PATH
+        return self.url(MODELS_PATH)
 
     @property
     def alerts_url(self) -> str:
-        return self.api_base_url + ALERTS_PATH
+        return self.url(ALERTS_PATH)
+
+    @property
+    def ingest_url(self) -> str:
+        return self.url(INGEST_PATH)
+
+    @property
+    def locations_url(self) -> str:
+        return self.url(LOCATIONS_PATH)
+
+    @property
+    def metrics_url(self) -> str:
+        return self.url(METRICS_PATH)
+
+    @property
+    def image_urls_url(self) -> str:
+        return self.url(IMAGE_URLS_PATH)
 
     @property
     def credentials_file(self) -> Path:
@@ -60,4 +82,20 @@ class Environment:
             config_dir=Path(env.get("CONFIG_DIR", "/config")),
             state_dir=Path(env.get("STATE_DIR", "/state")),
             replay_dir=Path(env["REPLAY_DIR"]) if env.get("REPLAY_DIR") else None,
+            gps_device=env.get("GPS_DEVICE") or None,
+            gps_baud=int(env.get("GPS_BAUD") or DEFAULT_GPS_BAUD),
+            gps_fixed_location=_fixed_location(env.get("GPS_FIXED_LOCATION")),
         )
+
+
+def _fixed_location(value: str | None) -> tuple[float, float] | None:
+    """'52.229676,21.012229' to (lat, lon); anything else is a mistake in .env and stops the mode with a message."""
+    if not value:
+        return None
+    try:
+        lat, lon = (float(part) for part in value.split(","))
+    except ValueError:
+        raise EnvironmentIncomplete(f"GPS_FIXED_LOCATION must be 'lat,lon', not {value!r}") from None
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180) or (lat, lon) == (0, 0):
+        raise EnvironmentIncomplete("GPS_FIXED_LOCATION is not a valid position")
+    return lat, lon

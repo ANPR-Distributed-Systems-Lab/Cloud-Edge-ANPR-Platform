@@ -39,7 +39,7 @@ model cache of the detection mode).
 main.py             entry point: runs the mode chosen by EDGE_MODE
 common/             shared by both modes: JSON logs, atomic JSON files, auto exposure, Pi health, LCD / buzzer / LED
 collection/         the data collection mode (web UI in collection/ui/)
-detection/          the detection mode: contract/, config/, vision/, rules/, delivery/, cloud/ (DETECTION.md, section 2)
+detection/          the detection mode: contract/, config/, gps/, vision/, rules/, delivery/, cloud/ (DETECTION.md, section 2)
 tests/              unit tests (pytest), no camera, network or GPU
 tools/              development tools: dev_cloud.py (the platform without AWS), stress_test.py (power supply test)
 ```
@@ -91,7 +91,9 @@ API_BASE_URL=http://localhost:8100
 The container uses the host network, so `localhost` on the Pi is the end of the tunnel. The configuration and the
 models are kept on the Pi, so it keeps detecting without the PC; the stand-in only has to be reachable when
 batches go out (they wait in the outbox otherwise). `dev_cloud.py --ingest-status 503` (or `400`) shows the
-retries (or the quarantine), and `--alerts <file>` serves an alert list (a JSON array of alerts in the shape of
+retries (or the quarantine). It also takes locations, metrics and photos (`--uploads <dir>` keeps the photos, which
+show plates: keep that folder outside the repository), and refuses a batch that breaks the main rules of the ingest
+contracts, with `fields[]` as the platform does, so a mistake shows before AWS. `--alerts <file>` serves an alert list (a JSON array of alerts in the shape of
 operations-service; it holds plates, so keep it outside the repository). The stand-in is for development only: against AWS, `API_BASE_URL` is the API Gateway
 and the Cognito settings are filled in (`.env.example`).
 
@@ -105,7 +107,7 @@ container (on the Pi, with the service stopped so that only one process analyses
 ```bash
 docker run --rm --privileged --network host -v /dev:/dev -v rpi-edge_rpi-edge-config:/config \
   -v rpi-edge_rpi-edge-state:/state -e EDGE_MODE=detection -e STATE_DIR=/state/replay \
-  -e API_BASE_URL=http://localhost:8100 \
+  -e API_BASE_URL=http://localhost:8100 -e GPS_FIXED_LOCATION=52.229676,21.012229 \
   -e REPLAY_DIR=/mnt/usb/rpi-edge/<session> --entrypoint sh rpi-edge-rpi-edge \
   -c 'mkdir -p /mnt/usb && mount -o ro /dev/sda1 /mnt/usb && exec /opt/venv/bin/python main.py'
 ```

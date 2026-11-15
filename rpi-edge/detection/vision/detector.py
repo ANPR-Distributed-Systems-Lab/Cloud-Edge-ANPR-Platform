@@ -2,7 +2,7 @@
 
 The model takes the frame resized to its input size (RGB, 0..1, NCHW) and returns up to max_det rows of
 [x1, y1, x2, y2, confidence, class, then x, y, visibility for each corner TL, TR, BR, BL], in pixels of the
-model input. YOLO26 end-to-end models return the same layout, so they can replace it without code changes.
+model input.
 """
 from dataclasses import dataclass
 
@@ -23,7 +23,8 @@ def parse_output(rows: np.ndarray, input_size: tuple[int, int], frame_size: tupl
                  min_confidence: float) -> list[Detection]:
     """Rows of the model output -> detections at or above min_confidence, corners scaled to the frame.
 
-    input_size and frame_size are (width, height).
+    input_size and frame_size are (width, height). The NMS of the export already drops rows below 0.1
+    (CONF_FLOOR in ml-models), so a lower min_confidence changes nothing.
     """
     scale = np.array([frame_size[0] / input_size[0], frame_size[1] / input_size[1]])
     detections = []

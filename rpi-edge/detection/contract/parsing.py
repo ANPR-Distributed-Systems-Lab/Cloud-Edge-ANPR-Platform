@@ -2,7 +2,7 @@
 
 A field `ocr_min_confidence` reads the key `ocrMinConfidence`. What a field accepts is declared next to it:
 
-    exposure_us: int = bounded(20, 1_000_000)     a number in the range (int fields get an int)
+    exposure_us: int = bounded(20, 80_000)        a number in the range (int fields get an int)
     mode: str = one_of("MANUAL", "AUTO")          one of the listed strings
     version: str = matching(r"[A-Za-z0-9]+")       a string matching the whole pattern
     hflip: bool                                   true or false

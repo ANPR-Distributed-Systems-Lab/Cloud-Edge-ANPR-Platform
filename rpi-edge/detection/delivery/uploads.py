@@ -37,7 +37,13 @@ from detection.contract.wire import iso_ms, parse_iso_ms
 from detection.delivery.answers import Outcome, outcome_of, retry_after
 from detection.delivery.backoff import Backoff
 from detection.delivery.queue import Batch, ItemCodec, PersistentQueue, Queued
-from detection.delivery.sender import BACKOFF_FIRST_SECONDS, BACKOFF_MAX_SECONDS, FORBIDDEN_WAIT_SECONDS, IDLE_SECONDS
+from detection.delivery.sender import (
+    BACKOFF_FIRST_SECONDS,
+    BACKOFF_MAX_SECONDS,
+    FORBIDDEN_WAIT_SECONDS,
+    IDLE_SECONDS,
+    LOGGED_FIELD_ERRORS,
+)
 
 
 @dataclass(frozen=True)
@@ -59,7 +65,7 @@ IMAGE_CODEC = ItemCodec(ImageJob.to_document, ImageJob.from_document, lambda j: 
                         lambda j: j.captured_at.timestamp())
 
 
-GATE_RECHECK_SECONDS = 2.0
+GATE_RECHECK_SECONDS = 2.0  # how often a photo that gives way looks at the link again
 DEFERRED_LOG_SECONDS = 60.0  # how often a long wait is reported
 
 
@@ -134,7 +140,7 @@ class ImageUploader:
             self._quarantine(bad, problem.status, problem.code or f"HTTP {problem.status}")
             log("images_quarantined", level="error", traceId=trace_id, count=len(bad), status=problem.status,
                 code=problem.code, fields=[{"index": f.index, "field": f.field, "code": f.code}
-                                           for f in problem.fields][:10])
+                                           for f in problem.fields][:LOGGED_FIELD_ERRORS])
             return 0.0
         if outcome is Outcome.FORBIDDEN:
             log("image_urls_forbidden", level="error", traceId=trace_id, hint="check the device account")

@@ -1,8 +1,9 @@
-"""The plate OCR: fast-plate-ocr's cct-s-v2-global fine-tuned in ml-models (OCR v3), run with ONNX Runtime.
+"""The plate OCR: fast-plate-ocr's cct-s-v2-global fine-tuned in ml-models, run with ONNX Runtime.
 
-The model takes one 128x64 RGB uint8 crop (batch size 1) and has two outputs, both already probabilities:
+The model takes one 128x64 RGB uint8 crop (batch size 1) and has up to two outputs, both already probabilities:
   plate   10 slots x alphabet: the character in each slot, the pad character after the end of the text
-  region  the readability head, classes listed in plate_config.yaml (`plate_regions`: readable, unreadable)
+  region  the readability head (OCR v3 on), classes listed in plate_config.yaml (`plate_regions`: readable,
+          unreadable); a model without it gives no P(readable), and the send rule then skips that check
 Decoding follows fast-plate-ocr (argmax per slot, trailing pad characters stripped) and ml-models'
 anpr_ml.ocr.predict (confidence = the weakest slot, padding slots included).
 """

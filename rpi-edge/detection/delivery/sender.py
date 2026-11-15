@@ -28,11 +28,11 @@ from detection.delivery.answers import Outcome, outcome_of, retry_after
 from detection.delivery.backoff import Backoff
 from detection.delivery.queue import Batch, PersistentQueue
 
-IDLE_SECONDS = 1.0
+IDLE_SECONDS = 1.0  # how often a sender with nothing due looks at its queue again
 BACKOFF_FIRST_SECONDS = 2.0
 BACKOFF_MAX_SECONDS = 300.0
-FORBIDDEN_WAIT_SECONDS = 600.0
-LOGGED_FIELD_ERRORS = 10
+FORBIDDEN_WAIT_SECONDS = 600.0  # a 403 needs a fix of the setup, not a quick retry
+LOGGED_FIELD_ERRORS = 10  # field errors in one log line at most: a refused batch of 100 must not flood the log
 
 
 @dataclass(frozen=True)

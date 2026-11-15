@@ -124,7 +124,7 @@ class ModelStore:
                         detector / "model.onnx", ocr / "model.onnx", ocr / "plate_config.yaml")
 
     def _remove_old_versions(self, keep: list[dict[str, InstalledModel]]) -> None:
-        """Keeps the current and the previous version of each model, so going back is a download away at most."""
+        """Keeps the current and the previous version of each model, so switching back needs no download."""
         for name in REQUIRED_FILES:
             wanted = {k[name].version for k in keep if name in k}
             for directory in (self.root / name).iterdir():

@@ -59,7 +59,7 @@ here.
   device keeps a copy and has no defaults of its own (`rpi-edge/DETECTION.md`, section 4).
 - A new device starts with the defaults of the service (`app.configuration.defaults` in `application.yaml`):
   the ML starting points of `ml-models/ML_ASSUMPTIONS.md` (0.40 / 0.80 / 0.80 / 70 px / 10 px, still open there),
-  the published models v2 / v3 and the camera settings tested on the Pi. They must satisfy the ranges of the
+  the published models v3 (detector) and v3 (OCR) and the camera settings tested on the Pi. They must satisfy the ranges of the
   contract, which `DefaultSettingsIT` checks. Enum values are uppercase in the API (`MANUAL`, `DAYLIGHT`).
 - `models.detector` and `models.ocr` must name published versions: a `PUT` naming another one is
   `400 VALIDATION_FAILED` with the field code `MODEL_NOT_PUBLISHED`. A version is published when
@@ -67,7 +67,7 @@ here.
   written by `anpr-publish-model` of ml-models); it lists the files of the version with their SHA-256 and size.
   `GET /api/v1/device/models` reads it for the versions of the device's configuration and signs a GET URL per
   file (`internal/models`). The device downloads them, checks the SHA-256 and switches without a restart. The
-  defaults are not checked at startup: until v2 and v3 are published, a new device's `GET /api/v1/device/models`
+  defaults are not checked at startup: until detector v3 and OCR v3 are published, a new device's `GET /api/v1/device/models`
   answers `409 MODEL_NOT_PUBLISHED`.
 - `batching.imageUploadsLowPriority` (default `true`) makes the device upload photos only while its detections,
   locations and metrics have nothing to send; the photos wait on the device meanwhile. It is required like every

@@ -34,7 +34,7 @@ class DeviceConfigurationIT extends ApiTestSupport {
                 .andExpect(jsonPath("$.ml.ocrMinConfidence").value(0.8))
                 .andExpect(jsonPath("$.ml.readableMinProbability").value(0.8))
                 .andExpect(jsonPath("$.ml.minEdgeMarginPx").value(10))
-                .andExpect(jsonPath("$.models.detector").value("v2"))
+                .andExpect(jsonPath("$.models.detector").value("v3"))
                 .andExpect(jsonPath("$.models.ocr").value("v3"))
                 .andExpect(jsonPath("$.intervals.metricsSeconds").value(60))
                 .andExpect(jsonPath("$.gps.maxFixAgeSeconds").value(30))

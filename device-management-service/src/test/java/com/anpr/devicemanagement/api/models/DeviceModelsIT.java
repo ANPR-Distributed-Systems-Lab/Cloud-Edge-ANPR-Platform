@@ -23,7 +23,7 @@ class DeviceModelsIT extends ApiTestSupport {
         mockMvc.perform(get("/api/v1/device/models").with(device(owner.deviceId())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.deviceId").value(owner.deviceId().toString()))
-                .andExpect(jsonPath("$.detector.version").value("v2"))
+                .andExpect(jsonPath("$.detector.version").value("v3"))
                 .andExpect(jsonPath("$.ocr.version").value("v3"))
                 .andExpect(jsonPath("$.ocr.files", hasSize(1)))
                 .andExpect(jsonPath("$.ocr.files[0].name").value("model.onnx"))
@@ -37,7 +37,7 @@ class DeviceModelsIT extends ApiTestSupport {
     @Test
     void aVersionThatIsNotPublishedIsAConflict() throws Exception {
         PersonWithDevice owner = createPersonWithDevice();
-        when(releases.find(ModelName.DETECTOR, "v2")).thenReturn(Optional.empty());
+        when(releases.find(ModelName.DETECTOR, "v3")).thenReturn(Optional.empty());
 
         mockMvc.perform(get("/api/v1/device/models").with(device(owner.deviceId())))
                 .andExpect(status().isConflict())

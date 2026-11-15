@@ -72,7 +72,14 @@ here.
 - `batching.imageUploadsLowPriority` (default `true`) makes the device upload photos only while its detections,
   locations and metrics have nothing to send; the photos wait on the device meanwhile. It is required like every
   other field (`rpi-edge/DETECTION.md`, section 9).
-- The resolution is fixed at 4056x3040, so `camera.fps` is at most 11.7.
+- `gps.maxFixAgeSeconds` (default 30) is the oldest GPS fix the device still takes as the position of a frame;
+  the plates of a frame without one are not read. `intervals.locationSampleSeconds` is how often the device
+  records a point of its track, moving or not.
+- `photos.widthPx` (640 to 4056, default 4056) and `photos.jpegQuality` (50 to 100, default 90) set the uploaded
+  photo: a width below 4056 is a downscaled copy of the frame (4:3 kept). The corners of a detection are relative
+  to the frame, so they fit a photo of any size.
+- The resolution is fixed at 4056x3040, so `camera.fps` is at most 11.7. `exposureUs` and `maxExposureUs` are at
+  most 80 ms: an exposure must end before the next frame starts, and the sensor runs at 10 fps or faster.
 - `ETag` is the quoted version (`"3"`) and `If-None-Match` is compared weakly (RFC 9110).
 
 ## 4. Online state

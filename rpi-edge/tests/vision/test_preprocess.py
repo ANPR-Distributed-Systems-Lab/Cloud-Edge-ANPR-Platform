@@ -14,7 +14,7 @@ import cv2
 import numpy as np
 import pytest
 
-from detection.vision.preprocess import OCR_SIZE, rectify_plate, resize_for_detector
+from detection.vision.preprocess import OCR_SIZE, crop_rows, detector_input, rectify_plate, resize_for_detector
 
 GOLDEN_RESIZE = "2b2164cc869b5e20"
 GOLDEN_RECTIFY = {"large": "5a6c6056a22f957c", "small": "c37da4690b8a6aa8"}
@@ -35,6 +35,18 @@ def test_resize_for_detector_reference_pixels():
     out = resize_for_detector(frame, (1280, 960))
     assert out.shape == (960, 1280, 3) and out.dtype == np.uint8
     assert sha16(out) == GOLDEN_RESIZE  # on every CPU
+
+
+def test_crop_rows_of_the_whole_frame_and_a_band():  # the same values as ml-models/tests/test_common.py
+    assert crop_rows(3040, None) == (0, 3040)
+    assert crop_rows(3040, (0.337, 0.795)) == (1024, 2417)
+
+
+def test_detector_input_crops_rows_then_resizes():
+    frame = np.random.default_rng(7).integers(0, 256, (3040, 4056, 3), dtype=np.uint8)
+    out = detector_input(frame, (1024, 352), (0.337, 0.795))
+    assert np.array_equal(out, cv2.resize(frame[1024:2417], (1024, 352), interpolation=cv2.INTER_AREA))
+    assert np.array_equal(detector_input(frame, (1280, 960), None), resize_for_detector(frame, (1280, 960)))
 
 
 @pytest.mark.parametrize("name", QUADS)

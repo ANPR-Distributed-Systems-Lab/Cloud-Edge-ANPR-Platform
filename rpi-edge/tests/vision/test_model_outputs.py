@@ -2,7 +2,8 @@
 import numpy as np
 import pytest
 
-from detection.vision.detector import parse_output
+from detection.vision import detector as detector_module
+from detection.vision.detector import Detector, parse_crop, parse_output
 from detection.vision.ocr import PlateConfig, decode
 
 ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_"
@@ -24,6 +25,64 @@ def test_parse_output_scales_corners_to_the_frame_and_applies_the_threshold():
     assert found[0].confidence == pytest.approx(0.8)
     assert found[0].corners[0] == pytest.approx([100 * 4056 / 1280, 200 * 3040 / 960])
     assert found[0].corners.shape == (4, 2)
+
+
+def test_parse_output_of_a_crop_band_maps_the_rows_back_to_the_whole_frame():
+    corners = [[100, 100], [140, 100], [140, 110], [100, 110]]
+    rows = np.stack([detector_row(0.8, corners)])
+    found = parse_output(rows, input_size=(1024, 352), frame_size=(4056, 3040), min_confidence=0.4,
+                         crop=(0.337, 0.795))
+    # y = y0 + y * (y1 - y0) / H with the band 1024..2417 of the frame
+    assert found[0].corners[0] == pytest.approx([100 * 4056 / 1024, 1024 + 100 * 1393 / 352])
+    assert found[0].corners[2] == pytest.approx([140 * 4056 / 1024, 1024 + 110 * 1393 / 352])
+
+
+def test_the_crop_metadata_is_read_strictly():
+    assert parse_crop(None) is None and parse_crop("") is None
+    assert parse_crop("0.337,0.795") == (0.337, 0.795)
+    for bad in ("0.3", "a,b", "0.8,0.3", "-0.1,0.5", "0.2,1.5", "0.5,0.5"):
+        with pytest.raises(ValueError):
+            parse_crop(bad)
+
+
+class FakeSession:
+    """Stands in for an ONNX Runtime session: a (1, 3, 352, 1024) input, one detection, the metadata given."""
+
+    def __init__(self, metadata):
+        self.metadata, self.blob = metadata, None
+
+    def get_inputs(self):
+        return [type("Input", (), {"name": "images", "shape": [1, 3, 352, 1024]})()]
+
+    def get_modelmeta(self):
+        return type("Meta", (), {"custom_metadata_map": self.metadata})()
+
+    def run(self, _outputs, feed):
+        self.blob = feed["images"]
+        return [np.stack([detector_row(0.9, [[512, 176], [532, 176], [532, 186], [512, 186]])])[None]]
+
+
+def detector_with(monkeypatch, metadata):
+    monkeypatch.setattr(detector_module.onnx, "session", lambda _path: FakeSession(metadata))
+    return Detector("model.onnx")
+
+
+def test_a_detector_with_a_crop_sees_only_its_band(monkeypatch):
+    detector = detector_with(monkeypatch, {"crop": "0.337,0.795"})
+    frame = np.zeros((3040, 4056, 3), np.uint8)
+    frame[:1024] = 255  # above the band: must not reach the model
+    found = detector.detect(frame, 0.4)
+    assert detector.crop == (0.337, 0.795)
+    assert detector.session.blob.shape == (1, 3, 352, 1024) and detector.session.blob.max() == 0
+    assert found[0].corners[0] == pytest.approx([512 * 4056 / 1024, 1024 + 176 * 1393 / 352])
+
+
+def test_a_detector_without_a_crop_sees_the_whole_frame(monkeypatch):
+    detector = detector_with(monkeypatch, {})
+    frame = np.full((3040, 4056, 3), 255, np.uint8)
+    found = detector.detect(frame, 0.4)
+    assert detector.crop is None and detector.session.blob.min() == 1.0
+    assert found[0].corners[0] == pytest.approx([512 * 4056 / 1024, 176 * 3040 / 352])
 
 
 def plate_probs(text, confidence=0.9):

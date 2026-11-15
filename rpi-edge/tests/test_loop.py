@@ -1,9 +1,9 @@
 import threading
 from collections import Counter
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import numpy as np
-from samples import LOCATION, configuration_document, detection_event
+from samples import LOCATION, configuration, configuration_document, detection_event
 
 from detection.config.store import ConfigurationStore
 from detection.contract.configuration import ModelVersions
@@ -84,6 +84,81 @@ def test_a_frame_without_a_fix_gets_no_location(tmp_path, monkeypatch):
     loop, stop, pipeline, _, _ = loop_for(tmp_path, NoLocationSource(), frames=1)
     loop.run(stop)
     assert [location for _, location in pipeline.seen] == [None]
+
+
+class RecordingCamera:
+    """Records what it was opened and configured with; serves `frames` frames, then stops the loop."""
+
+    def __init__(self, stop, frames):
+        self.stop, self.frames, self.captured = stop, frames, 0
+        self.is_open, self.opened_with, self.applied = False, [], []
+
+    def open(self, camera):
+        self.is_open = True
+        self.opened_with.append(camera)
+
+    def apply(self, camera):
+        self.applied.append(camera)
+
+    def capture(self):
+        self.captured += 1
+        if self.captured >= self.frames:
+            self.stop.set()
+        return Frame(np.zeros((4, 4, 3), np.uint8), datetime.now(UTC))
+
+    def close(self):
+        self.is_open = False
+
+
+class ChangingStore:
+    """A store whose configuration changes after the given reads, as the config poller would change it."""
+
+    def __init__(self, *configurations):
+        self.configurations = list(configurations)
+
+    @property
+    def current(self):
+        return self.configurations.pop(0) if len(self.configurations) > 1 else self.configurations[0]
+
+
+def test_each_frame_runs_with_one_configuration_and_a_new_one_reaches_the_camera_on_the_next_frame(tmp_path):
+    first, second = (configuration(camera={"fps": 11.7}), configuration(camera={"fps": 11.7, "vflip": False}))
+    stop = threading.Event()
+    camera, pipeline = RecordingCamera(stop, frames=3), RecordingPipeline()
+    slot = ModelSlot()
+    slot.put(LoadedModels(ModelVersions("v2", "v3"), None, None))
+    detections = PersistentQueue(tmp_path / "d.sqlite3", "detections", DETECTION_CODEC, 30, 1000)
+    FrameLoop(camera, pipeline, ChangingStore(first, second), slot, NoLocationSource(), detections).run(stop)
+    assert camera.opened_with == [first.camera] and camera.applied == [second.camera]  # applied once, not per frame
+    assert pipeline.configurations == [first, second, second]
+
+
+def test_the_fix_age_limit_of_the_configuration_decides_the_position_of_a_frame(tmp_path):
+    class StaleFix(FixedLocationSource):
+        def fix_at(self, moment):  # the latest fix arrived 45 s before the capture
+            return self._fix(moment - timedelta(seconds=45))
+
+    seen = []
+    for max_age in (30, 60):
+        stop = threading.Event()
+        pipeline = RecordingPipeline()
+        slot = ModelSlot()
+        slot.put(LoadedModels(ModelVersions("v2", "v3"), None, None))
+        store = ChangingStore(configuration(camera={"fps": 11.7}, gps={"maxFixAgeSeconds": max_age}))
+        detections = PersistentQueue(tmp_path / f"d{max_age}.sqlite3", "detections", DETECTION_CODEC, 30, 1000)
+        FrameLoop(RecordingCamera(stop, 1), pipeline, store, slot, StaleFix(52.2, 21.0), detections).run(stop)
+        seen.append(pipeline.locations[0])
+    assert seen[0] is None and seen[1].fix_age_ms == 45_000
+
+
+class RecordingPipeline:
+    def __init__(self):
+        self.configurations, self.locations = [], []
+
+    def process(self, frame, configuration, models, location):
+        self.configurations.append(configuration)
+        self.locations.append(location)
+        return FrameResult()
 
 
 def test_summary_counts_and_resets():

@@ -1,9 +1,8 @@
 """The configuration the detection mode runs with: the device configuration of device-management, nothing else.
 
-Every setting (send rule thresholds, model versions, camera, batching, intervals) is kept and edited in the
-cloud, which also holds the defaults. The device keeps the last configuration it received in
-/config/device-config.json, so after a restart without network it runs on that copy. A device that never
-received one waits for it (cloud/config_poll.py fetches it).
+Every setting (contract/configuration.py) is kept and edited in the cloud, which also holds the defaults. The device
+keeps the last configuration it received in /config/device-config.json, so after a restart without network it runs
+on that copy. A device that never received one waits for it (cloud/config_poll.py fetches it).
 """
 import json
 import threading

@@ -57,7 +57,8 @@ class FrameLoop:
                 started = time.monotonic()
                 frame = self.camera.capture()
                 loaded = self.models.get()
-                result = self.pipeline.process(frame, current, loaded, locate(self.locations, frame.captured_at))
+                location = locate(self.locations, frame.captured_at, current.gps.max_fix_age_seconds)
+                result = self.pipeline.process(frame, current, loaded, location)
                 self._buffer(result)
                 for observe in self.observers:
                     observe(frame, result)

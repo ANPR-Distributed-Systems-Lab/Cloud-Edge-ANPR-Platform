@@ -1,8 +1,7 @@
-"""Records the track of the device: a point of the GNSS module every intervals.locationSampleSeconds while it moves.
+"""Records the track of the device: a point of the GNSS module every intervals.locationSampleSeconds, moving or not.
 
 The track goes to its own queue and stream (POST /api/v1/ingest/device-locations), independent of the detections.
-While the device stands still, one point every STATIONARY_SAMPLE_SECONDS is enough to show where it is and that it
-is alive. Without a fresh fix nothing is recorded: the platform refuses a point without a position.
+Without a fresh fix nothing is recorded: the platform refuses a point without a position.
 """
 import threading
 from collections.abc import Callable
@@ -13,9 +12,8 @@ from detection.contract.locations import LocationPoint
 from detection.contract.wire import uuid7
 from detection.delivery.queue import PersistentQueue
 from detection.gps.source import LocationSource
-from detection.gps.tracker import MOVING_SPEED_MPS, Fix
+from detection.gps.tracker import Fix
 
-STATIONARY_SAMPLE_SECONDS = 60.0
 FRESH_FIX_SECONDS = 5.0  # an older latest fix means the fix is lost
 POLL_SECONDS = 1.0
 
@@ -51,8 +49,4 @@ class LocationRecorder:
             return False
         if self._last is None:
             return True
-        if fix.received_at <= self._last.received_at:  # the same fix again
-            return False
-        moving = fix.speed_mps is not None and fix.speed_mps >= MOVING_SPEED_MPS
-        interval = sample_seconds if moving else STATIONARY_SAMPLE_SECONDS
-        return (fix.received_at - self._last.received_at).total_seconds() >= interval
+        return (fix.received_at - self._last.received_at).total_seconds() >= sample_seconds

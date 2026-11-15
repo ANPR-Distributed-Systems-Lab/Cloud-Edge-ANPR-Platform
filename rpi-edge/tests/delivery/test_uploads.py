@@ -1,13 +1,16 @@
 from datetime import UTC, datetime
 
+import cv2
 import numpy as np
 import pytest
 from fakes import FakeApi, response
-from samples import DEVICE_ID, configuration
+from samples import DEVICE_ID, configuration, configuration_document
 
 from detection.cloud.transport import NetworkError
+from detection.config.store import ConfigurationStore
+from detection.contract.configuration import PhotosConfiguration
 from detection.contract.images import image_key
-from detection.delivery.photos import MAX_WAITING_FRAMES, FrameSaver
+from detection.delivery.photos import MAX_WAITING_FRAMES, FrameSaver, encode_jpeg
 from detection.delivery.queue import PersistentQueue
 from detection.delivery.sender import FORBIDDEN_WAIT_SECONDS
 from detection.delivery.uploads import DEFERRED_LOG_SECONDS, GATE_RECHECK_SECONDS, IMAGE_CODEC, ImageJob, ImageUploader
@@ -156,11 +159,17 @@ def frame_result(frame_id="f1", events=1):
     return FrameResult(frame_id=frame_id, events=[object()] * events)
 
 
+def configured(tmp_path, **photos):
+    store = ConfigurationStore(tmp_path / "config")
+    store.apply(configuration_document(photos=photos), None)
+    return store
+
+
 def test_the_saver_writes_the_jpeg_atomically_and_queues_the_upload(tmp_path):
     queue = PersistentQueue(tmp_path / "i.sqlite3", "images", IMAGE_CODEC, 30, 100)
-    saver = FrameSaver(tmp_path / "frames", queue, encode=lambda frame: b"jpeg bytes")
+    saver = FrameSaver(tmp_path / "frames", queue, configured(tmp_path), encode=lambda frame, photos: b"jpeg bytes")
     frame = Frame(np.zeros((2, 2, 3), np.uint8), CAPTURED)
-    saver.save(frame, "f1")
+    saver.save(frame, "f1", PhotosConfiguration(4056, 90))
     job = queue.oldest(1)[0].item
     assert job.path.read_bytes() == b"jpeg bytes" and job.frame_id == "f1" and job.captured_at == CAPTURED
     assert not list((tmp_path / "frames").glob("*.part"))
@@ -168,7 +177,7 @@ def test_the_saver_writes_the_jpeg_atomically_and_queues_the_upload(tmp_path):
 
 def test_only_frames_with_detections_are_kept_and_a_busy_encoder_drops_photos(tmp_path):
     queue = PersistentQueue(tmp_path / "i.sqlite3", "images", IMAGE_CODEC, 30, 100)
-    saver = FrameSaver(tmp_path / "frames", queue, encode=lambda frame: b"x")
+    saver = FrameSaver(tmp_path / "frames", queue, configured(tmp_path), encode=lambda frame, photos: b"x")
     frame = Frame(np.zeros((2, 2, 3), np.uint8), CAPTURED)
     saver.submit(frame, FrameResult())  # nothing detected
     for n in range(MAX_WAITING_FRAMES + 2):
@@ -179,5 +188,38 @@ def test_only_frames_with_detections_are_kept_and_a_busy_encoder_drops_photos(tm
 def test_leftovers_of_a_power_cut_are_removed_at_the_start(tmp_path):
     (tmp_path / "frames").mkdir()
     (tmp_path / "frames" / "f1.jpg.part").write_bytes(b"half")
-    FrameSaver(tmp_path / "frames", PersistentQueue(tmp_path / "i.sqlite3", "images", IMAGE_CODEC, 30, 100))
+    FrameSaver(tmp_path / "frames", PersistentQueue(tmp_path / "i.sqlite3", "images", IMAGE_CODEC, 30, 100),
+               configured(tmp_path))
     assert not list((tmp_path / "frames").glob("*.part"))
+
+
+def test_a_frame_keeps_the_photo_settings_it_was_analysed_with(tmp_path):
+    store = configured(tmp_path, widthPx=2028, jpegQuality=70)
+    seen = []
+    saver = FrameSaver(tmp_path / "frames", PersistentQueue(tmp_path / "i.sqlite3", "images", IMAGE_CODEC, 30, 100),
+                       store, encode=lambda frame, photos: seen.append(photos) or b"x")
+    saver.submit(Frame(np.zeros((2, 2, 3), np.uint8), CAPTURED), frame_result("f1"))
+    store.apply(configuration_document(photos={"widthPx": 4056}), None)  # a change before the encoder gets to it
+    saver.save(*saver._waiting.get_nowait())
+    assert seen == [PhotosConfiguration(2028, 70)]
+
+
+def decoded(jpeg: bytes) -> np.ndarray:
+    return cv2.imdecode(np.frombuffer(jpeg, np.uint8), cv2.IMREAD_COLOR)
+
+
+def test_a_narrower_setting_downscales_the_photo_keeping_its_aspect_ratio():
+    frame = Frame(np.random.default_rng(1).integers(0, 255, (3040, 4056, 3), np.uint8), CAPTURED)
+    assert decoded(encode_jpeg(frame, PhotosConfiguration(2028, 90))).shape == (1520, 2028, 3)
+    assert decoded(encode_jpeg(frame, PhotosConfiguration(1000, 90))).shape == (750, 1000, 3)
+    assert decoded(encode_jpeg(frame, PhotosConfiguration(4056, 90))).shape == (3040, 4056, 3)
+
+
+def test_a_photo_is_never_upscaled():
+    frame = Frame(np.zeros((480, 640, 3), np.uint8), CAPTURED)  # a frame narrower than the setting (replay)
+    assert decoded(encode_jpeg(frame, PhotosConfiguration(4056, 90))).shape == (480, 640, 3)
+
+
+def test_a_lower_quality_gives_a_smaller_photo():
+    frame = Frame(np.random.default_rng(2).integers(0, 255, (600, 800, 3), np.uint8), CAPTURED)
+    assert len(encode_jpeg(frame, PhotosConfiguration(800, 50))) < len(encode_jpeg(frame, PhotosConfiguration(800, 95)))

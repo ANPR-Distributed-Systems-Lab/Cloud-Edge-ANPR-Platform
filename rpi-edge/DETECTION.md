@@ -87,7 +87,7 @@ document. Tests mirror the folders under `tests/`.
 | Step | Module | What it does |
 |---|---|---|
 | Capture | `vision/camera.py` | picamera2, full resolution `RGB888` (B, G, R in memory, the order of OpenCV and of the training frames). The sensor runs at 10 fps or more, so a capture waits briefly for a fresh frame; the loop analyses at most `camera.fps` frames per second. Software auto exposure of `common/autoexposure.py`, as in the collection mode. `vision/replay.py` replaces the camera with recorded frames (`REPLAY_DIR`, README) |
-| Detector | `vision/detector.py` | `resize_for_detector()` to the model input (1280x960 for detector v2), YOLO11n-pose exported with NMS inside: rows of box, confidence, class and 4 corners |
+| Detector | `vision/detector.py` | `detector_input()` to the model input (1280x960 for detector v2), YOLO11n-pose exported with NMS inside: rows of box, confidence, class and 4 corners. A model with a `crop` in its ONNX metadata (detector v3: rows 0.337-0.795 at 1024x352) sees only that band of rows at full width, and its corners are mapped back to the whole frame; without the key it sees the whole frame |
 | Crop | `vision/preprocess.py` | `rectify_plate()`: 128x64 RGB with an 8 % margin, from the corners on the full-resolution frame |
 | OCR | `vision/ocr.py` | OCR v3 (fast-plate-ocr `cct-s-v2-global` with the readability head): text, the weakest slot probability, P(readable) |
 | Rule | `rules/send_rule.py`, `rules/plates.py` | [Section 3](#3-send-rule) |
@@ -98,7 +98,8 @@ document. Tests mirror the folders under `tests/`.
 the golden checksums of `ml-models/tests/test_common.py`. If the functions change in ml-models, they change here
 in the same way. Measured on the Pi 5 (decided 2026-11-12):
 
-- `resize_for_detector()` (the detector input) is **bit-identical** on x86 and on the Pi.
+- `resize_for_detector()` and `detector_input()` (the detector input, with or without the crop band) are
+  **bit-identical** on x86 and on the Pi.
 - `rectify_plate()` (the OCR crop) is bit-identical on x86 only. On ARM, OpenCV's `warpPerspective` and `resize`
   take other SIMD paths, which move a few values by 1 (on 22 test plates at most 0.05 % of a crop's values, never
   more than 1). Rounding the transform matrix does not help, so this is accepted: irrelevant for the OCR, which was
@@ -401,6 +402,17 @@ Pi 5 (8 GB), detector v2 at 1280x960 and OCR v3, both FP32 on ONNX Runtime with 
 | Live camera, no plates in view | 1.7 | 516-527 ms | - | 47 °C |
 | Replay of a val session from the USB stick (`REPLAY_DIR`) | 1.4-1.5 | 488 ms | 80-146 ms (all plates of the frame) | 55-56 °C |
 
+- **Detector v3 vs v2** (2026-11-15, `Detector.detect()` of this code on a 4056x3040 frame, 40 runs after 3 warm-up
+  runs, the container stopped, model files fetched from the models bucket through a presigned URL, sha256 of v3
+  checked against `release.json`): v2 (1280x960, whole frame) median 502 ms (p10-p90 496-517); v3 (crop band at
+  1024x352) median 148 ms (144-156), 3.4 times faster. Preprocessing, `session.run` and the decoding are included.
+  On the live camera with detector v3 delivered by the cloud (models bucket -> presigned URLs, nothing copied by
+  hand, empty scene): 3.0 fps, the `camera.fps` cap, with a median frame time of 207 ms and a detector time of
+  146 ms, 45 °C. With v2 the same scene gave 1.67 fps, 600 ms per frame, 531 ms in the detector and 57 °C. The frame
+  time leaves room for about 4.8 fps, so `camera.fps` above 3 would now be reached.
+  The corners of v3 and v2 agree on the 150 frames of val_001 (rpi-edge `Detector` on the PC, both models): 133
+  plates matched with a median corner difference of 2.8 px and a p90 of 6.3 px in frame pixels, 17 found by v2 only
+  and 3 by v3 only (recall 0.951 against 1.000 at conf 0.40, as in ml-models).
 - In the replay, every stage of the send rule fired (`too_small`, `near_edge`, `unreadable`, `bad_format`,
   `low_confidence`, `cooldown`), and the accepted detections reached the mock ingest in batches (202).
 - After the move to the cloud-only configuration, with alerts and feedback (2026-11-13, on the Pi through the
@@ -420,9 +432,8 @@ Pi 5 (8 GB), detector v2 at 1280x960 and OCR v3, both FP32 on ONNX Runtime with 
 - Store-and-forward: with the mock stopped, detections stayed in the outbox (`batch_not_sent`, backoff). After a
   `docker kill` (no clean shutdown) the container came back with them (`pending: 4`), and they went out in one
   batch once the mock was back.
-- The analysis rate is below the 2-3 fps assumed in ML_ASSUMPTIONS: these numbers belong to the Pi benchmark of
-  the detector input size (ml-models roadmap, item 6). Cheaper inference (INT8, a smaller input, fewer OCR threads)
-  is not tried yet.
+- With detector v2 the analysis rate (1.4-1.7 fps) was below the 2-3 fps assumed in ML_ASSUMPTIONS; detector v3
+  (the crop band, ml-models roadmap, item 6) reaches 3 fps. INT8 and fewer OCR threads are not tried.
 
 ## 14. What is still missing
 
@@ -434,5 +445,5 @@ Pi 5 (8 GB), detector v2 at 1280x960 and OCR v3, both FP32 on ONNX Runtime with 
   queue leave a detection without a photo.
 - **GNSS**: time from the module to correct the clock of the device (only a warning now); the antenna in the car.
 - **ml-models**: the final thresholds and detector input size (the `detection_summary` timings on the Pi feed that
-  benchmark). The analysis rate is 1.4-1.7 fps.
+  benchmark). The analysis rate is 3.0 fps (the cap) with detector v3; v2 gave 1.4-1.7.
 - **Later**: tracking a plate across frames, rotation of the device password (`docs/identity-and-access.md`).

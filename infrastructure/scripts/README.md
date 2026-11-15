@@ -88,21 +88,41 @@ python infrastructure/scripts/identity/create_device.py --person-username kamil 
 python infrastructure/scripts/identity/create_device.py --delete <deviceId> --profile dev
 ```
 
-#### Putting the credentials file on the Pi
+#### Putting the credentials on the Pi
 
-The device reads its login from `/config/device-credentials.json`, a file in the Docker volume `rpi-edge-config` of
-the Pi (the volume is called `rpi-edge_rpi-edge-config` there). The Docker context `rpi` (SSH to the Pi, see
-`rpi-edge/RASPBERRY_PI_SETUP.md`, step 6) lets you copy the file from this computer. The app reads the file every
-time it signs in, so it needs no restart. `--context rpi` makes sure the commands go to the Pi, whatever context is
-active.
+The device reads its login from `/config/device-credentials.json` in the Docker volume `rpi-edge_rpi-edge-config`
+on the Pi. The Docker context `rpi` (SSH to the Pi, see `rpi-edge/RASPBERRY_PI_SETUP.md`, step 6) lets you do it from
+this computer. Run the commands from the `rpi-edge/` folder.
 
-If the `rpi-edge` container exists (running or stopped), from the `rpi-edge/` folder:
+**After a reset of the environment** (the old device no longer exists):
 
-```powershell
-docker --context rpi compose cp C:\secrets\rpi-01.json rpi-edge:/config/device-credentials.json
-```
+1. Stop the container and remove its volumes. `rpi-edge_rpi-edge-config` holds the old credentials and the cached
+   configuration, `rpi-edge_rpi-edge-state` the unsent events, photos and the model cache. None of it fits a new
+   `deviceId`. To keep the model cache, remove only the `config` volume.
 
-If it does not exist yet, copy into the volume through a throw-away container (it is removed afterwards):
+   ```powershell
+   cd G:\repos\Cloud-Edge-ANPR-Platform\rpi-edge
+   docker --context rpi compose down
+   docker --context rpi volume rm rpi-edge_rpi-edge-config rpi-edge_rpi-edge-state
+   ```
+
+2. Create the new device (above). Build the image, create the container without starting it and copy the file in,
+   so detection cannot start before the credentials are there.
+
+   ```powershell
+   docker --context rpi compose create --build
+   docker --context rpi compose cp C:\secrets\rpi-01.json rpi-edge:/config/device-credentials.json
+   ```
+
+3. Start it and follow the log.
+
+   ```powershell
+   docker --context rpi compose up -d
+   docker --context rpi compose logs -f
+   ```
+
+**Replacing only the credentials** needs no restart, because the app reads the file at every sign-in. Use the `cp`
+command of step 2; if the container does not exist yet, go through a throw-away one:
 
 ```powershell
 docker --context rpi create --name credentials-copy -v rpi-edge_rpi-edge-config:/config alpine
@@ -110,7 +130,7 @@ docker --context rpi cp C:\secrets\rpi-01.json credentials-copy:/config/device-c
 docker --context rpi rm credentials-copy
 ```
 
-Check that the file is there without printing it (it holds the password), then delete the local copy:
+Check the file without printing it (it holds the password), then delete the local copy:
 
 ```powershell
 docker --context rpi run --rm -v rpi-edge_rpi-edge-config:/config alpine ls -l /config/device-credentials.json

@@ -3,8 +3,10 @@
 A config (configs/<name>.yaml) describes one training run completely:
 
     run_name    the run directory, runs/detector/<run_name>/
-    dataset     name (datasets/<name>/), exports (label batches), size [w, h], min_plate_px, ignore_margin_px
-    model       weights: the pretrained Ultralytics checkpoint to start from
+    dataset     name (datasets/<name>/), exports (label batches), size [w, h], min_plate_px, ignore_margin_px,
+                optional crop [top, bottom]: the band of frame rows the detector sees (common.preprocess.crop_rows)
+    model       weights: the pretrained Ultralytics checkpoint to start from, or from_run: a finished detector
+                run whose best.pt is fine-tuned
     train       passed unchanged to Ultralytics model.train()
     wandb       enabled, project, entity, mode, log_images (see anpr_ml.tracking)
 
@@ -21,6 +23,8 @@ def load_config(path: Path) -> dict:
     with open(path, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
     cfg["dataset"]["size"] = tuple(cfg["dataset"]["size"])
+    crop = cfg["dataset"].get("crop")
+    cfg["dataset"]["crop"] = tuple(crop) if crop is not None else None
     return cfg
 
 
@@ -34,6 +38,11 @@ def run_dir(cfg: dict) -> Path:
 
 def pretrained_weights(cfg: dict) -> Path:
     """Where the starting checkpoint lives; Ultralytics downloads its released weights there if missing."""
+    if "from_run" in cfg["model"]:
+        path = RUNS_DIR / "detector" / cfg["model"]["from_run"] / "weights" / "best.pt"
+        if not path.exists():
+            raise FileNotFoundError(f"{path} is missing: model.from_run must name a finished detector run")
+        return path
     path = MODELS_DIR / "pretrained" / cfg["model"]["weights"]
     path.parent.mkdir(parents=True, exist_ok=True)
     return path

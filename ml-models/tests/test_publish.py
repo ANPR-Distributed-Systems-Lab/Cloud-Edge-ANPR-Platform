@@ -99,3 +99,11 @@ def test_a_missing_detection_or_a_moved_corner_fails():
     assert not compare_frame(onnx_rows(), CORNERS[None], np.array([0.9]), 0.4).matches
     moved = compare_frame(onnx_rows((0.9, CORNERS + MAX_CORNER_DIFF_PX + 1)), CORNERS[None], np.array([0.9]), 0.4)
     assert not moved.matches
+
+
+def test_corners_outside_the_input_are_clipped_as_ultralytics_does():
+    outside = CORNERS - [105, 0]  # a plate cut off by the left edge: x down to -5
+    clipped = np.clip(outside, 0, None)
+    rows = onnx_rows((0.9, outside))
+    assert not compare_frame(rows, clipped[None], np.array([0.9]), 0.4).matches
+    assert compare_frame(rows, clipped[None], np.array([0.9]), 0.4, size=(1024, 352)).matches

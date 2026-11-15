@@ -64,3 +64,20 @@ def test_build_dataset_writes_yolo_layout_and_refuses_overwrite(tmp_path):
     assert manifest["counts"]["train"]["plates"] == 1 and manifest["counts"]["val"]["negatives"] == 1
     with pytest.raises(FileExistsError):
         build_dataset([export], out, (64, 64), images_dir=images, splits=splits)
+
+
+def test_convert_record_with_a_crop_labels_plates_in_the_band():
+    image = np.full((H, W, 3), 200, np.uint8)
+    crop = (0.3, 0.6)  # rows 90-180 of 300; PLATE (0.40-0.46) inside, FAR (0.80) and SMALL (0.10) outside
+    out, lines, stats = convert_record(record(plates=(PLATE, SMALL)), image, (200, 45), 70, 0, IGNORE_FILL, crop)
+    assert out.shape == (45, 200, 3)
+    assert len(lines) == 1 and stats["plates"] == 1 and stats["plates_demoted_small"] == 1
+    kpts = np.array([float(v) for v in lines[0].split()[5:]]).reshape(4, 3)[:, :2]
+    assert kpts[:, 1] == pytest.approx((np.array(PLATE)[:, 1] - 0.3) / 0.3, abs=1e-6)  # 6 decimals in the file
+    assert kpts[:, 0] == pytest.approx(np.array(PLATE)[:, 0])
+
+
+def test_convert_record_paints_a_plate_reaching_outside_the_crop():
+    image = np.full((H, W, 3), 200, np.uint8)
+    _, lines, stats = convert_record(record(ignore=()), image, (200, 30), 70, 0, IGNORE_FILL, (0.2, 0.42))
+    assert lines == [] and stats["plates_outside_crop"] == 1

@@ -1,6 +1,6 @@
 """anpr-eval-pipeline: detector + OCR end to end on the val split, the way the edge node runs them.
 
-Full frame -> resize_for_detector() -> detector -> corners on the original -> rectify_plate() -> OCR.
+Full frame -> detector_input() -> detector -> corners on the original -> rectify_plate() -> OCR.
 The detector runs at its operating threshold (best F1 on val, from its eval_val.json). Every kept detection
 is read, because on the edge node every detection is, and each read falls into one category:
 
@@ -163,7 +163,7 @@ def evaluate_pipeline(det_cfg: dict, ocr_cfg: dict) -> PipelineEvaluation:
     conf = operating_conf(det_cfg)
     records = val_records(det_cfg)
     detections = predict_records(det_run / "weights" / "best.pt", records, det_cfg["dataset"]["size"],
-                                 conf=conf, device=det_cfg["train"]["device"])
+                                 conf=conf, device=det_cfg["train"]["device"], crop=det_cfg["dataset"]["crop"])
     reader = Reader(ocr_run)
     size, margin = ocr_cfg["dataset"]["size"], ocr_cfg["dataset"]["margin"]
 

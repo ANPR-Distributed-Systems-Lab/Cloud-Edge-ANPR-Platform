@@ -1,7 +1,7 @@
 # ML assumptions: plate detection and OCR
 
 Working assumptions for building the Polish license plate models (detection with 4 corners, then OCR).
-Last updated: 2026-11-09. Items marked **OPEN** are deliberately undecided, see the last section.
+Last updated: 2026-11-15. Items marked **OPEN** are deliberately undecided, see the last section.
 
 ## 1. Decision summary
 
@@ -9,10 +9,10 @@ Last updated: 2026-11-09. Items marked **OPEN** are deliberately undecided, see 
 |---|---|
 | Labeling tool | CVAT, self-hosted (docker) |
 | Pre-labeling | Iterative loop with our own model |
-| Detection model | YOLO11n-pose (Ultralytics), 1 class, 4 keypoints (plate corners); YOLO26n-pose compared at the Pi benchmark |
+| Detection model | YOLO11n-pose (Ultralytics), 1 class, 4 keypoints (plate corners); from v3 fine-tuned from v2 (YOLO26n-pose checked 2026-11-15: not faster on the CPU) |
 | OCR model | `fast-plate-ocr` `cct-s-v2-global`, fine-tuned with Keras 3 on the torch backend (no TensorFlow); input 128x64 RGB, rectified with an 8 % margin. Final model **OPEN** (per-position character rules in PLATE_FORMAT.md) |
 | Labeling resolution | Original frames, 4056x3040 |
-| Detector input resolution | **OPEN**, 1280x960 for detector v0; final after a benchmark on the Pi |
+| Detector input resolution | **Decided 2026-11-15:** a band of the frame, rows 0.337-0.795 at full width, resized to 1024x352 (detector v3, section 6); v0 to v2 used the whole frame at 1280x960 |
 | Ignore regions in training | Painted gray (114) in the downscaled train and val images |
 | Frame selection | Perceptual-hash deduplication, then diverse frames that contain plates |
 | Test set | ~150 frames from separate sessions, labeled from scratch |
@@ -113,22 +113,22 @@ Much of the best data is expected to be oncoming cars passing on the left side o
 - Capture rate: with a closing speed of about 28 m/s (two cars at ~50 km/h) the cars move ~14 m between frames at 2 fps, so only a few frames per pass fall into this range. Consider a higher recording fps for dedicated passes, within the exposure and storage limits of the collection app.
 
 ### Two resolutions in one pipeline
-- **Detector:** runs on the frame downscaled to the detector input size (candidates 1024x768, 1280x960, 1920x1440; **OPEN**).
+- **Detector:** runs on a band of the frame (rows 0.337-0.795, full width) downscaled to 1024x352 (v3; section 6).
 - **OCR:** crops are cut from the **full-resolution frame**, using the detected corners scaled back to the original size. The Pi keeps the full frame in memory (about 18 MB of YUV).
 
 ### Train / inference consistency
-1. One shared function, e.g. `resize_for_detector()` using `cv2.resize(..., interpolation=cv2.INTER_AREA)`, used both when preparing the dataset and on the Pi. Golden checksums in `tests/test_common.py` (and the same ones in `rpi-edge/tests/vision/test_preprocess.py`) check the pixels. **Measured 2026-11-12 on the Pi 5 (aarch64, opencv-python-headless 5.0.0.93):** `resize_for_detector()` is bit-identical to x86, `rectify_plate()` is not: OpenCV's warpPerspective takes other SIMD paths on ARM (rounding the transform matrix does not help). On 22 plates the difference is at most 1 grey level, in at most 0.05 % of the values (mean 0.008 %). So the rule is: **identical on x86, within ±1 on ARM** (at most 1 level in at most 0.1 % of the values, checked on the Pi against reference crops stored from x86). The OCR does not notice a difference of this size.
+1. One shared function, `detector_input()`: the crop band of rows, then `resize_for_detector()` with `cv2.resize(..., interpolation=cv2.INTER_AREA)`, used both when preparing the dataset and on the Pi. Golden checksums in `tests/test_common.py` (and the same ones in `rpi-edge/tests/vision/test_preprocess.py`) check the pixels. **Measured 2026-11-12 on the Pi 5 (aarch64, opencv-python-headless 5.0.0.93):** `resize_for_detector()` is bit-identical to x86, `rectify_plate()` is not: OpenCV's warpPerspective takes other SIMD paths on ARM (rounding the transform matrix does not help). On 22 plates the difference is at most 1 grey level, in at most 0.05 % of the values (mean 0.008 %). So the rule is: **identical on x86, within ±1 on ARM** (at most 1 level in at most 0.1 % of the values, checked on the Pi against reference crops stored from x86). The OCR does not notice a difference of this size.
 2. Downscale the dataset **offline** to the exact detector input size, so the training library does not resample again.
 3. On the Pi, take the full frame from the `main` stream and resize it ourselves. Do not use the ISP-scaled `lores` stream: its scaling filter differs from `INTER_AREA`.
 4. The dataset is JPEG (quality 92) while live frames are not. After a 3x downscale the difference is negligible. Mild JPEG augmentation can be added for OCR crops.
 
 ## 6. Detection model
 
-- **Model:** YOLO11n-pose, 1 class (`plate`), 4 keypoints (`kpt_shape: [4, 3]`), starting from COCO-pose weights (the keypoint head is rebuilt). Chosen for v0 as the mature option; YOLO26n-pose (NMS-free, built for edge CPUs) is compared at the Pi benchmark.
+- **Model:** YOLO11n-pose, 1 class (`plate`), 4 keypoints (`kpt_shape: [4, 3]`), starting from COCO-pose weights (the keypoint head is rebuilt) for v0 to v2; v3 fine-tunes v2 (`model.from_run`). Chosen for v0 as the mature option; YOLO26n-pose (NMS-free, built for edge CPUs) has the same FLOPs at the same input and was not faster with ONNX Runtime on the CPU (2026-11-15), so it was not trained.
 - **Ignore regions:** Ultralytics has no ignore label, so `plate_ignore` regions and plates below the small-plate threshold are painted gray (114, the letterbox color) with a 3 px margin in the downscaled train and val images; pixels of real plates are never painted. The evaluation on original frames (unpainted) drops detections on those regions instead of counting them as false positives.
 - **Label format:** `0 cx cy w h x1 y1 v1 x2 y2 v2 x3 y3 v3 x4 y4 v4`, all normalized. The box is derived from the 4 corners. `v` is the visibility flag.
 - **Augmentation:** horizontal flip is disabled (`fliplr = 0`), because a mirrored plate is not a real case and would swap the TL/TR corner order.
-- **Input size:** **OPEN**. Candidates 1024x768, 1280x960, 1920x1440. All are divisible by 32.
+- **Input size:** **Decided 2026-11-15 (detector v3):** the detector sees only rows 0.337-0.795 of the frame (`dataset.crop`), at full width, resized to **1024x352**: 0.29 of the pixels of 1280x960 at a similar scale (3.96 instead of 3.17 original px per input px). Every labeled plate of at least 70 px (589, 40 sessions) lies at 0.43-0.71 of the frame height (ignore regions 0.41-0.72), since the camera mount is fixed; a different mount needs a new crop and a new model. Latency study (scratch runs on the v2 data, val with OCR v3 behind the detector, 143 readable plates): v2 at 1280x960 135 read right; full frame from COCO at 1024x768 130, 768x576 126, 640x480 120; the band from COCO at 1280x448 135, 1024x352 130, 768x256 124; v2 fine-tuned on the band at 1024x352 132 (768x256: 126). Lower inputs lose plates of 70-110 px first. YOLO26n-pose has the same FLOPs as YOLO11n-pose and was not faster on the CPU, so it was not trained. Static INT8 quantization of v2 (ONNX Runtime, QDQ, per-channel Conv) kept the quality (136 read right) but was slower on the x86 PC without VNNI; on the Pi 5 it is still to be measured. Detector v3 (fine-tuned from v2, 60 epochs, no early stop): precision 1.000, recall 0.951 at conf 0.40 (205 val plates; v2 0.990 / 0.990 on the same labels), corner error median 2.6 px / p90 5.2 px (v2 2.4 / 5.4), behind it 132 of 143 readable plates read right (v2 135). The Pi latency is estimated at about 0.3 of v2's (roughly 150-180 ms instead of 490-530 ms) and still has to be measured. Both sides of an input size are divisible by 32.
 - **Licensing:** Ultralytics models are AGPL-3.0. Acceptable for the thesis; reconsider before any commercial use. The label format is model-neutral, so switching to an Apache-2.0 alternative (e.g. RTMPose or RF-DETR based) stays possible.
 - **Hardware caveat:** the GTX 1660 Super has 6 GB VRAM and no tensor cores. Measured at 1280 in FP32: batch 4 needs 3.6 GB per training step, batch 8 needs 7.2 GB, so v0 trains with batch 4 (gradients accumulate to 64 images). Deterministic cuDNN kernels (`deterministic=True`) need about 10 GB at batch 4 and are 8x slower, so they are off: runs with the same seed are close but not bit-identical. Mixed precision is unreliable on 16-series cards: Ultralytics' AMP check disables it on the GTX 1660 Super, so training runs in FP32 (confirmed on the first run, 2026-11-05).
 - **Export:** ONNX, run with ONNX Runtime on the Pi.
@@ -179,17 +179,17 @@ Development decisions (checkpoints, thresholds, model variants) are made on the 
 
 - Runtime: ONNX Runtime for both models.
 - Models are downloaded from S3 (repository-wide edge MLOps standard). **Decided 2026-11-12:** a version is published once, with `anpr-publish-model <detector|ocr> <run>` (the run name is the version), into the models bucket of the infrastructure (`models/<model>/<version>/` with `release.json` listing SHA-256 and size). Which versions a device runs is part of its configuration in device-management (`models.detector`, `models.ocr`); the device downloads them through presigned URLs (`GET /api/v1/device/models`), checks the SHA-256, keeps them on the SD card and switches to new versions without a restart. The detector is exported with `anpr-export-detector` (ONNX, NMS inside, checked against the PyTorch weights on val frames); the OCR export is part of `anpr-train-ocr`.
-- Pipeline: full-resolution frame from the `main` stream, `resize_for_detector()`, detector, corners scaled back to the original, `rectify_plate()` (128x64, 8 % margin), OCR. Both preprocessing functions are covered by golden checksums in `tests/test_common.py`, which the Pi implementation matches exactly on x86 and within ±1 grey level on ARM (section 5). Measured on the Pi 5 (detector v2 at 1280x960, FP32, ONNX Runtime with 4 threads): 1.4-1.7 frames per second, the detector with its resize about 490-530 ms, the OCR about 40-70 ms per plate; below the assumed 2-3 fps, which is input for the benchmark below.
+- Pipeline: full-resolution frame from the `main` stream, `detector_input()` (the crop band, read from the model's ONNX metadata key `crop`, then the resize), detector, corners scaled back to the original, `rectify_plate()` (128x64, 8 % margin), OCR. Both preprocessing functions are covered by golden checksums in `tests/test_common.py`, which the Pi implementation matches exactly on x86 and within ±1 grey level on ARM (section 5). Measured on the Pi 5 (detector v2 at 1280x960, FP32, ONNX Runtime with 4 threads): 1.4-1.7 frames per second, the detector with its resize about 490-530 ms, the OCR about 40-70 ms per plate; below the assumed 2-3 fps, which is input for the benchmark below.
 - OCR outputs: `plate` (10 slots, the text with its per-slot probabilities, padding stripped) and `region`. For a readability model (`plate_regions` = `[readable, unreadable]` in its `plate_config.yaml`), P(readable) is the `region` output at the index of `readable`; for older models there is no readability.
 - Send rule (shape recommended, thresholds **OPEN**, every threshold part of the device configuration in device-management, starting points 0.40 / 0.80 / 0.80 / 70 px / 10 px): geometry before the OCR (plate width >= 70 px, corners >= 10 px from the frame edge), then per frame the Polish format check ([PLATE_FORMAT.md](PLATE_FORMAT.md): ordinary car plates and individual plates, verified against the registration regulation), the OCR confidence threshold and the P(readable) threshold, then one event per tracked pass with agreement across frames (on the Pi for now: one event per plate text within a cooldown).
 - Logging: structured JSON, per project convention.
-- Benchmark to run before fixing the detector input size: a nano model at 1024x768, 1280x960 and 1920x1440 on the Pi 5, measuring latency. Required frame rate in the car is the deciding input (2-3 fps is assumed to be enough).
+- Benchmark still to run on the Pi 5 (the Pi was offline during the 2026-11-15 study): detector v3 against v2, plus the INT8 export, with the app stopped. Required frame rate in the car is the deciding input (2-3 fps is assumed to be enough).
 
 ## 10. Open items
 
 | # | Item | How it gets decided |
 |---|---|---|
-| 1 | Detector input resolution | Pi 5 latency benchmark, plus plate-width histogram from real labels |
+| 1 | Detector input resolution | **Decided 2026-11-15:** rows 0.337-0.795 at full width, resized to 1024x352 (detector v3, section 6); the Pi measurement is left |
 | 2 | Final OCR model and rule handling | After the baseline; the per-position character rules are written down in [PLATE_FORMAT.md](PLATE_FORMAT.md) (2026-11-12) |
 | 3 | Share of synthetic data for OCR | After the baseline, based on errors on rare characters |
 | 4 | Small-plate threshold (~70 px on the original) | Histogram after the first ~100 labels |

@@ -4,7 +4,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-# (width, height). OPEN in ML_ASSUMPTIONS: 1280x960 is the v0 choice, final after the Pi benchmark.
+# (width, height): the full-frame input of detectors v0 to v2 and the default of anpr-yolo-dataset. A detector
+# config may crop a band of rows first (dataset.crop, from v3 on).
 DETECTOR_SIZE = (1280, 960)
 # (width, height): the input of the pretrained fast-plate-ocr CCT models, which a fine-tuned model keeps.
 OCR_SIZE = (128, 64)
@@ -16,10 +17,40 @@ OCR_MARGIN = 0.08
 def resize_for_detector(image: np.ndarray, size: tuple[int, int] = DETECTOR_SIZE) -> np.ndarray:
     """Full frame -> detector input with INTER_AREA, the reference filter the Pi has to reproduce.
 
-    The 4056x3040 frame and the 4:3 detector sizes differ in aspect by under 0.1 %, so the frame is stretched
-    to the exact size rather than letterboxed; normalized labels stay valid either way.
+    The 4056x3040 frame (or its crop band) and the detector size differ in aspect by under 0.2 %, so the image
+    is stretched to the exact size rather than letterboxed; normalized labels stay valid either way.
     """
     return cv2.resize(image, size, interpolation=cv2.INTER_AREA)
+
+
+def crop_rows(frame_height: int, crop: tuple[float, float] | None) -> tuple[int, int]:
+    """Rows [y0, y1) of the frame the detector sees. crop is (top, bottom) as shares of the frame height, the
+    band where plates appear for a fixed camera mount; None is the whole frame."""
+    if crop is None:
+        return 0, frame_height
+    return round(crop[0] * frame_height), round(crop[1] * frame_height)
+
+
+def detector_input(image: np.ndarray, size: tuple[int, int], crop: tuple[float, float] | None = None) -> np.ndarray:
+    """Full frame -> detector input: the crop's rows at full width, then resize_for_detector()."""
+    y0, y1 = crop_rows(image.shape[0], crop)
+    return resize_for_detector(image[y0:y1], size)
+
+
+def to_crop(points: np.ndarray, frame_height: int, crop: tuple[float, float] | None) -> np.ndarray:
+    """Points (..., 2) in fractions of the frame -> fractions of the detector input."""
+    y0, y1 = crop_rows(frame_height, crop)
+    out = np.array(points, dtype=float)
+    out[..., 1] = (out[..., 1] * frame_height - y0) / (y1 - y0)
+    return out
+
+
+def from_crop(points: np.ndarray, frame_height: int, crop: tuple[float, float] | None) -> np.ndarray:
+    """Points (..., 2) in fractions of the detector input -> fractions of the frame; the inverse of to_crop()."""
+    y0, y1 = crop_rows(frame_height, crop)
+    out = np.array(points, dtype=float)
+    out[..., 1] = (y0 + out[..., 1] * (y1 - y0)) / frame_height
+    return out
 
 
 def rectify_plate(

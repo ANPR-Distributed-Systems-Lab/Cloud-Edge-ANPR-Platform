@@ -1,11 +1,11 @@
-"""Running a trained detector the way the edge node will: original frame -> resize_for_detector() -> model."""
+"""Running a trained detector the way the edge node will: original frame -> detector_input() -> model."""
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 
 from ..common.geometry import quad_box
-from ..common.preprocess import read_image, resize_for_detector
+from ..common.preprocess import detector_input, from_crop, read_image
 from ..paths import BATCHES_DIR
 
 
@@ -27,26 +27,30 @@ class Prediction:
 
 
 def predict_records(
-    weights: Path, records: list[dict], size: tuple[int, int], conf: float = 0.05, device=0
+    weights: Path, records: list[dict], size: tuple[int, int], conf: float = 0.05, device=0,
+    crop: tuple[float, float] | None = None,
 ) -> dict[str, list[Prediction]]:
     """Predictions per labeled frame (keyed by its "image").
 
     The frames are not painted, so the model also sees the ignored plates; the evaluation drops detections
     there instead of counting them as false positives. A low `conf` keeps enough detections for the
-    precision / recall curve; the operating threshold is chosen afterwards.
+    precision / recall curve; the operating threshold is chosen afterwards. With a crop, the model sees the
+    band only and its output is mapped back to fractions of the whole frame.
     """
     from ultralytics import YOLO
 
     model = YOLO(str(weights))
     out: dict[str, list[Prediction]] = {}
     for r in records:
-        image = resize_for_detector(read_image(BATCHES_DIR / r["image"]), size)
+        frame = read_image(BATCHES_DIR / r["image"])
+        image = detector_input(frame, size, crop)
         res = model.predict(image, imgsz=max(size), conf=conf, device=device, verbose=False)[0]
         if res.keypoints is None or len(res.boxes) == 0:
             out[r["image"]] = []
             continue
-        kpts = res.keypoints.xyn.cpu().numpy()
-        boxes = res.boxes.xyxyn.cpu().numpy()
+        height = frame.shape[0]
+        kpts = from_crop(res.keypoints.xyn.cpu().numpy(), height, crop)
+        boxes = from_crop(res.boxes.xyxyn.cpu().numpy().reshape(-1, 2, 2), height, crop).reshape(-1, 4)
         confs = res.boxes.conf.cpu().numpy()
         out[r["image"]] = [Prediction(float(c), k, b) for c, k, b in zip(confs, kpts, boxes)]
     return out

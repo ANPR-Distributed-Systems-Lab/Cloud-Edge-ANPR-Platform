@@ -2,8 +2,9 @@
 
 Logged: the final metrics in the run summary, the precision / recall / F1 curve, recall by plate width and,
 with wandb.log_images, a table with one row per validation frame. The table columns (missed, false_pos,
-max_corner_err_px, ...) can be sorted and filtered in the W&B UI; each row shows the frame at detector
-resolution with labels and predictions drawn, plus toggleable box overlays.
+max_corner_err_px, ...) can be sorted and filtered in the W&B UI; each row shows the whole frame at the
+detector's width with labels and predictions drawn (and the crop band, if any, as two lines), plus toggleable
+box overlays.
 """
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -14,7 +15,7 @@ import numpy as np
 from .. import tracking
 from ..common.geometry import quad_box
 from ..common.labels import plate_width_px, session_of
-from ..common.preprocess import read_image, resize_for_detector
+from ..common.preprocess import crop_rows, read_image, resize_for_detector
 from ..paths import BATCHES_DIR
 from .metrics import frame_results
 from .predict import Prediction
@@ -66,15 +67,20 @@ def box_overlays(record: dict, preds: list[Prediction], min_plate_px: float) -> 
 
 
 def frames_table(wandb, records: list[dict], predictions: dict[str, list[Prediction]], conf: float,
-                 size: tuple[int, int], min_plate_px: float):
+                 size: tuple[int, int], min_plate_px: float, crop: tuple[float, float] | None = None):
     """One row per frame, at the operating threshold `conf`."""
     columns = ["image", "frame", "session", "plates", "detected", "missed", "false_pos",
                "max_corner_err_px", "min_plate_width_px", "max_conf"]
     table = wandb.Table(columns=columns)
     for r, res in zip(records, frame_results(records, predictions, min_plate_px, conf)):
         preds = [p for p in predictions.get(r["image"], []) if p.conf >= conf]
-        frame = resize_for_detector(read_image(BATCHES_DIR / r["image"]), size)
-        image = wandb.Image(draw_frame(frame, r, preds, min_plate_px), boxes=box_overlays(r, preds, min_plate_px),
+        full = read_image(BATCHES_DIR / r["image"])
+        frame = resize_for_detector(full, (size[0], round(size[0] * full.shape[0] / full.shape[1])))
+        drawn = draw_frame(frame, r, preds, min_plate_px)
+        if crop is not None:
+            for row in crop_rows(frame.shape[0], crop):
+                cv2.line(drawn, (0, row), (frame.shape[1] - 1, row), IGNORED, 1)
+        image = wandb.Image(drawn, boxes=box_overlays(r, preds, min_plate_px),
                             file_type="jpg", caption=Path(r["image"]).name)
         table.add_data(
             image, Path(r["image"]).name, session_of(r["image"]), len(res.plates), len(res.hits),
@@ -86,7 +92,7 @@ def frames_table(wandb, records: list[dict], predictions: dict[str, list[Predict
 
 
 def log_evaluation(wandb, evaluation: "Evaluation", size: tuple[int, int], min_plate_px: float,
-                   images: bool) -> None:
+                   images: bool, crop: tuple[float, float] | None = None) -> None:
     res, ultra = evaluation.result, evaluation.ultralytics
     best, corner = res["best"], res["corner_error"]
     summary = {
@@ -110,7 +116,7 @@ def log_evaluation(wandb, evaluation: "Evaluation", size: tuple[int, int], min_p
     })
     if images:
         wandb.log({"eval/frames": frames_table(wandb, evaluation.records, evaluation.predictions,
-                                               best["conf"], size, min_plate_px)})
+                                               best["conf"], size, min_plate_px, crop)})
 
 
 def report(cfg: dict, evaluation: "Evaluation") -> None:
@@ -125,6 +131,6 @@ def report(cfg: dict, evaluation: "Evaluation") -> None:
         if new:
             tracking.log_history(wandb, run)
         log_evaluation(wandb, evaluation, cfg["dataset"]["size"], cfg["dataset"]["min_plate_px"],
-                       images=cfg["wandb"].get("log_images", False))
+                       images=cfg["wandb"].get("log_images", False), crop=cfg["dataset"]["crop"])
     finally:
         wandb.finish()

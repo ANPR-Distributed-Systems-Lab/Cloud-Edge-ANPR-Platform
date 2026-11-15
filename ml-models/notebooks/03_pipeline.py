@@ -21,7 +21,7 @@
 # in the first code cell and run all cells.** Each model has its own notebook (`01_detector.py`,
 # `02_ocr.py`); this one answers what comes out of the whole chain:
 #
-# full frame -> `resize_for_detector()` -> detector -> corners on the original -> `rectify_plate()` -> OCR
+# full frame -> `detector_input()` -> detector -> corners on the original -> `rectify_plate()` -> OCR
 #
 # The detector runs at its operating threshold (best F1 on val). Every detection is read, as on the edge
 # node, and each read is one of: `correct` / `wrong` (a readable plate), `unreadable` (a plate labeled not

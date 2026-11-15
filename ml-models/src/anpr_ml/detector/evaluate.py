@@ -60,7 +60,8 @@ def evaluate_run(cfg: dict) -> Evaluation:
     weights = run / "weights" / "best.pt"
     records = val_records(cfg)
     ultra = ultralytics_val(cfg, weights)
-    preds = predict_records(weights, records, cfg["dataset"]["size"], device=cfg["train"]["device"])
+    preds = predict_records(weights, records, cfg["dataset"]["size"], device=cfg["train"]["device"],
+                            crop=cfg["dataset"]["crop"])
     res = evaluate(records, preds, cfg["dataset"]["min_plate_px"])
     (run / "eval_val.json").write_text(json.dumps({"ultralytics": ultra, **res}, indent=2, default=lambda o: o.item()))
     return Evaluation(run, weights, records, preds, ultra, res)

@@ -1,15 +1,17 @@
 """anpr-yolo-dataset: validated labels (.jsonl) -> YOLO-pose dataset at the detector input size.
 
-Every frame is downscaled offline with resize_for_detector(), so the training library never resamples it and
-the pixels match what the edge node feeds the detector. Images are written as PNG to avoid a second lossy JPEG
+Every frame is downscaled offline with detector_input() (the config's crop band, if any, then
+resize_for_detector()), so the training library never resamples it and the pixels match what the edge node feeds
+the detector. Images are written as PNG to avoid a second lossy JPEG
 step. A frame's split comes from splits.json (its session), never from the batch name.
 
 Ultralytics has no ignore label, so plate_ignore regions and plates narrower than the small-plate threshold
 are painted with a neutral gray: the detector is then neither trained to find them nor penalized for finding
 them. Pixels of real plates are never painted, even where an ignore region overlaps them.
 
-Label line per plate: `0 cx cy w h x1 y1 2 x2 y2 2 x3 y3 2 x4 y4 2`, corners TL, TR, BR, BL, all normalized;
-the box is derived from the corners.
+Label line per plate: `0 cx cy w h x1 y1 2 x2 y2 2 x3 y3 2 x4 y4 2`, corners TL, TR, BR, BL, normalized to the
+detector input (the crop band when there is one); the box is derived from the corners. A plate reaching outside
+the band is painted like plate_ignore and counted in the manifest, so a band that is too narrow shows there.
 
 A dataset directory is written once and never overwritten: manifest.json records the label files (by checksum)
 and the parameters it was built from, and ensure_dataset() refuses one that no longer matches its config.
@@ -34,7 +36,7 @@ from ..common.labels import (
     plate_width_px,
     split_records,
 )
-from ..common.preprocess import DETECTOR_SIZE, read_image, resize_for_detector
+from ..common.preprocess import DETECTOR_SIZE, detector_input, read_image, to_crop
 from ..paths import BATCHES_DIR, DATASETS_DIR, EXPORTS_DIR
 from .config import dataset_dir
 
@@ -71,26 +73,32 @@ def label_line(corners: np.ndarray) -> str:
 
 
 def convert_record(
-    record: dict, image: np.ndarray, size: tuple[int, int], min_plate_px: float, margin_px: int, fill: int
+    record: dict, image: np.ndarray, size: tuple[int, int], min_plate_px: float, margin_px: int, fill: int,
+    crop: tuple[float, float] | None = None,
 ) -> tuple[np.ndarray, list[str], Counter]:
     """The resized and painted image of one frame, its label lines and counters for the manifest."""
     stats = Counter()
     scale = np.array(size, dtype=float)
+    height = image.shape[0]
     keep, ignore, lines = [], [], []
     for plate in record["plates"]:
-        corners = np.array(plate["corners"])
-        if plate_width_px(corners, record) < min_plate_px:
+        corners = to_crop(plate["corners"], height, crop)
+        if plate_width_px(plate["corners"], record) < min_plate_px:
             ignore.append(corners * scale)
             stats["plates_demoted_small"] += 1
+            continue
+        if corners[:, 1].min() < 0 or corners[:, 1].max() > 1:
+            ignore.append(corners * scale)
+            stats["plates_outside_crop"] += 1
             continue
         keep.append(corners * scale)
         lines.append(label_line(corners))
         stats["plates"] += 1
     for region in record["ignore"]:
-        ignore.append(np.array(region["corners"]) * scale)
+        ignore.append(to_crop(region["corners"], height, crop) * scale)
         stats["ignore_regions"] += 1
 
-    resized = resize_for_detector(image, size)
+    resized = detector_input(image, size, crop)
     resized[ignore_mask(size, ignore, keep, margin_px)] = fill
     stats["images"] += 1
     stats["negatives"] += not lines
@@ -110,6 +118,7 @@ def build_dataset(
     fill: int = IGNORE_FILL,
     images_dir: Path = BATCHES_DIR,
     splits: dict | None = None,
+    crop: tuple[float, float] | None = None,
 ) -> dict:
     """Writes images/<split>, labels/<split>, data.yaml and manifest.json into out_dir; returns the manifest."""
     if out_dir.exists():
@@ -128,7 +137,7 @@ def build_dataset(
         total = Counter()
         for r in records:
             image, lines, stats = convert_record(
-                r, read_image(images_dir / r["image"]), size, min_plate_px, margin_px, fill
+                r, read_image(images_dir / r["image"]), size, min_plate_px, margin_px, fill, crop
             )
             stem = Path(r["image"]).stem
             if not cv2.imwrite(str(tmp / "images" / split / f"{stem}.png"), image):
@@ -148,7 +157,8 @@ def build_dataset(
     manifest = {
         "created_utc": datetime.now(UTC).isoformat(timespec="seconds"),
         "size": list(size),
-        "resize": "cv2.resize INTER_AREA (anpr_ml.common.preprocess.resize_for_detector)",
+        "crop": list(crop) if crop is not None else None,
+        "resize": "crop rows, then cv2.resize INTER_AREA (anpr_ml.common.preprocess.detector_input)",
         "opencv": cv2.__version__,
         "min_plate_px": min_plate_px,
         "ignore_margin_px": margin_px,
@@ -168,15 +178,17 @@ def ensure_dataset(cfg: dict) -> dict:
     exports = export_paths(d["exports"])
     out = dataset_dir(cfg)
     if not (out / "manifest.json").exists():
-        build_dataset(exports, out, d["size"], d["min_plate_px"], d["ignore_margin_px"])
+        build_dataset(exports, out, d["size"], d["min_plate_px"], d["ignore_margin_px"], crop=d["crop"])
     manifest = json.loads((out / "manifest.json").read_text())
     expected = {
         "sources": {p.name: sha256_file(p) for p in exports},
         "size": list(d["size"]),
         "min_plate_px": d["min_plate_px"],
         "ignore_margin_px": d["ignore_margin_px"],
+        "crop": list(d["crop"]) if d["crop"] is not None else None,
     }
-    stale = {k: {"dataset": manifest[k], "config": v} for k, v in expected.items() if manifest[k] != v}
+    # Datasets built before crops existed have no "crop" key: they are full frame.
+    stale = {k: {"dataset": manifest.get(k), "config": v} for k, v in expected.items() if manifest.get(k) != v}
     if stale:
         raise ValueError(f"{out} does not match the config, give the dataset a new name: {stale}")
     return manifest
@@ -196,10 +208,13 @@ def main() -> None:
     parser.add_argument("--size", type=parse_size, default=DETECTOR_SIZE, help="WxH, e.g. 1280x960")
     parser.add_argument("--min-plate-px", type=float, default=SMALL_PLATE_PX)
     parser.add_argument("--margin-px", type=int, default=IGNORE_MARGIN_PX)
+    parser.add_argument("--crop", type=float, nargs=2, metavar=("TOP", "BOTTOM"),
+                        help="band of frame rows the detector sees, as shares of the frame height")
     args = parser.parse_args()
 
     exports = export_paths(args.exports) if args.exports else sorted(EXPORTS_DIR.glob("*.jsonl"))
-    manifest = build_dataset(exports, DATASETS_DIR / args.name, args.size, args.min_plate_px, args.margin_px)
+    manifest = build_dataset(exports, DATASETS_DIR / args.name, args.size, args.min_plate_px, args.margin_px,
+                             crop=tuple(args.crop) if args.crop else None)
     print(json.dumps(manifest["counts"], indent=2))
     print(f"written {DATASETS_DIR / args.name}")
 

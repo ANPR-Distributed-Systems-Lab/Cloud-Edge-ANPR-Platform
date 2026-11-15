@@ -115,7 +115,7 @@ These refine the documents above (which are already updated):
   now: no enrichment. Later, use detector v0 predictions to pick such frames for training batches. Never enrich
   the test set; it must reflect the real distribution.
 
-## Current state (2026-11-12)
+## Current state (2026-11-15)
 
 - **train_001**: 300 frames from the train split, labeled by hand, validated with 0 errors. 180 `plate`,
   186 `plate_ignore`; plate width min 70, median 121, p90 236, max 525 px.
@@ -180,14 +180,23 @@ These refine the documents above (which are already updated):
 - **ARM preprocessing (2026-11-12)**: `rectify_plate()` differs by at most 1 grey level on the Pi;
   ML_ASSUMPTIONS section 5 now says "identical on x86, within ±1 on ARM". `tests/test_common.py` keeps the x86
   checksums.
+- **Detector v3 (2026-11-15)** (`configs/detector_v3.yaml`, `runs/detector/v3`): v2 fine-tuned on a band of
+  the frame, rows 0.337-0.795 at full width (`dataset.crop`), resized to 1024x352, about 0.29 of v2's compute; the
+  camera mount is fixed and every labeled plate lies at 0.43-0.71 of the frame height. Chosen from an overnight
+  latency study (scratch runs `runs/detector/exp-*`, results in ML_ASSUMPTIONS section 6; YOLO26n-pose not
+  faster). 60 epochs without early stop (a first attempt with patience 20 kept epoch 1 and was deleted). On val:
+  precision 1.000, recall 0.951 at conf 0.40, corner error median 2.6 / p90 5.2 px; behind it OCR v3 reads 132 of
+  143 readable plates right (v2 135). The export carries the crop in its ONNX metadata (`crop` = "0.337,0.795");
+  the rpi-edge detector still has to apply it. Not measured on the Pi yet (it was offline). Reported to W&B.
 - **test_001 does not exist yet**: ~150 frames from the test split, labeled from scratch, never with
   model suggestions.
 - **val_002** is labeled (150 frames, 72 readable plates) and `configs/detector_v2.yaml` (v1 plus val_002 for
   validation) is committed; detector v2 on val_001 + val_002 (207 plates): precision and recall 0.986 at conf
   0.40 (3 FP, 3 FN). The OCR configs and the pipeline validate on val_001 + val_002 too.
 - Committed: the package restructuring, detector v1 and v2 configs, the version-agnostic detector notebook, the
-  OCR and pipeline code (v0 / v1), `anpr_ml.analysis`, notebooks 02 / 03 and the OCR rejects (v2). Uncommitted:
-  the readability head (v3).
+  OCR and pipeline code (v0 / v1), `anpr_ml.analysis`, notebooks 02 / 03, the OCR rejects (v2), the readability
+  head (OCR v3), the detector export and model publishing. Uncommitted: detector v3 (the crop band in the detector
+  code, its config).
 
 ## Roadmap
 
@@ -201,7 +210,8 @@ The order agreed so far; confirm each step with the project owner before startin
 4. **Done (2026-11-06):** detector v0 = YOLO11n-pose at 1280x960, `fliplr = 0`, FP32, trained with
    `anpr-train-detector` and tracked in W&B. Left: review of its errors, written conclusions, report.
 5. Pre-labeling loop: predictions exported as CVAT for images 1.1 XML, imported as pre-annotations, corrected.
-6. Pi 5 latency benchmark at 1024x768 / 1280x960 / 1920x1440 to close the detector input size.
+6. **Done (2026-11-15):** detector input chosen by a latency study on the PC: a crop band at 1024x352 (detector
+   v3). Left: measure v3 (and an INT8 export) on the Pi 5.
 7. OCR. **Done (2026-11-09):** rectified 128x64 crops with an 8 % margin and corner jitter (`anpr-ocr-dataset`),
    fast-plate-ocr `cct-s-v2-global` on Keras 3 + torch with ONNX export (`anpr-train-ocr`), baseline v0, the
    end-to-end evaluation (`anpr-eval-pipeline`) and notebooks 02 / 03. **Done (2026-11-10):** v1 trained, rejects
@@ -209,4 +219,4 @@ The order agreed so far; confirm each step with the project owner before startin
    verified per-position rules (PLATE_FORMAT.md) and the send rule on the Pi (geometry, format, confidence,
    P(readable), cooldown; no agreement across frames yet). Left: the thresholds, then the final model.
 8. **Done (2026-11-12):** both models export to ONNX (`anpr-export-detector`, `anpr-train-ocr`) and publish to the
-   models bucket (`anpr-publish-model`). Left: apply the bucket in AWS, then publish detector v2 and OCR v3.
+   models bucket (`anpr-publish-model`). Left: apply the bucket in AWS, then publish detector v3 and OCR v3.

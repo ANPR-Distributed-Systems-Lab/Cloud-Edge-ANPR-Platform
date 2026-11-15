@@ -131,16 +131,20 @@ The `.jsonl` is written only when there are no errors; fix the reported frames i
 Copy the previous config and edit the copy:
 
 ```powershell
-$prev = "v1"; $new = "v2"
+$prev = "v3"; $new = "v4"
 Copy-Item "configs\detector_$prev.yaml" "configs\detector_$new.yaml"
 ```
 
 In `configs\detector_<new>.yaml` change:
 
 - the header comment: what this version changes and why;
-- `run_name: v2`;
-- when the data changes: `dataset.name: pose_1280x960_v2` (a new name, datasets are never overwritten) and
-  `dataset.exports: [train_001, train_002, train_003, val_001]`;
+- `run_name: v4`;
+- when the data or the input changes: `dataset.name: pose_1024x352_v4` (a new name, datasets are never
+  overwritten), `dataset.exports: [train_001, train_002, train_003, val_001, val_002]`, `dataset.size` and
+  `dataset.crop` (the band of frame rows the detector sees, shares of the frame height; leave it out for the
+  whole frame);
+- the start: `model.from_run` fine-tunes a finished detector run (v3 starts from v2), `model.weights` names a
+  pretrained Ultralytics checkpoint (v0 to v2: `yolo11n-pose.pt`);
 - any training setting under test.
 
 Then train. The dataset is built automatically; the same command resumes an interrupted run, and evaluates and
@@ -179,7 +183,7 @@ interrupted, delete its `runs\ocr\<run>` folder (after a look) and run the train
 ### Detector and OCR together
 
 ```powershell
-$det = "v2"; $ocr = "v3"
+$det = "v3"; $ocr = "v3"
 uv run anpr-eval-pipeline --detector "configs\detector_$det.yaml" --ocr "configs\ocr_$ocr.yaml"
 ```
 
@@ -191,8 +195,8 @@ The edge devices download models from the models bucket (Terraform output `model
 `infrastructure/envs/dev`); the run name is the version. The upload uses your AWS credentials.
 
 ```powershell
-uv run anpr-export-detector --config configs\detector_v2.yaml   # writes runs\detector\v2\model.onnx
-uv run anpr-publish-model detector v2 --bucket <models bucket>
+uv run anpr-export-detector --config configs\detector_v3.yaml   # writes runs\detector\v3\model.onnx
+uv run anpr-publish-model detector v3 --bucket <models bucket>
 uv run anpr-publish-model ocr v3 --bucket <models bucket>      # model.onnx and plate_config.yaml of the run
 ```
 
@@ -234,7 +238,7 @@ ml-models/
 │   ├── analysis.py                 notebook helpers: plot style, version selection, config comparison
 │   ├── common/
 │   │   ├── geometry.py             plate width, boxes from corners, IoU
-│   │   ├── preprocess.py           resize_for_detector(), rectify_plate(): same pixels on the Pi
+│   │   ├── preprocess.py           detector_input() (crop band + resize), rectify_plate(): same pixels on the Pi
 │   │   └── labels.py               splits.json, the validated .jsonl labels, batch names, width buckets
 │   ├── labeling/
 │   │   ├── frames.py               sessions on disk, perceptual hash (dHash)

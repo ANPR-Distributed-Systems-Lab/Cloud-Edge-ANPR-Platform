@@ -7,7 +7,15 @@ import pytest
 
 from anpr_ml.common.geometry import box_iou, plate_width, quad_box
 from anpr_ml.common.labels import batch_file_name, load_records, plate_width_px, session_of, split_records
-from anpr_ml.common.preprocess import OCR_SIZE, rectify_plate, resize_for_detector
+from anpr_ml.common.preprocess import (
+    OCR_SIZE,
+    crop_rows,
+    detector_input,
+    from_crop,
+    rectify_plate,
+    resize_for_detector,
+    to_crop,
+)
 from samples import PLATE, W, record
 
 # SHA-256 prefixes of the preprocessing on the seeded frames below, computed with opencv 5.0.0. If one changes,
@@ -72,3 +80,24 @@ def test_a_frame_labeled_in_two_batches_is_rejected(tmp_path):
         (tmp_path / f"{batch}.jsonl").write_text(json.dumps(record(f"{batch}/session_a__0000__img_1.jpg")) + "\n")
     with pytest.raises(ValueError):
         load_records([tmp_path / "a.jsonl", tmp_path / "b.jsonl"])
+
+
+def test_crop_rows_of_the_whole_frame_and_a_band():
+    assert crop_rows(3040, None) == (0, 3040)
+    assert crop_rows(3040, (0.337, 0.795)) == (1024, 2417)
+
+
+def test_detector_input_crops_rows_then_resizes():
+    frame = np.random.default_rng(7).integers(0, 256, (3040, 4056, 3), dtype=np.uint8)
+    out = detector_input(frame, (1024, 352), (0.337, 0.795))
+    assert np.array_equal(out, cv2.resize(frame[1024:2417], (1024, 352), interpolation=cv2.INTER_AREA))
+    assert np.array_equal(detector_input(frame, (1280, 960)), resize_for_detector(frame, (1280, 960)))
+
+
+def test_from_crop_inverts_to_crop():
+    points = np.array([[0.1, 0.45], [0.9, 0.7]])
+    inside = to_crop(points, 3040, (0.337, 0.795))
+    assert inside[:, 0] == pytest.approx(points[:, 0])
+    assert inside[0, 1] == pytest.approx((0.45 * 3040 - 1024) / 1393)
+    assert from_crop(inside, 3040, (0.337, 0.795)) == pytest.approx(points)
+    assert to_crop(points, 3040, None) == pytest.approx(points)

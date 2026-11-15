@@ -21,9 +21,10 @@
 # `configs/detector_vN.yaml` and the run directory `runs/detector/vN/`.
 #
 # **Pipeline shared by all versions** (decided 2026-11-05):
-# - YOLO-pose, 1 class, 4 keypoints in the order TL, TR, BR, BL, starting from COCO-pose weights.
-# - Frames are downscaled offline with `resize_for_detector()` (INTER_AREA), the function the Pi will use, so
-#   training never resamples them again.
+# - YOLO-pose, 1 class, 4 keypoints in the order TL, TR, BR, BL, starting from COCO-pose weights (v0 to v2) or
+#   fine-tuned from an earlier run (`model.from_run`, v3 from v2).
+# - Frames are downscaled offline with `detector_input()` (the config's crop band of rows, if any, then INTER_AREA),
+#   the function the Pi will use, so training never resamples them again.
 # - `plate_ignore` regions and plates narrower than `min_plate_px` on the original are painted gray (114), so the
 #   model is neither trained to find them nor penalized for finding them.
 # - Horizontal flip off: a mirrored plate is not a real case and would swap TL and TR.
@@ -292,7 +293,7 @@ pd.Series(ultra, name="val").to_frame()
 # %% [markdown]
 # ## 5. Evaluation on the original frames
 #
-# The way the edge node will run: original frame -> `resize_for_detector()` -> model, with **unpainted** frames.
+# The way the edge node will run: original frame -> `detector_input()` -> model, with **unpainted** frames.
 # Detections on ignore regions or demoted small plates are dropped, not counted as false positives. A match needs
 # box IoU >= 0.5. Corner error is the mean distance of the 4 corners on the original 4056x3040 frame.
 

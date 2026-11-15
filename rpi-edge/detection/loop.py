@@ -41,21 +41,24 @@ class FrameLoop:
     def run(self, stop: threading.Event) -> None:
         """Analyses frames until stopped; expects a configuration and models to be there. Any failure closes the
         camera, which opens again a little later."""
-        applied_version = None
+        applied = None  # the configuration the camera runs with
         summary = Summary()
         while not stop.is_set():
             try:
+                # One read per frame: the camera, the pipeline and the pause all use the same configuration, even
+                # when a new one arrives meanwhile (it is applied on the next frame).
                 current = self.configuration.current
                 if not self.camera.is_open:
                     self.camera.open(current.camera)
-                    applied_version = self.configuration.version
-                elif applied_version != self.configuration.version:
+                    applied = current
+                elif current is not applied:
                     self.camera.apply(current.camera)
-                    applied_version = self.configuration.version
+                    applied = current
                 started = time.monotonic()
                 frame = self.camera.capture()
                 loaded = self.models.get()
-                result = self.pipeline.process(frame, current, loaded, locate(self.locations, frame.captured_at))
+                location = locate(self.locations, frame.captured_at, current.gps.max_fix_age_seconds)
+                result = self.pipeline.process(frame, current, loaded, location)
                 self._buffer(result)
                 for observe in self.observers:
                     observe(frame, result)

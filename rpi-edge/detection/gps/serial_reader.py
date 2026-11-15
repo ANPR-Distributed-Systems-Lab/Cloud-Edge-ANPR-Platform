@@ -1,8 +1,9 @@
 """Reads the NMEA stream of the GNSS module from its serial port into the GpsTracker.
 
 The module talks as soon as it is powered (the LC76G at 115200 baud by default) and needs no commands. When the port
-cannot be opened or the module goes quiet, the reader says so once and opens the port again every few seconds, so
-a module that is plugged in later, or a loose wire, heals by itself.
+cannot be opened or fails, the reader says so once and opens it again every few seconds, so a module that is plugged
+in later heals by itself. A module that is connected but quiet is not an error here: the tracker reports it
+(GpsStatus.receiving).
 """
 import threading
 from collections.abc import Callable

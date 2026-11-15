@@ -95,14 +95,16 @@ def test_a_wrong_device_clock_is_reported(capsys):
 def test_locate_gives_a_position_only_for_a_recent_fix():
     tracker = GpsTracker()
     tracker.feed(RMC, T0)
-    assert locate(tracker, T0 + timedelta(seconds=1)).fix_age_ms == 1000
-    assert locate(tracker, T0 + timedelta(seconds=31)) is None  # too old to be the position of a moving car
-    assert locate(tracker, T0 - timedelta(seconds=1)) is None
+    assert locate(tracker, T0 + timedelta(seconds=1), 30).fix_age_ms == 1000
+    assert locate(tracker, T0 + timedelta(seconds=31), 30) is None  # too old to be the position of a moving car
+    assert locate(tracker, T0 + timedelta(seconds=31), 60).fix_age_ms == 31_000  # gps.maxFixAgeSeconds decides
+    assert locate(tracker, T0 + timedelta(seconds=3), 2) is None
+    assert locate(tracker, T0 - timedelta(seconds=1), 30) is None
 
 
 def test_the_other_sources_answer_the_same_questions():
-    assert locate(NoLocationSource(), T0) is None
-    location = locate(FixedLocationSource(52.229676, 21.012229), T0)
+    assert locate(NoLocationSource(), T0, 30) is None
+    location = locate(FixedLocationSource(52.229676, 21.012229), T0, 30)
     assert (location.lat, location.lon, location.fix_age_ms) == (52.229676, 21.012229, 0)
     assert FixedLocationSource(1.0, 2.0).status(T0).fix is FixType.FIX_3D
     assert NoLocationSource().status(T0).receiving is False

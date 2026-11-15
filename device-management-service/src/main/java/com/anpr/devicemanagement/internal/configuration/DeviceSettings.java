@@ -41,6 +41,14 @@ public class DeviceSettings {
 
     @Valid
     @NotNull
+    private Gps gps;
+
+    @Valid
+    @NotNull
+    private Photos photos;
+
+    @Valid
+    @NotNull
     private Camera camera;
 
     /** How the device groups its local queues before sending them. */
@@ -101,6 +109,26 @@ public class DeviceSettings {
         private Integer alertsPollSeconds;
         @NotNull
         private Integer locationSampleSeconds;
+    }
+
+    /** How fresh a GPS fix must be to give a frame its position. */
+    @DynamoDbBean
+    @Getter
+    @Setter
+    public static class Gps {
+        @NotNull
+        private Integer maxFixAgeSeconds;
+    }
+
+    /** The photo uploaded for a frame with detections: a copy of the frame, downscaled if narrower than 4056 px. */
+    @DynamoDbBean
+    @Getter
+    @Setter
+    public static class Photos {
+        @NotNull
+        private Integer widthPx;
+        @NotNull
+        private Integer jpegQuality;
     }
 
     /** Capture settings; the resolution is fixed (4056x3040). */

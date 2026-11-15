@@ -397,7 +397,7 @@ components:
 
     DeviceConfigurationResponse:
       type: object
-      required: [deviceId, version, updatedAt, plateCooldownSeconds, batching, ml, models, intervals, camera]
+      required: [deviceId, version, updatedAt, plateCooldownSeconds, batching, ml, models, intervals, gps, photos, camera]
       properties:
         deviceId: { type: string, format: uuid }
         version:
@@ -410,11 +410,13 @@ components:
         ml: { $ref: '#/components/schemas/MlConfiguration' }
         models: { $ref: '#/components/schemas/ModelsConfiguration' }
         intervals: { $ref: '#/components/schemas/IntervalsConfiguration' }
+        gps: { $ref: '#/components/schemas/GpsConfiguration' }
+        photos: { $ref: '#/components/schemas/PhotosConfiguration' }
         camera: { $ref: '#/components/schemas/CameraConfiguration' }
 
     UpdateDeviceConfigurationRequest:
       type: object
-      required: [version, plateCooldownSeconds, batching, ml, models, intervals, camera]
+      required: [version, plateCooldownSeconds, batching, ml, models, intervals, gps, photos, camera]
       properties:
         version:
           type: integer
@@ -425,6 +427,8 @@ components:
         ml: { $ref: '#/components/schemas/MlConfiguration' }
         models: { $ref: '#/components/schemas/ModelsConfiguration' }
         intervals: { $ref: '#/components/schemas/IntervalsConfiguration' }
+        gps: { $ref: '#/components/schemas/GpsConfiguration' }
+        photos: { $ref: '#/components/schemas/PhotosConfiguration' }
         camera: { $ref: '#/components/schemas/CameraConfiguration' }
 
     PlateCooldownSeconds:
@@ -540,8 +544,40 @@ components:
         locationSampleSeconds:
           type: integer
           minimum: 1
-          maximum: 60
-          description: How often the device records a GPS point while moving
+          maximum: 3600
+          description: How often the device records a point of its track (while it has a GPS fix), moving or not
+
+    GpsConfiguration:
+      type: object
+      required: [maxFixAgeSeconds]
+      properties:
+        maxFixAgeSeconds:
+          type: integer
+          minimum: 1
+          maximum: 300
+          description: |
+            The oldest GPS fix the device still takes as the position of a frame. Without a fix this fresh the plates
+            of the frame are not read (a detection must carry a position, and it cannot be added later).
+
+    PhotosConfiguration:
+      type: object
+      description: |
+        The photo of a frame with detections, uploaded to S3. The corners of a detection are relative to the frame
+        (0 to 1), so they fit a photo of any size.
+      required: [widthPx, jpegQuality]
+      properties:
+        widthPx:
+          type: integer
+          minimum: 640
+          maximum: 4056
+          description: |
+            Width of the uploaded photo; the height keeps the 4:3 frame (4056 = the full 4056x3040 frame, less is a
+            downscaled copy)
+        jpegQuality:
+          type: integer
+          minimum: 50
+          maximum: 100
+          description: JPEG quality of the uploaded photo
 
     CameraConfiguration:
       type: object
@@ -573,9 +609,19 @@ components:
           description: |
             MANUAL - exposureUs and gain fixed; AUTO - exposure time first (up to maxExposureUs), then gain (up to maxGain);
             AUTO_GAIN - exposureUs fixed, gain automatic; AUTO_EXPOSURE - gain fixed, exposure time automatic
-        exposureUs: { type: integer, minimum: 20, maximum: 1000000 }
+        exposureUs:
+          type: integer
+          minimum: 20
+          maximum: 80000
+          description: |
+            Exposure time of MANUAL and AUTO_GAIN. At most 80 ms: an exposure must end before the next frame starts, and
+            the sensor runs at 10 fps or faster (11.7 fps leaves 83 ms), so a longer one could not be applied
         gain: { type: number, format: double, minimum: 1, maximum: 22 }
-        maxExposureUs: { type: integer, minimum: 20, maximum: 1000000 }
+        maxExposureUs:
+          type: integer
+          minimum: 20
+          maximum: 80000
+          description: Upper limit of the exposure time in AUTO and AUTO_EXPOSURE (at most 80 ms, as exposureUs)
         maxGain: { type: number, format: double, minimum: 1, maximum: 22 }
         targetBrightness:
           type: number

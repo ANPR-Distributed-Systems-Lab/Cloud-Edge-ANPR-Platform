@@ -1,9 +1,8 @@
 """The configuration the detection mode runs with: the device configuration of device-management, nothing else.
 
-Every setting (send rule thresholds, model versions, camera, batching, intervals) is kept and edited in the
-cloud, which also holds the defaults. The device keeps the last configuration it received in
-/config/device-config.json, so after a restart without network it runs on that copy. A device that never
-received one waits for it (cloud/config_poll.py fetches it).
+Every setting (contract/configuration.py) is kept and edited in the cloud, which also holds the defaults. The device
+keeps the last configuration it received in /config/device-config.json, so after a restart without network it runs
+on that copy. A device that never received one waits for it (cloud/config_poll.py fetches it).
 """
 import json
 import threading
@@ -18,14 +17,13 @@ CACHE_FILE = "device-config.json"
 
 
 class ConfigurationStore:
-    """`current` is replaced as a whole, so readers never see half an update; `version` goes up with every change,
-    so the frame loop knows when to re-apply the camera settings."""
+    """`current` is replaced as a whole, and only when it changes: readers never see half an update, and a reader
+    that keeps the object it read knows a change by `current is not kept`."""
 
     def __init__(self, config_dir: Path) -> None:
         self.cache_file = config_dir / CACHE_FILE
         self.current: DeviceConfiguration | None = None
         self.etag: str | None = None
-        self.version = 0
         self._configured = threading.Event()
         self._lock = threading.Lock()
         self._load_cached()
@@ -42,7 +40,6 @@ class ConfigurationStore:
             if configuration == self.current:
                 return False
             self.current = configuration
-            self.version += 1
             self._configured.set()
             return True
 
@@ -66,6 +63,5 @@ class ConfigurationStore:
             log("configuration_cache_unusable", level="error", file=str(self.cache_file), problems=problems)
             return
         self.etag = cached.get("etag")
-        self.version = 1
         self._configured.set()
         log("configuration_from_cache", configVersion=self.current.version)

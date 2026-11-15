@@ -40,8 +40,8 @@ FPS_WINDOW_SECONDS = 10.0
 ALERT_SCREEN_SECONDS = 15.0
 ALERT_BEEPS = (3, 0.4)  # count, seconds each
 READY_BEEPS = (1, 0.12)
-LEFT_COLUMN = 12
-MAX_SHOWN_COUNT = 9999
+LEFT_COLUMN = 12  # width of the left half of a status line; the right half starts after it
+MAX_SHOWN_COUNT = 9999  # larger counts show as 9999+, so a line never grows past the 20 columns
 
 
 class FrameRate:

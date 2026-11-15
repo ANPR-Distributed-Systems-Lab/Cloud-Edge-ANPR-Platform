@@ -20,6 +20,8 @@ _CONFIGURATION = {
            "minPlateWidthPx": 70, "minEdgeMarginPx": 10},
     "models": {"detector": "v2", "ocr": "v3"},
     "intervals": {"metricsSeconds": 60, "configPollSeconds": 60, "alertsPollSeconds": 60, "locationSampleSeconds": 5},
+    "gps": {"maxFixAgeSeconds": 30},
+    "photos": {"widthPx": 4056, "jpegQuality": 90},
     "camera": {
         "exposure": {"mode": "AUTO", "exposureUs": 500, "gain": 2.0, "maxExposureUs": 540, "maxGain": 4.0,
                      "targetBrightness": 0.4},

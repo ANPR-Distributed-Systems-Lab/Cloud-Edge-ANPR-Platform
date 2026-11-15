@@ -37,6 +37,9 @@ class DeviceConfigurationIT extends ApiTestSupport {
                 .andExpect(jsonPath("$.models.detector").value("v2"))
                 .andExpect(jsonPath("$.models.ocr").value("v3"))
                 .andExpect(jsonPath("$.intervals.metricsSeconds").value(60))
+                .andExpect(jsonPath("$.gps.maxFixAgeSeconds").value(30))
+                .andExpect(jsonPath("$.photos.widthPx").value(4056))
+                .andExpect(jsonPath("$.photos.jpegQuality").value(90))
                 .andExpect(jsonPath("$.camera.exposure.mode").value("AUTO"))
                 .andExpect(jsonPath("$.camera.whiteBalance.mode").value("DAYLIGHT"))
                 .andExpect(jsonPath("$.camera.fps").value(3.0))
@@ -76,6 +79,9 @@ class DeviceConfigurationIT extends ApiTestSupport {
                 .andExpect(jsonPath("$.intervals.metricsSeconds").value(15))
                 .andExpect(jsonPath("$.models.ocr").value("v4"))
                 .andExpect(jsonPath("$.batching.imageUploadsLowPriority").value(false))
+                .andExpect(jsonPath("$.gps.maxFixAgeSeconds").value(10))
+                .andExpect(jsonPath("$.photos.widthPx").value(2028))
+                .andExpect(jsonPath("$.photos.jpegQuality").value(80))
                 .andExpect(jsonPath("$.camera.vflip").value(false));
     }
 
@@ -124,6 +130,19 @@ class DeviceConfigurationIT extends ApiTestSupport {
     }
 
     @Test
+    void anExposureLongerThanAFrameIsRefused() throws Exception {
+        PersonWithDevice owner = createPersonWithDevice();
+        String request = updateRequest(versionOf(owner), 15).replace("\"exposureUs\": 1000", "\"exposureUs\": 80001");
+
+        mockMvc.perform(put("/api/v1/device/config").with(person(owner.accountId()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fields[0].field").value("camera.exposure.exposureUs"))
+                .andExpect(jsonPath("$.fields[0].code").value("RANGE"));
+    }
+
+    @Test
     void aDeviceMayNotEditItsConfiguration() throws Exception {
         PersonWithDevice owner = createPersonWithDevice();
 
@@ -163,6 +182,8 @@ class DeviceConfigurationIT extends ApiTestSupport {
                           "minPlateWidthPx": 80, "minEdgeMarginPx": 5 },
                   "models": { "detector": "v2", "ocr": "v4" },
                   "intervals": { "metricsSeconds": %d, "configPollSeconds": 30, "alertsPollSeconds": 30, "locationSampleSeconds": 2 },
+                  "gps": { "maxFixAgeSeconds": 10 },
+                  "photos": { "widthPx": 2028, "jpegQuality": 80 },
                   "camera": {
                     "exposure": { "mode": "AUTO", "exposureUs": 1000, "gain": 2.0, "maxExposureUs": 3000, "maxGain": 8.0, "targetBrightness": 0.45 },
                     "whiteBalance": { "mode": "MANUAL", "redGain": 1.8, "blueGain": 1.5 },

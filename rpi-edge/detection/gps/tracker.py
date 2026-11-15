@@ -16,8 +16,8 @@ from detection.contract.metrics import FixType
 from detection.gps import nmea
 
 HISTORY_SECONDS = 60
-# Below this speed the device counts as stationary: the course over ground is noise (no heading is reported) and the
-# track is sparse. A stationary antenna near a window shows speeds up to 0.7 m/s from reflections.
+# Below this speed the device counts as stationary and no heading is reported: the course over ground is noise there.
+# A stationary antenna near a window shows speeds up to 0.7 m/s from reflections.
 MOVING_SPEED_MPS = 2.0  # 7 km/h
 ACCURACY_M_PER_HDOP = 5.0  # horizontal accuracy ~ HDOP x the typical range error of a consumer receiver
 SILENCE_SECONDS = 5.0  # no sentence for this long: the module is not talking
@@ -116,7 +116,8 @@ class GpsTracker:
         self._warn_about_clock(rmc.time, now)
 
     def _warn_about_clock(self, gps_time: datetime, now: datetime) -> None:
-        """Detections are stamped with the clock of the device (there is no RTC): say so when it is wrong."""
+        """Detections are stamped with the clock of the device, which the GPS time does not set: say so when it is
+        wrong, since every detectedAt of the device is wrong with it."""
         skew = (now - gps_time).total_seconds()
         if abs(skew) < CLOCK_SKEW_WARNING_SECONDS:
             return

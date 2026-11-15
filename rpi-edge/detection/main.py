@@ -69,7 +69,7 @@ def main() -> None:
     queues = Queues.open(env.state_dir / "outbox")
     gps, gps_workers = _gnss(env)
     feedback = Feedback.open(StatusSources(configuration, models, queues.detections, gps, api.health, alerts))
-    photos = FrameSaver(env.state_dir / "frames", queues.images)
+    photos = FrameSaver(env.state_dir / "frames", queues.images, configuration)
     log("detection_starting", cloud=env.api_base_url, authenticated=auth is not None, gps=_gps_kind(env),
         pending=queues.detections.pending())
 

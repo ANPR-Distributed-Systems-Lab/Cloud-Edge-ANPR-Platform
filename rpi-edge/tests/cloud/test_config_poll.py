@@ -14,10 +14,11 @@ def test_the_poller_sends_the_etag_and_applies_a_new_configuration(tmp_path):
     poller = ConfigPoller(api, URL, store)
     poller.poll_once()
     assert store.current.plate_cooldown_seconds == 5
+    applied = store.current
     poller.poll_once()
     assert "If-None-Match" not in api.requests[0]["headers"]
     assert api.requests[1]["headers"]["If-None-Match"] == '"2"'
-    assert store.version == 1
+    assert store.current is applied  # a 304 changes nothing
 
 
 def test_failed_polls_and_refused_configurations_keep_the_current_one(tmp_path):
@@ -29,4 +30,4 @@ def test_failed_polls_and_refused_configurations_keep_the_current_one(tmp_path):
     poller = ConfigPoller(api, URL, store)
     for _ in range(4):
         poller.poll_once()
-    assert store.current == before and store.version == 1 and store.etag == '"1"'
+    assert store.current is before and store.etag == '"1"'

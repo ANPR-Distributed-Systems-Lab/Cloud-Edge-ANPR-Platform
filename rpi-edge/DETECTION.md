@@ -36,9 +36,9 @@ Decided 2026-11-12. Each line is the decision, the reason follows in the section
 | Models | The versions are part of the configuration; device-management signs S3 download URLs for them; immutable versions, SHA-256 checked, cached on the SD card; a new version is swapped in without a restart ([section 6](#6-models)) |
 | Queues | One SQLite queue (WAL, `synchronous=FULL`) on the SD card per stream: detections, locations, metrics, photos; only what is to be sent; 30 days at most (metrics 6) ([section 7](#7-queues-and-sending)) |
 | Sending | Batches in the shape of each contract; section 4 of the ingest contract decides delete / quarantine / retry, the same code for every stream ([section 7](#7-queues-and-sending)) |
-| Position | The GNSS module on UART0; a detection carries the last fix at the capture of its frame (at most 30 s old, its age in `fixAgeMs`); a frame without one is not read ([section 8](#8-position-and-the-track)) |
-| Track | A point every `locationSampleSeconds` while moving, one a minute while stationary, to `device-locations` ([section 8](#8-position-and-the-track)) |
-| Photos | The key of the photo is computed on the device, so a detection leaves at once; the JPEG of the full frame follows in the background ([section 9](#9-photos)) |
+| Position | The GNSS module on UART0; a detection carries the last fix at the capture of its frame (at most `gps.maxFixAgeSeconds` old, its age in `fixAgeMs`); a frame without one is not read ([section 8](#8-position-and-the-track)) |
+| Track | A point every `locationSampleSeconds`, moving or not, to `device-locations` ([section 8](#8-position-and-the-track)) |
+| Photos | The key of the photo is computed on the device, so a detection leaves at once; the JPEG of the frame (`photos.widthPx`, `photos.jpegQuality`) follows in the background ([section 9](#9-photos)) |
 | Metrics | A measurement every `metricsSeconds`, queued like everything else ([section 10](#10-device-metrics)) |
 | Alerts | The owner's alert list is polled into memory; an accepted detection of a listed plate shows on the LCD with three beeps ([section 11](#11-alerts-and-the-driver)) |
 | Messages | Every document exchanged with the platform is a frozen dataclass in `detection/contract/`, checked against its contract on the way in ([section 2](#2-pipeline)) |
@@ -154,8 +154,9 @@ Two kinds, kept apart:
   `tools/dev_cloud.py`). Fixed for the life of the container. Contains no secret.
 - **The device configuration** of device-management (`GET /api/v1/device/config`, contract
   `DeviceConfigurationResponse`, here `contract/configuration.py`): the send rule thresholds (`ml`), the model
-  versions (`models`), `plateCooldownSeconds`, `batching`, `intervals` and `camera` (exposure, white balance, fps,
-  the flips of the mounting). **Decided 2026-11-12: it is the only source.** device-management holds the defaults
+  versions (`models`), `plateCooldownSeconds`, `batching`, `intervals`, `gps` (the oldest fix that still gives a
+  frame its position), `photos` (width and JPEG quality of the uploaded photo) and `camera` (exposure, white
+  balance, fps, the flips of the mounting). **Decided 2026-11-12: it is the only source.** device-management holds the defaults
   of a new device (its `application.yaml`) and the owner edits them (View 4); the device has no defaults and no
   settings file of its own.
 
@@ -164,8 +165,15 @@ a restart without network the device runs on that copy. `cloud/config_poll.py` a
 `intervals.configPollSeconds` with `If-None-Match` (every 10 s until the first configuration arrives). A device
 that has never received one waits: it does not open the camera. A configuration outside the contract is refused
 as a whole and logged (`configuration_refused`, with the field problems), and the current one stays. A change
-applies from the next frame; a change of the flips or the sensor rate restarts the camera, a change of `models`
-starts the model update ([section 6](#6-models)).
+applies from the next frame: the frame loop reads the configuration once per frame and runs the camera, the
+pipeline and the pause with that one object, so a configuration that arrives meanwhile is never half applied. A
+change of the flips or the sensor rate restarts the camera, a change of `models` starts the model update
+([section 6](#6-models)).
+
+`camera.fps` is the most frames analysed per second, an upper limit: the analysis takes about 600 ms a frame
+([section 13](#13-measured-on-the-pi)), so above ~1.6 it changes nothing. The exposure times (`exposureUs`,
+`maxExposureUs`) are at most 80 ms in the contract: an exposure must end before the next frame starts, and the
+sensor runs at 10 fps or faster (83 ms per frame at 11.7 fps), so a longer value could not be applied.
 
 During development the configuration comes from `tools/dev_cloud.py`, which serves `tools/dev-device-config.json`:
 a stand-in with the service defaults for this Pi, used only until the device runs against the cloud.
@@ -291,12 +299,13 @@ from `GPS_DEVICE` (`/dev/ttyAMA0`) and needs no commands: it sends NMEA sentence
   2 m/s (7 km/h), where the course over ground is noise (a stationary antenna near a window shows up to 0.7 m/s).
   The fixes of the last minute are kept with the device time at which they arrived.
 - **The position of a frame** (`gps/source.py`, `locate()`): the latest fix that arrived at or before the capture of
-  the frame, if it is at most 30 s older; `fixAgeMs` is its age at the capture. Without such a fix the frame is
-  not read (rejection `no_location`, [section 3](#3-send-rule)): waiting would not help, since the position at that
-  moment cannot be reconstructed later, and a position older than 30 s is not the position of a moving car.
-- **The track** (`gps/recorder.py`): the latest fresh fix every `intervals.locationSampleSeconds` (5 s) while the
-  speed is 2 m/s or more, one point a minute while stationary, none without a fresh fix. The platform refuses a
-  point without a position.
+  the frame, if it is at most `gps.maxFixAgeSeconds` (30 s) older; `fixAgeMs` is its age at the capture. Without
+  such a fix the frame is not read (rejection `no_location`, [section 3](#3-send-rule)): waiting would not help,
+  since the position at that moment cannot be reconstructed later, and an older position is not the position of a
+  moving car.
+- **The track** (`gps/recorder.py`): the latest fresh fix every `intervals.locationSampleSeconds` (5 s), moving or
+  not (decided 2026-11-15: simpler than a separate rate while stationary), none without a fresh fix (5 s). The
+  platform refuses a point without a position.
 - **Sources** (`GPS_DEVICE`, `GPS_FIXED_LOCATION` in `.env`): the module; a fixed `lat,lon` for development and for
   replaying recordings (no fix needed); or neither, then no frame is ever read and the log says why
   (`gps_not_configured`).
@@ -311,10 +320,13 @@ leaves at once, without waiting for the upload (decided 2026-11-13; the contract
 `docs/api/ingest-detections.md`, section 7). The photo follows in the background:
 
 1. **Save** (`delivery/photos.py`): the frame loop hands every frame that produced detections to the encoder thread,
-   which writes the JPEG (full resolution, quality 90, 1.5-3 MB in the tests) to `/state/frames/<frameId>.jpg`
-   (through a `.part` file, so a power cut never leaves half a photo) and adds a row to the `images` queue. When the
-   encoder is three frames behind, further photos are not saved (`photo_not_saved`): a detection without a photo is
-   better than a slower detection. The size of the photo is to be decided later.
+   which writes the JPEG to `/state/frames/<frameId>.jpg` (through a `.part` file, so a power cut never leaves half
+   a photo) and adds a row to the `images` queue. The photo is `photos.widthPx` wide (default 4056, the full frame;
+   less is a downscaled copy with `INTER_AREA`, keeping 4:3, never upscaled) at `photos.jpegQuality` (default 90:
+   1.5-3 MB for a full frame in the tests, about a quarter of that at half the width), both as configured when the
+   frame was analysed. The corners of a detection are relative to the frame, so they fit a photo of any size. When
+   the encoder is three frames behind, further photos are not saved (`photo_not_saved`): a detection without a photo
+   is better than a slower detection.
 2. **Upload** (`delivery/uploads.py`): in batches of `batching.imageUrlsBatchSize` the uploader asks device-management
    for presigned URLs. For each frame the key in the answer must be the key the device computed, otherwise the photo is
    quarantined (`image_quarantined`, reason `IMAGE_KEY_MISMATCH`). Then it PUTs the file with
@@ -414,13 +426,12 @@ Pi 5 (8 GB), detector v2 at 1280x960 and OCR v3, both FP32 on ONNX Runtime with 
 
 ## 14. What is still missing
 
-- **First run against AWS**: `terraform apply` of the models bucket and route, device-management deployed with the
-  new contract, models v2 and v3 published, the device paired (`infrastructure/scripts/identity/create_device.py`) and its
-  credentials placed on the Pi. The Cognito sign-in and the real ingest, device-locations and metrics endpoints have
-  only run against fakes and the stand-in. The deployed ingest Lambda and operations-service may be older than the
-  contracts here (alerts for devices, photo URLs in detections).
-- **Photos**: the size of the uploaded photo (full frame now); frames of a power cut that never reached the queue
-  leave a detection without a photo.
+- **Against AWS** (2026-11-15): the Cognito sign-in, the configuration, the models from S3, metrics and the track
+  work; a detection put into the queue on the Pi reached the operations events queue through the ingest Lambda,
+  and its photo was uploaded after it. Not yet: a real plate in front of the camera end to end. The alert list of
+  the deployed operations-service answers 500 (its device endpoint is not in `main` yet).
+- **Photos**: the default size (full frame now, `photos.widthPx`); frames of a power cut that never reached the
+  queue leave a detection without a photo.
 - **GNSS**: time from the module to correct the clock of the device (only a warning now); the antenna in the car.
 - **ml-models**: the final thresholds and detector input size (the `detection_summary` timings on the Pi feed that
   benchmark). The analysis rate is 1.4-1.7 fps.

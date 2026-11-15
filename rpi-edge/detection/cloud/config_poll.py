@@ -46,6 +46,7 @@ class ConfigPoller:
             return
         if response.status != 200:
             problem = Problem.of(response.status, response.body)
+            # 404: the device is not (or no longer) paired, which no retry fixes.
             log("config_poll_failed", level="error" if response.status == 404 else "warning", traceId=trace_id,
                 status=response.status, code=problem.code)
             return

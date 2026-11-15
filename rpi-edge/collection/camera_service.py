@@ -301,7 +301,7 @@ class CameraService:
 
     def _limits(self) -> tuple:
         """(min exposure us, hardware max exposure us, min gain, hardware max gain) at the current frame rate."""
-        t_max = 1_000_000 / self._sensor_fps * 0.97
+        t_max = 1_000_000 / self._sensor_fps * 0.97  # the exposure must end before the next frame starts
         g_max = 16.0
         try:
             g_max = float(self.picam2.camera_controls["AnalogueGain"][1])
@@ -647,7 +647,7 @@ class CameraService:
     def status(self) -> dict:
         meta = self._meta
         gains = meta.get("ColourGains") or (0.0, 0.0)
-        limits = self._limits() if self.picam2 is not None else (30, 33000, 1.0, 16.0)
+        limits = self._limits() if self.picam2 is not None else (30, 33000, 1.0, 16.0)  # placeholders until it opens
         return {
             "camera": {
                 "running": self._running,

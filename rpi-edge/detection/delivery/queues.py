@@ -26,11 +26,12 @@ LOCATION_CODEC = ItemCodec(LocationPoint.to_document, LocationPoint.from_documen
 METRIC_CODEC = ItemCodec(DeviceMetric.to_document, DeviceMetric.from_document, lambda m: iso_ms(m.recorded_at),
                          lambda m: m.recorded_at.timestamp())
 
-# The platform refuses detections and points older than 30 days, and measurements older than 7 days.
+# The platform refuses detections and points older than 30 days, and measurements older than 7 days: keeping them
+# longer would only fill the SD card. Metrics stop a day early, so a measurement never leaves just to be refused.
 DETECTION_RETENTION_DAYS, DETECTION_MAX_ROWS = 30, 100_000
 LOCATION_RETENTION_DAYS, LOCATION_MAX_ROWS = 30, 200_000
 METRIC_RETENTION_DAYS, METRIC_MAX_ROWS = 6, 20_000
-IMAGE_RETENTION_DAYS, IMAGE_MAX_ROWS = 30, 2_000  # a photo is a file of a few MB on the SD card
+IMAGE_RETENTION_DAYS, IMAGE_MAX_ROWS = 30, 2_000  # a photo is a file of up to a few MB on the SD card
 
 
 @dataclass(frozen=True)

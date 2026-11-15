@@ -10,7 +10,7 @@ from detection.contract.parsing import ContractError
 
 def test_a_device_without_a_configuration_has_none(tmp_path):
     store = ConfigurationStore(tmp_path)
-    assert store.current is None and store.etag is None and store.version == 0
+    assert store.current is None and store.etag is None
     stop = threading.Event()
     stop.set()
     assert store.wait_until_configured(stop) is None
@@ -19,14 +19,16 @@ def test_a_device_without_a_configuration_has_none(tmp_path):
 def test_a_configuration_from_the_cloud_is_applied_and_kept_for_the_next_start(tmp_path):
     store = ConfigurationStore(tmp_path)
     assert store.apply(configuration_document(), '"3"') is True
-    assert store.version == 1 and store.current.ml.ocr_min_confidence == 0.80
+    assert store.current.ml.ocr_min_confidence == 0.80
     assert store.wait_until_configured(threading.Event()) == store.current
 
     restarted = ConfigurationStore(tmp_path)
     assert restarted.current == store.current and restarted.etag == '"3"'
+    kept = restarted.current
     assert restarted.apply(configuration_document(), '"3"') is False  # the same again: no change
+    assert restarted.current is kept  # unchanged object, so the frame loop does not re-apply the camera
     assert restarted.apply(configuration_document(ml={"ocrMinConfidence": 0.9}), '"4"') is True
-    assert restarted.version == 2
+    assert restarted.current is not kept
 
 
 def test_a_configuration_outside_the_contract_is_refused_and_the_current_one_stays(tmp_path):

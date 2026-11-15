@@ -9,7 +9,6 @@ from detection.contract.locations import Location
 from detection.contract.metrics import FixType
 from detection.gps.tracker import Fix, GpsStatus
 
-MAX_FIX_AGE_SECONDS = 30.0  # an older fix is not a position of the device any more: it moves
 FIXED_ACCURACY_M = 5.0
 
 
@@ -22,12 +21,13 @@ class LocationSource(Protocol):
     def status(self, now: datetime) -> GpsStatus: ...
 
 
-def locate(source: LocationSource, captured_at: datetime) -> Location | None:
-    """The position for a frame captured at captured_at, or None when there is no fix within MAX_FIX_AGE_SECONDS of
-    it. The platform requires a position with every detection, and the position at that moment cannot be recovered
-    later, so a frame without one is not read at all (rejection no_location)."""
+def locate(source: LocationSource, captured_at: datetime, max_fix_age_seconds: float) -> Location | None:
+    """The position for a frame captured at captured_at, or None when there is no fix within max_fix_age_seconds
+    (gps.maxFixAgeSeconds) of it: an older fix is not where the device is, as it moves. The platform requires a
+    position with every detection, and the position at that moment cannot be recovered later, so a frame without one
+    is not read at all (rejection no_location)."""
     fix = source.fix_at(captured_at)
-    if fix is None or (captured_at - fix.received_at) > timedelta(seconds=MAX_FIX_AGE_SECONDS):
+    if fix is None or (captured_at - fix.received_at) > timedelta(seconds=max_fix_age_seconds):
         return None
     return fix.location_at(captured_at)
 

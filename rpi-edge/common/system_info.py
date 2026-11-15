@@ -74,7 +74,7 @@ def local_ip() -> str:
     """IP of the interface that would be used to reach the network (no packet is sent)."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
-        sock.connect(("192.0.2.1", 9))
+        sock.connect(("192.0.2.1", 9))  # a documentation address (TEST-NET-1): UDP connect only picks a route
         return sock.getsockname()[0]
     except OSError:
         return "no network"

@@ -9,12 +9,14 @@ from detection.contract.parsing import bounded, matching, one_of, parse
 
 UUID = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
 MODEL_VERSION = r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}"  # also a directory name in the model cache
+# An exposure must end before the next frame starts; the sensor runs at 10 fps or faster (11.7 fps leaves 83 ms).
+MAX_EXPOSURE_US = 80_000
 
 
 @dataclass(frozen=True)
 class BatchingConfiguration:
     detections_batch_size: int = bounded(1, 100)  # detections per ingest request
-    locations_batch_size: int = bounded(1, 500)  # GPS points per request (not used yet)
+    locations_batch_size: int = bounded(1, 500)  # track points per request
     image_urls_batch_size: int = bounded(1, 100)  # frames per presigned URL request
     image_uploads_low_priority: bool  # photos go out only while the other streams are idle (delivery/uploads.py)
     max_batch_delay_seconds: int = bounded(1, 300)  # a batch that is not full leaves after this long
@@ -39,18 +41,30 @@ class ModelVersions:
 
 @dataclass(frozen=True)
 class IntervalsConfiguration:
-    metrics_seconds: int = bounded(3, 3600)  # not used yet
+    metrics_seconds: int = bounded(3, 3600)
     config_poll_seconds: int = bounded(3, 3600)
-    alerts_poll_seconds: int = bounded(3, 3600)  # not used yet
-    location_sample_seconds: int = bounded(1, 60)  # not used yet
+    alerts_poll_seconds: int = bounded(3, 3600)
+    location_sample_seconds: int = bounded(1, 3600)  # a point of the track this often, moving or not
+
+
+@dataclass(frozen=True)
+class GpsConfiguration:
+    max_fix_age_seconds: int = bounded(1, 300)  # an older fix is not the position of a frame (gps/source.py)
+
+
+@dataclass(frozen=True)
+class PhotosConfiguration:
+    """The uploaded photo of a frame with detections (delivery/photos.py)."""
+    width_px: int = bounded(640, 4056)  # below the frame width the photo is downscaled, keeping 4:3
+    jpeg_quality: int = bounded(50, 100)
 
 
 @dataclass(frozen=True)
 class ExposureConfiguration:
     mode: str = one_of("MANUAL", "AUTO", "AUTO_GAIN", "AUTO_EXPOSURE")
-    exposure_us: int = bounded(20, 1_000_000)
+    exposure_us: int = bounded(20, MAX_EXPOSURE_US)
     gain: float = bounded(1, 22)
-    max_exposure_us: int = bounded(20, 1_000_000)
+    max_exposure_us: int = bounded(20, MAX_EXPOSURE_US)
     max_gain: float = bounded(1, 22)
     target_brightness: float = bounded(0.1, 0.8)
 
@@ -81,6 +95,8 @@ class DeviceConfiguration:
     ml: MlConfiguration
     models: ModelVersions
     intervals: IntervalsConfiguration
+    gps: GpsConfiguration
+    photos: PhotosConfiguration
     camera: CameraConfiguration
 
     @classmethod

@@ -15,6 +15,12 @@ def test_the_document_maps_onto_typed_fields():
     assert config.camera.hflip is True
     assert config.intervals.config_poll_seconds == 60
     assert config.batching.image_uploads_low_priority is True
+    assert config.gps.max_fix_age_seconds == 30
+    assert config.photos.width_px == 4056 and config.photos.jpeg_quality == 90
+
+
+def test_the_track_may_be_sampled_up_to_once_an_hour():
+    assert configuration(intervals={"locationSampleSeconds": 3600}).intervals.location_sample_seconds == 3600
 
 
 def test_equal_documents_give_equal_configurations():
@@ -32,6 +38,14 @@ def test_equal_documents_give_equal_configurations():
     ({"camera": {"whiteBalance": None}}, "camera.whiteBalance must be an object"),
     ({"models": {"ocr": "../v3"}}, "models.ocr must match"),  # a version becomes a directory name
     ({"deviceId": "rpi-01"}, "deviceId must match"),
+    ({"camera": {"exposure": {"exposureUs": 80_001}}}, "camera.exposure.exposureUs"),  # longer than a frame
+    ({"camera": {"exposure": {"maxExposureUs": 1_000_000}}}, "camera.exposure.maxExposureUs"),
+    ({"intervals": {"locationSampleSeconds": 3601}}, "intervals.locationSampleSeconds"),
+    ({"gps": {"maxFixAgeSeconds": 0}}, "gps.maxFixAgeSeconds"),
+    ({"photos": {"widthPx": 639}}, "photos.widthPx"),
+    ({"photos": {"widthPx": 4057}}, "photos.widthPx"),  # never upscaled
+    ({"photos": {"jpegQuality": 101}}, "photos.jpegQuality"),
+    ({"photos": None}, "photos must be an object"),
 ])
 def test_values_outside_the_contract_are_named(patch, problem):
     with pytest.raises(ContractError) as e:

@@ -36,6 +36,13 @@ public final class TestData {
         intervals.setAlertsPollSeconds(60);
         intervals.setLocationSampleSeconds(5);
 
+        DeviceSettings.Gps gps = new DeviceSettings.Gps();
+        gps.setMaxFixAgeSeconds(30);
+
+        DeviceSettings.Photos photos = new DeviceSettings.Photos();
+        photos.setWidthPx(4056);
+        photos.setJpegQuality(90);
+
         DeviceSettings.Exposure exposure = new DeviceSettings.Exposure();
         exposure.setMode(DeviceSettings.ExposureMode.MANUAL);
         exposure.setExposureUs(2000);
@@ -62,6 +69,8 @@ public final class TestData {
         settings.setMl(ml);
         settings.setModels(models);
         settings.setIntervals(intervals);
+        settings.setGps(gps);
+        settings.setPhotos(photos);
         settings.setCamera(camera);
         return settings;
     }

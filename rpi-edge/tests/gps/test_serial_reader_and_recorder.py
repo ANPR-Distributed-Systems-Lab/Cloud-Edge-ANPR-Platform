@@ -7,7 +7,7 @@ from test_nmea import GGA, RMC
 from detection.config.store import ConfigurationStore
 from detection.delivery.queue import PersistentQueue
 from detection.delivery.queues import LOCATION_CODEC
-from detection.gps.recorder import STATIONARY_SAMPLE_SECONDS, LocationRecorder
+from detection.gps.recorder import LocationRecorder
 from detection.gps.serial_reader import SerialGpsReader
 from detection.gps.source import FixedLocationSource
 from detection.gps.tracker import Fix, GpsTracker
@@ -83,10 +83,25 @@ def test_a_moving_device_records_a_point_every_sample_interval(tmp_path):
     assert first.speed_mps == 14.0 and first.heading_deg == 90.0
 
 
-def test_a_stationary_device_records_a_point_a_minute(tmp_path):
+def test_a_stationary_device_records_at_the_same_interval(tmp_path):
     r = Recorder(tmp_path)
-    recorded = [r.arrive(second, speed=0.0) for second in range(0, 130)]
-    assert sum(recorded) == 3 and recorded[0] and recorded[int(STATIONARY_SAMPLE_SECONDS)]
+    recorded = [r.arrive(second, speed=0.0) for second in range(0, 12)]
+    assert [second for second, point in enumerate(recorded) if point] == [0, 5, 10]
+    assert r.queue.oldest(1)[0].item.heading_deg is None
+
+
+def test_a_new_interval_applies_from_the_next_point(tmp_path):
+    r = Recorder(tmp_path)
+    r.arrive(0, speed=14.0)
+    r.store.apply(configuration_document(intervals={"locationSampleSeconds": 2}), None)
+    assert [r.arrive(second, speed=14.0) for second in (1, 2, 3, 4)] == [False, True, False, True]
+
+
+def test_the_same_fix_is_not_recorded_twice(tmp_path):
+    r = Recorder(tmp_path, locationSampleSeconds=1)
+    assert r.arrive(0, speed=0.0)
+    r.now += timedelta(seconds=2)  # no new sentence, but still fresh enough
+    assert r.recorder.record_once() is False
 
 
 def test_nothing_is_recorded_without_a_fresh_fix_or_a_configuration(tmp_path):

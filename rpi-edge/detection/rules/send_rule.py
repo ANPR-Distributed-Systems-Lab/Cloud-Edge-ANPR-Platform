@@ -1,8 +1,8 @@
-"""Which detections become events (DETECTION.md, "Send rule"). Thresholds come from settings.ml.
+"""Which detections become events (DETECTION.md, "Send rule"). The thresholds are those of configuration.ml.
 
-  1. Geometry, before the OCR: the plate is wide enough and fully inside the frame. Narrower plates are not
-     read reliably, and a plate cut by the frame edge gives a wrong crop.
-  2. Per frame, after the OCR: some text, the Polish format, the OCR confidence and P(readable).
+  1. Geometry, before the OCR: corners the platform accepts, the plate wide enough and fully inside the frame.
+     Narrower plates are not read reliably, and a plate cut by the frame edge gives a wrong crop.
+  2. Per frame, after the OCR: some text, P(readable), the Polish format, the OCR confidence.
   3. Per plate: the same text is not sent again within plate_cooldown_seconds, so one passing car is one event.
 """
 import numpy as np

@@ -1,8 +1,8 @@
 """Measures the health of the device every intervals.metricsSeconds and queues it for POST /api/v1/device/metrics.
 
-View 5 charts these for the owner and View 4 shows the device online while the latest measurement is young, so a
-device that analyses frames but sends no metrics looks offline. Measurements taken while there is no network wait in
-the queue (store-and-forward) and go out together afterwards.
+View 5 charts these for the owner and shows the device online while the latest measurement is young
+(GET /api/v1/device), so a device that analyses frames but sends no metrics looks offline. Measurements taken while
+there is no network wait in the queue (store-and-forward) and go out together afterwards.
 """
 import threading
 from collections.abc import Callable

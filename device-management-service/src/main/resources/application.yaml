@@ -78,7 +78,7 @@ app:
         min-edge-margin-px: 10            # plates this close to the frame edge are not read (may be cut off)
       # Must be published (ml-models, anpr-publish-model) before a device can download them.
       models:
-        detector: v2                      # version of the plate detector
+        detector: v3                      # version of the plate detector
         ocr: v3                           # version of the OCR
       intervals:
         metrics-seconds: 60               # how often the device reports its metrics

@@ -7,8 +7,10 @@
 #   body        the JSON the device sent, unchanged
 #   attributes  eventType   detection | device-location (from the route; subscriptions can filter on it)
 #               traceId     end-to-end trace id (CLAUDE.md: passed through APIs and queues)
-#               accountId   account of the device, from its token
-#               deviceId    the device, from its token
+#               deviceId    the device, from its token (never from the body)
+#
+# The owner of the device is not in the message: a consumer finds the accountId of a deviceId in its
+# own table of pairings, built from the device.paired / device.unpaired events (device-events.tf).
 #
 # Consumers subscribe with the event-queue module, next to the rest of their service
 # (see operations-service.tf).

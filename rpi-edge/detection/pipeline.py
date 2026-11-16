@@ -65,7 +65,7 @@ class Pipeline:
         if reason is not None:
             return reason, None
         started = time.perf_counter()
-        reading = models.reader.read(rectify_plate(frame.image, detection.corners))
+        reading = models.reader.read(rectify_plate(frame.image, detection.corners, models.reader.input_size))
         result.ocr_ms += (time.perf_counter() - started) * 1000
         reason = reading_rejection(reading, configuration.ml)
         if reason is None and not self.cooldown.accept(reading.text, self.clock(),

@@ -30,9 +30,10 @@ class FakeDetector:
 
 
 class FakeReader:
-    def __init__(self, *readings):
+    def __init__(self, *readings, input_size=(128, 64)):
         self.readings = list(readings)
         self.crops = []
+        self.input_size = input_size
 
     def read(self, crop):
         self.crops.append(crop.shape)
@@ -45,6 +46,13 @@ def models(detector, reader):
 
 def frame():
     return Frame(np.zeros((3040, 4056, 3), np.uint8), datetime(2026, 11, 12, 9, 14, 22, 381_500, tzinfo=UTC))
+
+
+def test_the_crop_has_the_input_size_of_the_ocr_model():
+    reader = FakeReader(Reading("WA12345", 0.9412, 0.97), input_size=(160, 48))
+    Pipeline(clock=lambda: 0.0).process(frame(), CONFIG, models(FakeDetector([Detection(0.88, PLATE)]), reader),
+                                        LOCATION)
+    assert reader.crops == [(48, 160, 3)]
 
 
 def test_an_accepted_reading_becomes_an_event():

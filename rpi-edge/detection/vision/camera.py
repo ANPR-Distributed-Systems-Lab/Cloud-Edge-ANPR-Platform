@@ -13,10 +13,10 @@ import numpy as np
 
 from common import autoexposure
 from common.jsonlog import log
+from common.sensor import FRAME_SIZE
 from detection.contract.configuration import CameraConfiguration
 from detection.vision.frame import Frame
 
-SIZE = (4056, 3040)  # the recording resolution of the training frames
 SENSOR_MIN_FPS = 10.0
 BUFFERS = 3  # each holds a 37 MB BGR frame plus the raw sensor data
 LUMA = np.array([0.114, 0.587, 0.299], dtype=np.float32)  # BT.601 weights in B, G, R order
@@ -47,7 +47,7 @@ class Camera:
         self.picam2 = Picamera2()
         self._sensor_fps = _sensor_fps(camera)
         config = self.picam2.create_video_configuration(
-            main={"size": SIZE, "format": "RGB888"},  # picamera2's RGB888 is B, G, R in memory: OpenCV order
+            main={"size": FRAME_SIZE, "format": "RGB888"},  # picamera2's RGB888 is B, G, R in memory: OpenCV order
             controls=self._controls(camera),
             transform=Transform(hflip=camera.hflip, vflip=camera.vflip),
             buffer_count=BUFFERS,
@@ -59,8 +59,8 @@ class Camera:
         self.picam2.configure(config)
         self.picam2.start()
         self._camera = camera
-        log("camera_started", size=list(SIZE), sensor_fps=self._sensor_fps, hflip=camera.hflip, vflip=camera.vflip,
-            exposure_mode=camera.exposure.mode)
+        log("camera_started", size=list(FRAME_SIZE), sensor_fps=self._sensor_fps, hflip=camera.hflip,
+            vflip=camera.vflip, exposure_mode=camera.exposure.mode)
 
     def apply(self, camera: CameraConfiguration) -> None:
         """New settings: controls change live, flips and the sensor rate need a restart of the camera."""
@@ -140,9 +140,7 @@ def _sensor_fps(camera: CameraConfiguration) -> float:
 def _brightness(image: np.ndarray, top: float, bottom: float) -> float:
     """Mean luma (0..1) of the rows top..bottom (shares of the height) at full width: the band where plates pass,
     so the sky or the bonnet does not decide the exposure."""
-    h = image.shape[0]
-    y0 = min(round(top * h), h - 1)
-    y1 = max(round(bottom * h), y0 + 1)
+    y0, y1 = autoexposure.metered_rows(image.shape[0], top, bottom)
     band = image[y0:y1:METER_STEP, ::METER_STEP]
     return float((band.astype(np.float32) @ LUMA).mean()) / 255.0
 

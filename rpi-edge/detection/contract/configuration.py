@@ -5,12 +5,11 @@ edits them (View 4); the device keeps a copy (config/store.py). The ranges below
 """
 from dataclasses import dataclass
 
+from common.sensor import MAX_EXPOSURE_US, MAX_FPS
 from detection.contract.parsing import ContractError, bounded, matching, one_of, parse
 
 UUID = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
 MODEL_VERSION = r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}"  # also a directory name in the model cache
-# An exposure must end before the next frame starts; the sensor runs at 10 fps or faster (11.7 fps leaves 83 ms).
-MAX_EXPOSURE_US = 80_000
 
 
 @dataclass(frozen=True)
@@ -84,7 +83,7 @@ class WhiteBalanceConfiguration:
 class CameraConfiguration:
     exposure: ExposureConfiguration
     white_balance: WhiteBalanceConfiguration
-    fps: float = bounded(0.1, 11.7)  # the most frames analysed per second
+    fps: float = bounded(0.1, MAX_FPS)  # the most frames analysed per second
     hflip: bool  # how the camera is mounted, so the models see the scene upright and unmirrored
     vflip: bool
 

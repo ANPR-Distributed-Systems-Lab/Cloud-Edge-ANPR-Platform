@@ -4,7 +4,7 @@
   detections  DetectionEvent, 30 days                           POST /api/v1/ingest/detections
   locations   LocationPoint, 30 days                            POST /api/v1/ingest/device-locations
   metrics     DeviceMetric, 6 days (older ones are refused)     POST /api/v1/device/metrics
-  images      ImageJob (the JPEG is a file beside the queue)    POST /api/v1/images/presigned-urls, then PUT to S3
+  images      ImageJob, 30 days, photos.maxStored (JPEG beside)  POST /api/v1/images/presigned-urls, then PUT to S3
 """
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,7 +31,8 @@ METRIC_CODEC = ItemCodec(DeviceMetric.to_document, DeviceMetric.from_document, l
 DETECTION_RETENTION_DAYS, DETECTION_MAX_ROWS = 30, 100_000
 LOCATION_RETENTION_DAYS, LOCATION_MAX_ROWS = 30, 200_000
 METRIC_RETENTION_DAYS, METRIC_MAX_ROWS = 6, 20_000
-IMAGE_RETENTION_DAYS, IMAGE_MAX_ROWS = 30, 2_000  # a photo is a file of up to a few MB on the SD card
+# The photos: photos.maxStored of the configuration applies below this ceiling (its contract maximum).
+IMAGE_RETENTION_DAYS, IMAGE_MAX_ROWS = 30, 20_000
 
 
 @dataclass(frozen=True)

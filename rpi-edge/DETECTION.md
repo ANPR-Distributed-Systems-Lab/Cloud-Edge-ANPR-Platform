@@ -86,9 +86,9 @@ document. Tests mirror the folders under `tests/`.
 
 | Step | Module | What it does |
 |---|---|---|
-| Capture | `vision/camera.py` | picamera2, full resolution `RGB888` (B, G, R in memory, the order of OpenCV and of the training frames). The sensor runs at 10 fps or more, so a capture waits briefly for a fresh frame; the loop analyses at most `camera.fps` frames per second. Software auto exposure of `common/autoexposure.py`, as in the collection mode. `vision/replay.py` replaces the camera with recorded frames (`REPLAY_DIR`, README) |
+| Capture | `vision/camera.py` | picamera2, full resolution `RGB888` (B, G, R in memory, the order of OpenCV and of the training frames). The sensor runs at 10 fps or more, so a capture waits briefly for a fresh frame; the loop analyses at most `camera.fps` frames per second. Software auto exposure of `common/autoexposure.py`, as in the collection mode, measured on the rows `camera.exposure.meteringTop`..`meteringBottom` at full width (default the band of detector v3, where plates pass, so the sky or the bonnet does not decide the exposure). `vision/replay.py` replaces the camera with recorded frames (`REPLAY_DIR`, README) |
 | Detector | `vision/detector.py` | `detector_input()` to the model input (1280x960 for detector v2), YOLO11n-pose exported with NMS inside: rows of box, confidence, class and 4 corners. A model with a `crop` in its ONNX metadata (detector v3: rows 0.337-0.795 at 1024x352) sees only that band of rows at full width, and its corners are mapped back to the whole frame; without the key it sees the whole frame |
-| Crop | `vision/preprocess.py` | `rectify_plate()`: 128x64 RGB with an 8 % margin, from the corners on the full-resolution frame |
+| Crop | `vision/preprocess.py` | `rectify_plate()`: RGB at the input size of the OCR model (`img_width` x `img_height` of its `plate_config.yaml`, 128x64 for OCR v3; the loader refuses a model whose ONNX input differs) with an 8 % margin, from the corners on the full-resolution frame |
 | OCR | `vision/ocr.py` | OCR v3 (fast-plate-ocr `cct-s-v2-global` with the readability head): text, the weakest slot probability, P(readable) |
 | Rule | `rules/send_rule.py`, `rules/plates.py` | [Section 3](#3-send-rule) |
 | Position | `gps/source.py` | The fix of the GNSS module at the capture of the frame, before the detector's results are read ([section 8](#8-position-and-the-track)) |
@@ -156,8 +156,9 @@ Two kinds, kept apart:
 - **The device configuration** of device-management (`GET /api/v1/device/config`, contract
   `DeviceConfigurationResponse`, here `contract/configuration.py`): the send rule thresholds (`ml`), the model
   versions (`models`), `plateCooldownSeconds`, `batching`, `intervals`, `gps` (the oldest fix that still gives a
-  frame its position), `photos` (width and JPEG quality of the uploaded photo) and `camera` (exposure, white
-  balance, fps, the flips of the mounting). **Decided 2026-11-12: it is the only source.** device-management holds the defaults
+  frame its position), `photos` (width and JPEG quality of the uploaded photo, the frames that may wait for the
+  encoder, the photos kept until uploaded) and `camera` (exposure and its metered band, white balance, fps, the
+  flips of the mounting). **Decided 2026-11-12: it is the only source.** device-management holds the defaults
   of a new device (its `application.yaml`) and the owner edits them (View 4); the device has no defaults and no
   settings file of its own.
 
@@ -252,7 +253,7 @@ detections in both ONNX Runtime and PyTorch, corners within 0.024 px). Output `(
 | `detections` | `DetectionEvent` | 30 days, 100 000 rows | `POST /api/v1/ingest/detections` |
 | `locations` | `LocationPoint` | 30 days, 200 000 rows | `POST /api/v1/ingest/device-locations` |
 | `metrics` | `DeviceMetric` | 6 days (the platform refuses older), 20 000 rows | `POST /api/v1/device/metrics` |
-| `images` | `ImageJob`: the frame id, its capture time, the path of the JPEG | 30 days, 2 000 rows | presigned URL, then S3 ([section 9](#9-photos)) |
+| `images` | `ImageJob`: the frame id, its capture time, the path of the JPEG | 30 days, `photos.maxStored` rows (default 2000) | presigned URL, then S3 ([section 9](#9-photos)) |
 
 - An item is stored as the document that is sent and read back into the same dataclass. The items of one frame are
   added in one committed transaction with `synchronous=FULL`, so they survive a power cut.
@@ -326,8 +327,9 @@ leaves at once, without waiting for the upload (decided 2026-11-13; the contract
    less is a downscaled copy with `INTER_AREA`, keeping 4:3, never upscaled) at `photos.jpegQuality` (default 90:
    1.5-3 MB for a full frame in the tests, about a quarter of that at half the width), both as configured when the
    frame was analysed. The corners of a detection are relative to the frame, so they fit a photo of any size. When
-   the encoder is three frames behind, further photos are not saved (`photo_not_saved`): a detection without a photo
-   is better than a slower detection.
+   `photos.maxWaitingFrames` frames (default 3, about 37 MB each in memory) already wait for the encoder, further
+   photos are not saved (`photo_not_saved`): a detection without a photo is better than a slower detection. Such a
+   detection still carries the key of its photo, which never reaches S3.
 2. **Upload** (`delivery/uploads.py`): in batches of `batching.imageUrlsBatchSize` the uploader asks device-management
    for presigned URLs. For each frame the key in the answer must be the key the device computed, otherwise the photo is
    quarantined (`image_quarantined`, reason `IMAGE_KEY_MISMATCH`). Then it PUTs the file with
@@ -339,9 +341,10 @@ leaves at once, without waiting for the upload (decided 2026-11-13; the contract
    again after 2 s; the PUT of a photo that has started finishes. Between two photos of a batch the check is repeated,
    and the rest of the batch waits with fresh URLs next time. A sender that rests after a failure does not count, so a
    failing endpoint cannot keep the photos from going out. A long wait is logged once a minute
-   (`image_uploads_deferred`, with the number of waiting photos); the retention (30 days, 2000 photos) still applies.
+   (`image_uploads_deferred`, with the number of waiting photos); the retention (30 days, `photos.maxStored` photos) still applies.
    `false` uploads a photo as soon as it is saved, competing with the other streams.
-3. **Delete**: a file is deleted with its row, whether it was uploaded, quarantined or dropped by the retention.
+3. **Delete**: a file is deleted with its row, whether it was uploaded, quarantined or dropped by the retention or
+   by `photos.maxStored` (the oldest go first).
 
 ## 10. Device metrics
 

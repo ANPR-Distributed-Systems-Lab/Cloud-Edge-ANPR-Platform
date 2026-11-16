@@ -17,6 +17,8 @@ def test_the_document_maps_onto_typed_fields():
     assert config.batching.image_uploads_low_priority is True
     assert config.gps.max_fix_age_seconds == 30
     assert config.photos.width_px == 4056 and config.photos.jpeg_quality == 90
+    assert config.photos.max_waiting_frames == 3 and config.photos.max_stored == 2000
+    assert config.camera.exposure.metering_top == 0.337 and config.camera.exposure.metering_bottom == 0.795
 
 
 def test_the_track_may_be_sampled_up_to_once_an_hour():
@@ -46,6 +48,13 @@ def test_equal_documents_give_equal_configurations():
     ({"photos": {"widthPx": 4057}}, "photos.widthPx"),  # never upscaled
     ({"photos": {"jpegQuality": 101}}, "photos.jpegQuality"),
     ({"photos": None}, "photos must be an object"),
+    ({"photos": {"maxWaitingFrames": 0}}, "photos.maxWaitingFrames"),
+    ({"photos": {"maxWaitingFrames": 11}}, "photos.maxWaitingFrames"),
+    ({"photos": {"maxStored": 9}}, "photos.maxStored"),
+    ({"camera": {"exposure": {"meteringTop": 0.96}}}, "camera.exposure.meteringTop"),
+    ({"camera": {"exposure": {"meteringBottom": 1.1}}}, "camera.exposure.meteringBottom"),
+    ({"camera": {"exposure": {"meteringTop": 0.5, "meteringBottom": 0.5}}},
+     "camera.exposure.meteringBottom must be greater than meteringTop"),  # an empty band
 ])
 def test_values_outside_the_contract_are_named(patch, problem):
     with pytest.raises(ContractError) as e:

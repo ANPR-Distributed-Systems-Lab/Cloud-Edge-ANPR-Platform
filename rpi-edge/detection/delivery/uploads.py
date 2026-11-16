@@ -95,12 +95,13 @@ class ImageUploader:
 
     def send_once(self) -> float:
         """One step: maybe one request for URLs and the uploads that follow. Returns the seconds to wait."""
-        dropped = self.queue.prune()
+        configuration = self.configuration.current
+        dropped = self.queue.prune(configuration.photos.max_stored if configuration else None)
         for job in dropped:
             job.path.unlink(missing_ok=True)
         if dropped:
-            log("items_dropped", level="warning", stream="images", count=len(dropped), reason="retention")
-        configuration = self.configuration.current
+            log("items_dropped", level="warning", stream="images", count=len(dropped),
+                reason="retention or photos.maxStored")
         if configuration is None:
             return IDLE_SECONDS
         low_priority = configuration.batching.image_uploads_low_priority

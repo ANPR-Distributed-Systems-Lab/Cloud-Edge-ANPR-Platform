@@ -20,7 +20,7 @@ SIZE = (4056, 3040)  # the recording resolution of the training frames
 SENSOR_MIN_FPS = 10.0
 BUFFERS = 3  # each holds a 37 MB BGR frame plus the raw sensor data
 LUMA = np.array([0.114, 0.587, 0.299], dtype=np.float32)  # BT.601 weights in B, G, R order
-METER_STEP = 8  # every 8th pixel of the metered area is enough for its mean brightness
+METER_STEP = 8  # every 8th pixel of the metered band is enough for its mean brightness
 MIN_EXPOSURE_US = 30.0
 MIN_GAIN = 1.0
 FALLBACK_MAX_GAIN = 16.0  # when the camera does not report its limit
@@ -110,7 +110,8 @@ class Camera:
             return
         t = metadata.get("ExposureTime", ex.exposure_us)
         g = metadata.get("AnalogueGain", 1.0) * metadata.get("DigitalGain", 1.0)
-        t_new, g_new = autoexposure.next_exposure(ex.mode.lower(), _brightness(image), t, g, asdict(ex), self._limits())
+        brightness = _brightness(image, ex.metering_top, ex.metering_bottom)
+        t_new, g_new = autoexposure.next_exposure(ex.mode.lower(), brightness, t, g, asdict(ex), self._limits())
         if abs(t_new - t) > MIN_EXPOSURE_CHANGE_US or abs(g_new - g) > MIN_GAIN_CHANGE:
             self.picam2.set_controls({"ExposureTime": int(t_new), "AnalogueGain": float(g_new)})
 
@@ -136,11 +137,14 @@ def _sensor_fps(camera: CameraConfiguration) -> float:
     return max(SENSOR_MIN_FPS, camera.fps)
 
 
-def _brightness(image: np.ndarray) -> float:
-    """Mean luma (0..1) of the central 60 %, the metered area of the collection mode."""
-    h, w = image.shape[:2]
-    centre = image[h // 5: h * 4 // 5: METER_STEP, w // 5: w * 4 // 5: METER_STEP]
-    return float((centre.astype(np.float32) @ LUMA).mean()) / 255.0
+def _brightness(image: np.ndarray, top: float, bottom: float) -> float:
+    """Mean luma (0..1) of the rows top..bottom (shares of the height) at full width: the band where plates pass,
+    so the sky or the bonnet does not decide the exposure."""
+    h = image.shape[0]
+    y0 = min(round(top * h), h - 1)
+    y1 = max(round(bottom * h), y0 + 1)
+    band = image[y0:y1:METER_STEP, ::METER_STEP]
+    return float((band.astype(np.float32) @ LUMA).mean()) / 255.0
 
 
 def _capture_time(metadata: dict) -> datetime:

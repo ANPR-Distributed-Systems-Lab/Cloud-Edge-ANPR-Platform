@@ -1,12 +1,14 @@
 """Camera pipeline: live preview, 1:1 focus view, snapshots, software auto exposure and recording.
 
 One camera configuration serves everything:
-  main  - full recording resolution, YUV420. Frames are JPEG-encoded straight from it (snapshots, recording).
-  lores - small YUV420 stream. Feeds the browser preview and the auto exposure brightness measurement.
+  main  - the full sensor (common/sensor.py), YUV420. Frames are JPEG-encoded straight from it (snapshots, recording).
+  lores - small YUV420 stream. Feeds the browser preview and the auto exposure, which measures the brightness of
+          the metered band of rows (exposure.metering_top..metering_bottom), as the detection mode does.
 Callbacks run on picamera2's camera thread and must stay quick, so anything slow (JPEG encoding of full
 frames) is handed to worker threads by holding on to the request.
 """
 import collections
+import contextlib
 import csv
 import io
 import json
@@ -15,7 +17,7 @@ import os
 import queue
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import numpy as np
 import simplejpeg
@@ -27,6 +29,7 @@ from collection import settings as cfg
 from collection.storage import Storage
 from common import autoexposure, system_info
 from common.jsonlog import log
+from common.sensor import FRAME_SIZE, MAX_FPS
 
 PREVIEW_WIDTH = 960
 PREVIEW_QUALITY = 75
@@ -96,7 +99,7 @@ class Recording:
         self.k = k  # every k-th sensor frame is saved
         self.quality = quality
         self.started = time.monotonic()
-        self.started_wall = datetime.now(timezone.utc)
+        self.started_wall = datetime.now(UTC)
         self.active = True
         self.tick = 0  # sensor frames seen since the start
         self.slot = 0  # capture slots handed out. A gap in the file numbers means a dropped frame
@@ -125,8 +128,6 @@ class CameraService:
         self._cfg_lock = threading.RLock()
         self._rec_lock = threading.RLock()
 
-        self._res_name: str | None = None
-        self._main_size = (0, 0)
         self._lores_size = (0, 0)
         self._sensor_fps = 10.0
         self._k = 1
@@ -183,17 +184,15 @@ class CameraService:
                 self.error = self._explain(e)
                 log("camera_open_failed", error=str(e))
                 if self.picam2 is not None:
-                    try:
+                    with contextlib.suppress(Exception):  # it failed to open, a failed close changes nothing
                         self.picam2.close()
-                    except Exception:
-                        pass
                     self.picam2 = None
 
     @staticmethod
     def _explain(e: Exception) -> str:
         if isinstance(e, OSError) and e.errno == 12:
             return ("Out of memory for camera buffers. The container must see the host's /dev (volume /dev:/dev), "
-                    "otherwise buffers come from the small CMA pool. Or pick a lower resolution")
+                    "otherwise buffers come from the small CMA pool")
         return str(e)
 
     # --- configuration ---------------------------------------------------------------------------------------
@@ -201,9 +200,8 @@ class CameraService:
     def _rates(self, rec: dict) -> tuple[float, int]:
         """Sensor fps and decimation k so that every k-th sensor frame is a recorded frame at exactly rec['fps']."""
         fps = rec["fps"]
-        limit = cfg.MAX_SENSOR_FPS[rec["resolution"]]
         k = max(1, math.ceil(PREVIEW_MIN_SENSOR_FPS / fps))
-        while k > 1 and fps * k > limit:
+        while k > 1 and fps * k > MAX_FPS:
             k -= 1
         return fps * k, k
 
@@ -232,7 +230,7 @@ class CameraService:
         with self._cfg_lock:
             s = self.store.get()
             rec = s["recording"]
-            width, height = cfg.RESOLUTIONS[rec["resolution"]]
+            width, height = FRAME_SIZE
             lores_w = min(PREVIEW_WIDTH, width)
             lores_h = int(round(lores_w * height / width / 2)) * 2
             self._sensor_fps, self._k = self._rates(rec)
@@ -257,11 +255,9 @@ class CameraService:
             self.picam2.options["quality"] = rec["jpeg_quality"]
             self.picam2.start()
             self._running = True
-            self._res_name = rec["resolution"]
-            self._main_size = (width, height)
             self._lores_size = (lores_w, lores_h)
             self._meas = None
-            log("camera_started", resolution=self._res_name, lores=[lores_w, lores_h], sensor_fps=self._sensor_fps,
+            log("camera_started", size=list(FRAME_SIZE), lores=[lores_w, lores_h], sensor_fps=self._sensor_fps,
                 decimation=self._k, buffers=count)
 
     def update_settings(self, patch: dict) -> dict:
@@ -269,9 +265,9 @@ class CameraService:
         with self._cfg_lock:
             old = self.store.get()
             if self._rec is not None:
-                for key in ("fps", "resolution", "jpeg_quality"):
+                for key in ("fps", "jpeg_quality"):
                     if key in patch.get("recording", {}) and patch["recording"][key] != old["recording"][key]:
-                        raise ValueError("Stop recording before changing fps, resolution or JPEG quality")
+                        raise ValueError("Stop recording before changing fps or JPEG quality")
                 for key in ("hflip", "vflip"):
                     if key in patch.get("camera", {}) and bool(patch["camera"][key]) != old["camera"][key]:
                         raise ValueError("Stop recording before flipping the image")
@@ -279,7 +275,7 @@ class CameraService:
             if self.picam2 is None:
                 return new
             try:
-                if new["recording"]["resolution"] != self._res_name or new["camera"] != old["camera"]:
+                if new["camera"] != old["camera"]:  # flips need a new camera configuration
                     self._configure()
                 else:
                     self.picam2.set_controls(self._controls(new))
@@ -289,7 +285,7 @@ class CameraService:
             except Exception as e:
                 self.error = self._explain(e)
                 log("apply_settings_failed", error=str(e))
-                raise ValueError(self.error)
+                raise ValueError(self.error) from e
             return new
 
     def lock_white_balance(self) -> dict:
@@ -297,16 +293,15 @@ class CameraService:
         gains = self._meta.get("ColourGains")
         if not gains:
             raise ValueError("No colour gains available yet")
-        return self.update_settings({"white_balance": {"mode": "manual", "red_gain": round(gains[0], 3), "blue_gain": round(gains[1], 3)}})
+        return self.update_settings({"white_balance": {"mode": "manual", "red_gain": round(gains[0], 3),
+                                                       "blue_gain": round(gains[1], 3)}})
 
     def _limits(self) -> tuple:
         """(min exposure us, hardware max exposure us, min gain, hardware max gain) at the current frame rate."""
         t_max = 1_000_000 / self._sensor_fps * 0.97  # the exposure must end before the next frame starts
-        g_max = 16.0
-        try:
+        g_max = 16.0  # when the camera does not report its limit
+        with contextlib.suppress(Exception):
             g_max = float(self.picam2.camera_controls["AnalogueGain"][1])
-        except Exception:
-            pass
         return 30.0, t_max, 1.0, g_max
 
     # --- per frame -------------------------------------------------------------------------------------------
@@ -323,9 +318,11 @@ class CameraService:
                 arr = m.array
                 lw, lh = self._lores_size
                 y = arr[:lh, :lw]
-                roi = y[lh // 5 : lh * 4 // 5 : 4, lw // 5 : lw * 4 // 5 : 4]
+                ex = self.store.get()["exposure"]
+                y0, y1 = autoexposure.metered_rows(lh, ex["metering_top"], ex["metering_bottom"])
+                band = y[y0:y1:4, ::4]
                 gain = md.get("AnalogueGain", 1.0) * md.get("DigitalGain", 1.0)  # brightness depends on both
-                self._meas = (self._frame_no, float(roi.mean()) / 255.0, md.get("ExposureTime", 0), gain)
+                self._meas = (self._frame_no, float(band.mean()) / 255.0, md.get("ExposureTime", 0), gain)
                 if self.preview_clients > 0 and now - self._last_preview >= 1 / PREVIEW_MAX_FPS:
                     self._last_preview = now
                     self.preview.publish(self._encode_yuv420(arr, lw, lh, PREVIEW_QUALITY))
@@ -348,7 +345,7 @@ class CameraService:
                     rec.slot += 1
                     request.acquire()
                     try:
-                        rec.queue.put_nowait((request, slot, datetime.now(timezone.utc)))
+                        rec.queue.put_nowait((request, slot, datetime.now(UTC)))
                     except queue.Full:
                         request.release()
                         rec.dropped += 1
@@ -367,7 +364,7 @@ class CameraService:
         return simplejpeg.encode_jpeg_yuv_planes(y, u, v, quality)
 
     def _focus_crop(self, y: np.ndarray) -> tuple[np.ndarray, tuple[int, int]]:
-        width, height = self._main_size
+        width, height = FRAME_SIZE
         crop_w, crop_h = min(FOCUS_CROP[0], width), min(FOCUS_CROP[1], height)
         roi = self.store.get()["focus_roi"]
         x0 = int(min(max(roi["x"] * width - crop_w / 2, 0), width - crop_w))
@@ -376,17 +373,19 @@ class CameraService:
 
     @staticmethod
     def _sharpness(crop: np.ndarray) -> float:
-        """Variance of the Laplacian: higher is sharper. Only meaningful relative to other readings of the same scene."""
+        """Variance of the Laplacian: higher is sharper. Only comparable with other readings of the same scene."""
         c = crop.astype(np.int16)
         lap = 4 * c[1:-1, 1:-1] - c[:-2, 1:-1] - c[2:, 1:-1] - c[1:-1, :-2] - c[1:-1, 2:]
         return float(lap.astype(np.float32).var())
 
     def _focus_frame(self, request) -> None:
-        width, height = self._main_size
+        width, height = FRAME_SIZE
         with MappedArray(request, "main") as m:
             crop, origin = self._focus_crop(m.array[:height, :width])
-            self.focus_info = {"sharpness": self._sharpness(crop), "origin": origin, "size": [crop.shape[1], crop.shape[0]]}
-            self.focus.publish(simplejpeg.encode_jpeg(np.ascontiguousarray(crop[:, :, None]), quality=85, colorspace="GRAY"))
+            self.focus_info = {"sharpness": self._sharpness(crop), "origin": origin,
+                               "size": [crop.shape[1], crop.shape[0]]}
+            jpeg = simplejpeg.encode_jpeg(np.ascontiguousarray(crop[:, :, None]), quality=85, colorspace="GRAY")
+            self.focus.publish(jpeg)
 
     def focus_requested(self) -> None:
         """Called by the HTTP side while someone is looking at the focus view."""
@@ -431,7 +430,7 @@ class CameraService:
             request.save("main", buf, format="jpeg")
             jpeg = buf.getvalue()
             encode_ms = (time.monotonic() - started) * 1000
-            width, height = self._main_size
+            width, height = FRAME_SIZE
             with MappedArray(request, "main") as m:
                 crop, _ = self._focus_crop(m.array[:height, :width])
                 sharpness = self._sharpness(crop)
@@ -439,7 +438,8 @@ class CameraService:
             request.release()
 
         name = datetime.now().strftime("snap_%Y%m%d_%H%M%S.jpg")
-        directory = os.path.join(self.storage.root, "snapshots") if self.storage.ready() else os.path.join(cfg.CONFIG_DIR, "snapshots")
+        base = self.storage.root if self.storage.ready() else cfg.CONFIG_DIR
+        directory = os.path.join(base, "snapshots")
         path = None
         try:
             os.makedirs(directory, exist_ok=True)
@@ -456,15 +456,15 @@ class CameraService:
         info = {
             "name": name,
             "path": path,
-            "width": self._main_size[0],
-            "height": self._main_size[1],
+            "width": FRAME_SIZE[0],
+            "height": FRAME_SIZE[1],
             "bytes": len(jpeg),
             "encode_ms": round(encode_ms),
             "sharpness": round(sharpness, 1),
             "exposure_us": md.get("ExposureTime"),
             "gain": round(md.get("AnalogueGain", 0) * md.get("DigitalGain", 1.0), 2),
             "colour_gains": [round(x, 3) for x in md.get("ColourGains", (0, 0))],
-            "time": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "time": datetime.now(UTC).isoformat(timespec="seconds"),
         }
         self.last_snapshot = {"jpeg": jpeg, "info": info}
         log("snapshot", **info)
@@ -500,10 +500,11 @@ class CameraService:
                     "settings": s,
                     "sensor_fps": self._sensor_fps,
                     "decimation": self._k,
-                    "main_size": list(self._main_size),
+                    "main_size": list(FRAME_SIZE),
                     "start_reason": reason,
                 }, f, indent=2)
-            rec.csv_file = open(os.path.join(directory, "frames.csv"), "w", newline="", encoding="utf-8")
+            # Open for the whole recording; stop_recording() closes it.
+            rec.csv_file = open(os.path.join(directory, "frames.csv"), "w", newline="", encoding="utf-8")  # noqa: SIM115
             rec.csv = csv.writer(rec.csv_file)
             rec.csv.writerow(["file", "time_utc", "sensor_timestamp_ns", "exposure_us", "analogue_gain", "digital_gain",
                               "red_gain", "blue_gain", "lux", "bytes"])
@@ -531,7 +532,7 @@ class CameraService:
                 rec.csv_file.close()
                 with open(os.path.join(rec.directory, "summary.json"), "w", encoding="utf-8") as f:
                     json.dump({
-                        "stopped_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                        "stopped_utc": datetime.now(UTC).isoformat(timespec="seconds"),
                         "reason": reason,
                         "saved": rec.saved,
                         "dropped": rec.dropped,
@@ -543,7 +544,8 @@ class CameraService:
                 log("recording_summary_failed", error=str(e))
             os.sync()
             self._rec = None
-            log("recording_stopped", reason=reason, saved=rec.saved, dropped=rec.dropped, bytes=rec.bytes, error=rec.error)
+            log("recording_stopped", reason=reason, saved=rec.saved, dropped=rec.dropped, bytes=rec.bytes,
+                error=rec.error)
 
     def _worker(self, rec: Recording) -> None:
         while True:
@@ -652,7 +654,7 @@ class CameraService:
             "camera": {
                 "running": self._running,
                 "error": self.error,
-                "resolution": self._res_name,
+                "size": list(FRAME_SIZE),
                 "sensor_fps": round(self._sensor_fps, 2),
                 "measured_fps": round(self.measured_fps(), 1),
                 "decimation": self._k,

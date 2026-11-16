@@ -35,6 +35,7 @@
   #previewWrap { position:relative; background:#000; border-radius:8px; overflow:hidden; cursor:crosshair; }
   #preview { display:block; width:100%; height:auto; }
   #roi { position:absolute; border:2px solid var(--warn); box-shadow:0 0 0 1px #000; pointer-events:none; display:none; }
+  .band-line { position:absolute; left:0; right:0; border-top:2px dashed var(--ok); box-shadow:0 1px 0 #000; pointer-events:none; }
   #focusBox img { image-rendering:pixelated; width:100%; max-width:960px; background:#000; border-radius:6px; }
   .big { font-size:26px; font-variant-numeric: tabular-nums; }
   #snapWrap { max-height:420px; overflow:auto; background:#000; border-radius:6px; margin-top:8px; }
@@ -60,8 +61,8 @@
   <div class="col">
     <section>
       <h2>Live preview</h2>
-      <div id="previewWrap"><img id="preview" alt="live preview"><div id="roi"></div></div>
-      <div class="hint">Click the preview to choose the point to focus on (the yellow frame is the area shown in the 1:1 view).</div>
+      <div id="previewWrap"><img id="preview" alt="live preview"><div id="roi"></div><div class="band-line" id="bandTop"></div><div class="band-line" id="bandBottom"></div></div>
+      <div class="hint">Click the preview to choose the point to focus on (the yellow frame is the area shown in the 1:1 view). The green dashed lines are the metered band.</div>
       <div class="row dim" id="live">–</div>
     </section>
 
@@ -98,20 +99,25 @@
       </div>
 
       <div class="row" data-for="manual auto_gain"><label>Exposure time</label><input type="range" id="exposure_us" min="0" max="1000">
-        <span class="num"><input type="number" id="exposure_us_n" min="30" max="1000000" step="10"> µs</span>
+        <span class="num"><input type="number" id="exposure_us_n" min="30" max="80000" step="10"> µs</span>
         <span class="num">1/<input type="number" id="exposure_us_d" min="1" step="1"> s</span></div>
       <div class="row" data-for="manual auto_exposure"><label>Gain (ISO)</label><input type="range" id="gain" min="0" max="1000">
         <span class="num"><input type="number" id="gain_n" min="1" max="22" step="0.1"> ×</span>
         <span class="num">ISO <input type="number" id="gain_iso" min="100" max="2200" step="10"></span></div>
       <div class="row" data-for="auto auto_exposure"><label>Exposure time limit</label><input type="range" id="max_exposure_us" min="0" max="1000">
-        <span class="num"><input type="number" id="max_exposure_us_n" min="30" max="1000000" step="10"> µs</span>
+        <span class="num"><input type="number" id="max_exposure_us_n" min="30" max="80000" step="10"> µs</span>
         <span class="num">1/<input type="number" id="max_exposure_us_d" min="1" step="1"> s</span></div>
       <div class="row" data-for="auto auto_gain"><label>Gain limit</label><input type="range" id="max_gain" min="0" max="1000">
         <span class="num"><input type="number" id="max_gain_n" min="1" max="22" step="0.1"> ×</span>
         <span class="num">ISO <input type="number" id="max_gain_iso" min="100" max="2200" step="10"></span></div>
       <div class="row" data-for="auto auto_gain auto_exposure"><label>Target brightness</label><input type="range" id="target_brightness" min="10" max="80">
         <span class="num"><input type="number" id="target_brightness_n" min="10" max="80" step="1"> %</span></div>
-      <div class="hint">You can type exact values in the fields next to the sliders (confirm with Enter or by leaving the field). Gain 1.0 is about ISO 100, gain 4.0 about ISO 400. A short exposure (for example 1/1000 s) freezes moving cars, and gain makes up for the missing light. The exposure cannot be longer than one sensor frame. The camera rounds the exposure time and the gain to its own steps (for example 1000 µs may become 992 µs). The real values are shown in the "Current" line and in <code>frames.csv</code>.</div>
+      <div class="row"><label>Metered band (rows)</label>
+        <span class="num">top <input type="number" id="metering_top" min="0" max="0.95" step="0.001"></span>
+        <span class="num">bottom <input type="number" id="metering_bottom" min="0.05" max="1" step="0.001"></span>
+        <span class="dim">shares of the frame height, 0 = top edge</span></div>
+      <div class="hint">The automatic modes measure the brightness of this band of rows at full width (the green lines on the preview): set it to where the plates pass, so the sky or the bonnet does not decide the exposure. The detection mode uses the same band from <code>camera.exposure.meteringTop</code> / <code>meteringBottom</code> of the device configuration.</div>
+      <div class="hint">You can type exact values in the fields next to the sliders (confirm with Enter or by leaving the field). Gain 1.0 is about ISO 100, gain 4.0 about ISO 400. A short exposure (for example 1/1000 s) freezes moving cars, and gain makes up for the missing light. The exposure is at most 80 ms (1/12 s), the limit of the device configuration. The camera rounds the exposure time and the gain to its own steps (for example 1000 µs may become 992 µs). The real values are shown in the "Current" line and in <code>frames.csv</code>.</div>
 
       <div class="row"><label>White balance</label>
         <select id="wb_mode">
@@ -126,7 +132,6 @@
 
       <hr style="border-color:var(--line)">
       <div class="row"><label>Frames per second (recording)</label><input type="number" id="fps" min="0.1" step="0.1"><span class="dim" id="fpsInfo"></span></div>
-      <div class="row"><label>Recording resolution</label><select id="resolution"></select></div>
       <div class="row"><label>JPEG quality</label><input type="number" id="jpeg_quality" min="50" max="100" step="1"></div>
       <div class="row"><label>Stop when free space is below</label><input type="number" id="min_free_mb" min="50" step="50"> MB</div>
       <div class="row"><label>Image orientation</label>
@@ -157,7 +162,7 @@ const $ = (id) => document.getElementById(id);
 let state = null, pending = {}, sendTimer = null, focusOn = false, sharpMax = 0, focusUrl = null, snapZoom = false;
 
 // --- slider <-> value mappings (exposure and gain are logarithmic) -----------------------------------------
-const T_MIN = 30, T_MAX = 100000, G_MAX = 22;
+const T_MIN = 30, T_MAX = 80000, G_MAX = 22;  // T_MAX: the exposure limit of both modes (common/sensor.py)
 const posToUs = (p) => Math.round(T_MIN * Math.pow(T_MAX / T_MIN, p / 1000));
 const usToPos = (us) => Math.log(us / T_MIN) / Math.log(T_MAX / T_MIN) * 1000;
 const posToGain = (p) => Math.pow(G_MAX, p / 1000);
@@ -222,6 +227,8 @@ function render() {
   setIdle("max_exposure_us", usToPos(ex.max_exposure_us)); setIdle("max_exposure_us_n", ex.max_exposure_us); setIdle("max_exposure_us_d", denominator(ex.max_exposure_us));
   setIdle("max_gain", gainToPos(ex.max_gain)); setIdle("max_gain_n", +ex.max_gain.toFixed(3)); setIdle("max_gain_iso", Math.round(ex.max_gain * 100));
   setIdle("target_brightness", Math.round(ex.target_brightness * 100)); setIdle("target_brightness_n", Math.round(ex.target_brightness * 100));
+  setIdle("metering_top", ex.metering_top); setIdle("metering_bottom", ex.metering_bottom);
+  $("bandTop").style.top = (ex.metering_top * 100) + "%"; $("bandBottom").style.top = (ex.metering_bottom * 100) + "%";
 
   setIdle("wb_mode", wb.mode);
   document.querySelectorAll("[data-wb]").forEach((row) => row.classList.toggle("hidden", wb.mode !== "manual"));
@@ -229,20 +236,18 @@ function render() {
   setIdle("blue_gain", Math.round(wb.blue_gain * 100)); setIdle("blue_gain_n", +wb.blue_gain.toFixed(3));
 
   // recording parameters
-  const resSel = $("resolution");
-  if (!resSel.options.length) state.resolutions.forEach((n) => resSel.add(new Option(n.replace("x", " × "), n)));
-  setIdle("resolution", rec.resolution); setIdle("fps", rec.fps); setIdle("jpeg_quality", rec.jpeg_quality); setIdle("min_free_mb", rec.min_free_mb);
+  setIdle("fps", rec.fps); setIdle("jpeg_quality", rec.jpeg_quality); setIdle("min_free_mb", rec.min_free_mb);
   if (idle($("autostart"))) $("autostart").checked = rec.autostart;
   if (idle($("hflip"))) $("hflip").checked = s.camera.hflip;
   if (idle($("vflip"))) $("vflip").checked = s.camera.vflip;
-  $("fps").max = state.max_fps[rec.resolution];
-  $("fpsInfo").textContent = "max " + state.max_fps[rec.resolution] + " for this resolution · the sensor runs at " + cam.sensor_fps + " fps, " + (cam.decimation === 1 ? "every frame is saved" : "1 of every " + cam.decimation + " frames is saved");
+  $("fps").max = state.max_fps;
+  $("fpsInfo").textContent = "max " + state.max_fps + " at 4056 × 3040 · the sensor runs at " + cam.sensor_fps + " fps, " + (cam.decimation === 1 ? "every frame is saved" : "1 of every " + cam.decimation + " frames is saved");
   const locked = !!r;
-  ["fps", "resolution", "jpeg_quality", "hflip", "vflip"].forEach((id) => $(id).disabled = locked);
-  $("recLock").textContent = locked ? "While recording you cannot change frames per second, resolution, JPEG quality or image orientation. Exposure and white balance can be changed." : "";
+  ["fps", "jpeg_quality", "hflip", "vflip"].forEach((id) => $(id).disabled = locked);
+  $("recLock").textContent = locked ? "While recording you cannot change frames per second, JPEG quality or image orientation. Exposure and white balance can be changed." : "";
 
   // preview aspect + ROI marker
-  const [rw, rh] = (cam.resolution || "4056x3040").split("x").map(Number);
+  const [rw, rh] = cam.size;
   $("preview").style.aspectRatio = rw + " / " + rh;
   const f = st.focus;
   const roiEl = $("roi");
@@ -323,6 +328,14 @@ for (const key of ["gain", "max_gain"]) {
   bindNumber(prefix + "_iso", "exposure", key, (iso) => iso / 100);
 }
 bindNumber("target_brightness_n", "exposure", "target_brightness", (v) => v / 100);
+for (const key of ["metering_top", "metering_bottom"]) {
+  $(key).addEventListener("input", () => { $(key)._committed = false; });
+  $(key).addEventListener("change", () => {  // 0 is a valid top, so not through bindNumber, which refuses it
+    const v = parseFloat($(key).value);
+    $(key)._committed = true;
+    if (isFinite(v)) patchSettings("exposure", { [key]: v }); else refresh();
+  });
+}
 bindNumber("red_gain_n", "white_balance", "red_gain", (v) => v);
 bindNumber("blue_gain_n", "white_balance", "blue_gain", (v) => v);
 $("wb_mode").addEventListener("change", (e) => patchSettings("white_balance", { mode: e.target.value }));
@@ -330,7 +343,6 @@ $("red_gain").addEventListener("input", (e) => { $("red_gain_n").value = (e.targ
 $("blue_gain").addEventListener("input", (e) => { $("blue_gain_n").value = (e.target.value / 100).toFixed(2); patchSettings("white_balance", { blue_gain: e.target.value / 100 }); });
 $("btnLockWb").addEventListener("click", async () => { const j = await api("/api/white_balance/lock", {}); if (j.ok) { state = j; render(); } });
 ["fps", "jpeg_quality", "min_free_mb"].forEach((id) => $(id).addEventListener("change", (e) => patchSettings("recording", { [id]: +e.target.value })));
-$("resolution").addEventListener("change", (e) => patchSettings("recording", { resolution: e.target.value }));
 $("autostart").addEventListener("change", (e) => patchSettings("recording", { autostart: e.target.checked }));
 $("hflip").addEventListener("change", (e) => patchSettings("camera", { hflip: e.target.checked }));
 $("vflip").addEventListener("change", (e) => patchSettings("camera", { vflip: e.target.checked }));

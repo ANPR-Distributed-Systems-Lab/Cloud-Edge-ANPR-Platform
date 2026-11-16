@@ -129,6 +129,10 @@ public class DeviceSettings {
         private Integer widthPx;
         @NotNull
         private Integer jpegQuality;
+        @NotNull
+        private Integer maxWaitingFrames;
+        @NotNull
+        private Integer maxStored;
     }
 
     /** Capture settings; the resolution is fixed (4056x3040). */
@@ -167,6 +171,11 @@ public class DeviceSettings {
         private Double maxGain;
         @NotNull
         private Double targetBrightness;
+        /** The metered band of rows, shares of the frame height; meteringTop < meteringBottom (ConfigurationService). */
+        @NotNull
+        private Double meteringTop;
+        @NotNull
+        private Double meteringBottom;
     }
 
     @DynamoDbBean

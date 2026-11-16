@@ -90,6 +90,8 @@ app:
       photos:
         width-px: 4056                    # width of the uploaded photo (4056 = full frame, less = downscaled, 4:3 kept)
         jpeg-quality: 90                  # JPEG quality of the uploaded photo
+        max-waiting-frames: 3             # frames (~37 MB each) waiting for the JPEG encoder; more lose their photo
+        max-stored: 2000                  # photos kept on the device until uploaded; beyond it the oldest go
       # Tested on the Pi: automatic exposure capped at 540 us, so passing plates stay sharp.
       camera:
         exposure:
@@ -99,6 +101,10 @@ app:
           max-exposure-us: 540            # longest exposure time the automatic modes may use
           max-gain: 4.0                   # highest gain the automatic modes may use
           target-brightness: 0.4          # mean brightness (0 to 1) the automatic modes aim for
+          # Rows measured by the automatic modes (shares of the frame height, full width): the band of detector v3,
+          # where the plates pass.
+          metering-top: 0.337
+          metering-bottom: 0.795
         white-balance:
           mode: DAYLIGHT                  # a preset of the camera, or MANUAL with the gains below
           red-gain: 2.0                   # red gain of MANUAL

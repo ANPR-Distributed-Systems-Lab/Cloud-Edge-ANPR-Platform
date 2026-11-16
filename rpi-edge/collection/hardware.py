@@ -1,37 +1,29 @@
-"""Optional in-car hardware: tact switch (GPIO22) starts/stops recording, LED (GPIO17) shows it, buzzer (GPIO27)
-confirms, the 4x20 LCD shows status and the IP address to open in the browser.
+"""The in-car hardware in collection mode (common/peripherals.py): a short press of the tact switch starts / stops
+recording, the LED is on while recording, the buzzer confirms, and the 4x20 LCD shows the status and the IP address
+to open in the browser. A long press of the switch is main.py's: it switches to the detection mode.
 
-Every part is optional: whatever fails to initialise is logged and skipped, the web UI keeps working.
+Every part is optional: whatever is missing is skipped, the web UI keeps working.
 """
 import threading
 
 from collection.camera_service import CameraService
 from common.jsonlog import log
-from common.peripherals import Beeper, Lcd, open_led
+from common.peripherals import Peripherals
 from common.system_info import local_ip
-
-BUTTON_PIN = 22
 
 
 class Hardware:
-    def __init__(self, camera: CameraService) -> None:
+    def __init__(self, camera: CameraService, peripherals: Peripherals) -> None:
         self.camera = camera
+        self.peripherals = peripherals
         self._stop = threading.Event()
         self._busy = threading.Lock()
-        self.led, self.beeper, self.lcd = open_led(), Beeper.open(), Lcd.open()
-        self.button = None
-        try:
-            from gpiozero import Button
-
-            self.button = Button(BUTTON_PIN, bounce_time=0.05)
-            self.button.when_pressed = lambda: threading.Thread(target=self._toggle, daemon=True).start()
-        except Exception as e:
-            log("gpio_unavailable", error=repr(e))
+        if peripherals.switch is not None:
+            peripherals.switch.on_press = self._toggle
         threading.Thread(target=self._loop, name="hardware", daemon=True).start()
 
     def _beep(self, count: int = 1, length: float = 0.12) -> None:
-        if self.beeper is not None:
-            self.beeper.beep(count, length)
+        self.peripherals.beep(count, length)
 
     def _toggle(self) -> None:
         if not self._busy.acquire(blocking=False):  # ignore presses while the previous one is still being handled
@@ -84,21 +76,12 @@ class Hardware:
     def _loop(self) -> None:
         while not self._stop.wait(1.0):
             try:
-                if self.led is not None:
-                    self.led.value = 1 if self.camera.recording_status() is not None else 0
-                if self.lcd is not None:
-                    self.lcd.show(self._lines())
-            except OSError as e:  # I2C glitches happen, the next second tries again
-                log("lcd_error", error=str(e))
+                if self.peripherals.led is not None:
+                    self.peripherals.led.value = 1 if self.camera.recording_status() is not None else 0
+                self.peripherals.show(self._lines())
             except Exception as e:
                 log("hardware_error", error=repr(e))
 
     def close(self) -> None:
+        """Stops the status updates; main.py clears the LED, the screen and the short press (Peripherals.reset)."""
         self._stop.set()
-        try:
-            if self.led is not None:
-                self.led.off()
-            if self.lcd is not None:
-                self.lcd.clear()
-        except Exception:
-            pass

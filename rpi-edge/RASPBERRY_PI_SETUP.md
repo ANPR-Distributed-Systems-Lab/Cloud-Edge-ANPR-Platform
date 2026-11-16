@@ -438,7 +438,7 @@ What the in-car hardware is wired to (both modes use the same peripherals, `comm
 | LCD 4x20 (HD44780 + PCF8574, address `0x27`) | SDA / SCL, 5V, GND | GPIO2 / GPIO3 | 3 / 5, 2 or 4, any GND | both modes |
 | LED | anode through a resistor | GPIO17 | 11 | both modes |
 | Buzzer | signal | GPIO27 | 13 | both modes |
-| Tact switch | to GND | GPIO22 | 15 | collection (start / stop recording) |
+| Tact switch | to GND | GPIO22 | 15 | both modes: a long press (2 s) switches the mode; a short one starts / stops recording in collection |
 | GNSS module (Waveshare LC76G) | module TX -> Pi RXD, module RX -> Pi TXD, VCC to 3.3V, GND | GPIO15 / GPIO14 (UART0, `/dev/ttyAMA0`) | 10 / 8, 1, 34 | detection (position, track) |
 
 ### GNSS module (Waveshare LC76G)

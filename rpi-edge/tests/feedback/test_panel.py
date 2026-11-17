@@ -138,3 +138,22 @@ def test_the_frame_rate_counts_the_last_seconds_only():
         rate.tick()
         clock[0] += 1.0
     assert rate.per_second() == 1.0  # 10 ticks in the 10 s window
+
+
+def refuse(queues, n):
+    """Queues detection n and quarantines it, as the sender does after a 400."""
+    queues.detections.add([detection_event(n)])
+    queues.detections.quarantine([q.row_id for q in queues.detections.oldest(1)], 400, "VALIDATION_FAILED")
+
+
+def test_only_items_refused_since_the_mode_started_are_a_fault(tmp_path):
+    before = Queues.open(tmp_path / "outbox")
+    refuse(before, 1)  # refused in an earlier run: stays in the quarantine for diagnosis
+    before.close()
+    fb, p = panel(tmp_path, [0.0])
+    fb.refresh()
+    assert p.lights.fault.state is LightState.OFF
+    refuse(fb.sources.queues, 2)
+    fb.refresh()
+    assert p.lights.fault.state is LightState.ON and p.beeper.beeps == [(1, FAULT_TONE_SECONDS)]
+    assert [f.text for f in fb.snapshot().faults] == ["refused items 1"]

@@ -399,9 +399,10 @@ LAST PLATES   the last two plates accepted for sending (ALERT when on the list) 
 
 - Faults (`common/faults.py`, `feedback/faults.py`): no configuration, config refused, device not paired, no
   models, model load failed, models not updated, frame loop error, sign-in failed, access denied (403), refused
-  items (rows in a quarantine), SD card low (under 1 GB), power too low, CPU throttled, CPU hot (80 °C). A fault
-  that appears sounds the buzzer for 3 s, once (not again when it comes back within 10 min). The network and
-  the GPS are not faults: they have their own LEDs and recover by themselves.
+  items (rows the platform refused since the mode started: older ones stay in the quarantine for diagnosis but do
+  not light the LED), SD card low (under 1 GB), power too low, CPU throttled, CPU hot (80 °C). A fault that
+  appears sounds the buzzer for 3 s, once (not again when it comes back within 10 min). The network and the GPS
+  are not faults: they have their own LEDs and recover by themselves.
 - An alert replaces the page for 15 s: `*** ALERT ***`, the plate, the alert text over two lines (the LCD has no
   Polish letters: ą becomes a, ł becomes l), and the buzzer gives three beeps of 0.4 s. Its LED stays on until
   the analysis is stopped or the mode switched; nothing needs to be acknowledged.

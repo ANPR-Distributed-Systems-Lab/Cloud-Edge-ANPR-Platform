@@ -23,7 +23,7 @@ from detection.config.store import ConfigurationStore
 from detection.contract.alerts import Alert
 from detection.contract.ingest import DetectionEvent
 from detection.delivery.queues import Queues
-from detection.feedback.faults import detection_faults
+from detection.feedback.faults import detection_faults, quarantined
 from detection.feedback.lights import light_states
 from detection.feedback.screens import PAGES, LastPlate, Snapshot, Stage, Waiting, alert_lines
 from detection.gps.source import LocationSource
@@ -86,6 +86,7 @@ class Feedback:
         self._alert_until = 0.0
         self._alert_seen = False  # an alert since the analysis started: the alert LED stays on
         self._ready = False
+        self._quarantined_at_start = quarantined(sources.queues)  # the fault counts only new refusals
         if peripherals.run_switch is not None:
             peripherals.run_switch.on_press = self.toggle_hold
 
@@ -144,7 +145,11 @@ class Feedback:
             fresh = fix_age <= configuration.gps.max_fix_age_seconds
         sd_free_mb = _sd_free_mb(src.state_dir)
         temp_c = system_info.cpu_temp_c()
-        faults = detection_faults(src.faults, src.health, src.queues, sd_free_mb, system_info.power_flags(), temp_c)
+        now_quarantined = quarantined(src.queues)
+        # The retention prunes old rows: the count from the start goes down with them, so new ones still count.
+        self._quarantined_at_start = min(self._quarantined_at_start, now_quarantined)
+        refused = now_quarantined - self._quarantined_at_start
+        faults = detection_faults(src.faults, src.health, refused, sd_free_mb, system_info.power_flags(), temp_c)
         clock = self.clock()
         return Snapshot(
             stage=stage,

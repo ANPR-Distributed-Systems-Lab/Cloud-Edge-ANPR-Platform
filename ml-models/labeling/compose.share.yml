@@ -1,0 +1,13 @@
+# Override for CVAT's docker-compose.yml: exposes labeling/batches/ as the "Connected file share", so tasks
+# are created straight from the 12 MP frames on disk instead of uploading (and duplicating) them.
+# Used by cvat.ps1, which sets CVAT_SHARE_DIR.
+services:
+  cvat_server:
+    volumes:
+      - ${CVAT_SHARE_DIR:?set by cvat.ps1}:/home/django/share:ro
+  cvat_worker_import:
+    volumes:
+      - ${CVAT_SHARE_DIR:?set by cvat.ps1}:/home/django/share:ro
+  cvat_worker_chunks:
+    volumes:
+      - ${CVAT_SHARE_DIR:?set by cvat.ps1}:/home/django/share:ro

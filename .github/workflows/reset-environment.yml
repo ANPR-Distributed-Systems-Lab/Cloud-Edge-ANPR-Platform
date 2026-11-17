@@ -1,0 +1,64 @@
+name: Reset environment
+
+# Empties the DATA of the dev environment and keeps all its infrastructure: the operations database
+# (schema dropped, Flyway builds it again), the DynamoDB tables, the storage bucket, every Cognito user
+# and every SQS queue. The models bucket is not touched. The ECS services are scaled to 0 meanwhile and
+# get their task counts back. The environment must be running: start it first.
+# The logic lives in infrastructure/scripts/environment/environment_reset.py.
+#
+# Run it with the field empty first: it only prints what would be deleted. To delete, type the
+# environment name (anpr-dev) in the field.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Type anpr-dev to delete the data. Leave empty for a dry run that deletes nothing.
+        required: false
+        default: ""
+
+# Never at the same time as start or stop.
+concurrency:
+  group: environment-power
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: eu-central-1
+  PREFIX: anpr-dev
+
+jobs:
+  reset:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Own GitHub environment: it accepts trusted branches only, because the role deletes data
+    # (see the role's trust policy).
+    environment: dev-reset
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      # Only the script is needed, not the whole repository.
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: infrastructure/scripts
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: infrastructure/scripts/requirements.txt
+
+      - run: pip install -r infrastructure/scripts/requirements.txt
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_RESET_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # The input goes through the environment, never into the command line text.
+      - name: Reset
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: python infrastructure/scripts/environment/environment_reset.py --prefix "$PREFIX" ${CONFIRM:+--confirm "$CONFIRM"}

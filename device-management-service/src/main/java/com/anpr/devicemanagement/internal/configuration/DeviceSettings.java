@@ -33,7 +33,19 @@ public class DeviceSettings {
 
     @Valid
     @NotNull
+    private Models models;
+
+    @Valid
+    @NotNull
     private Intervals intervals;
+
+    @Valid
+    @NotNull
+    private Gps gps;
+
+    @Valid
+    @NotNull
+    private Photos photos;
 
     @Valid
     @NotNull
@@ -50,11 +62,14 @@ public class DeviceSettings {
         private Integer locationsBatchSize;
         @NotNull
         private Integer imageUrlsBatchSize;
+        /** Photos are uploaded only while the other streams of the device are idle (rpi-edge/DETECTION.md, section 9). */
+        @NotNull
+        private Boolean imageUploadsLowPriority;
         @NotNull
         private Integer maxBatchDelaySeconds;
     }
 
-    /** Thresholds below which the device drops a detection instead of sending it. */
+    /** The send rule of the device: which detections it reads and sends. */
     @DynamoDbBean
     @Getter
     @Setter
@@ -64,7 +79,22 @@ public class DeviceSettings {
         @NotNull
         private Double ocrMinConfidence;
         @NotNull
+        private Double readableMinProbability;
+        @NotNull
         private Integer minPlateWidthPx;
+        @NotNull
+        private Integer minEdgeMarginPx;
+    }
+
+    /** The published model versions the device runs (internal/models). */
+    @DynamoDbBean
+    @Getter
+    @Setter
+    public static class Models {
+        @NotNull
+        private String detector;
+        @NotNull
+        private String ocr;
     }
 
     @DynamoDbBean
@@ -81,6 +111,30 @@ public class DeviceSettings {
         private Integer locationSampleSeconds;
     }
 
+    /** How fresh a GPS fix must be to give a frame its position. */
+    @DynamoDbBean
+    @Getter
+    @Setter
+    public static class Gps {
+        @NotNull
+        private Integer maxFixAgeSeconds;
+    }
+
+    /** The photo uploaded for a frame with detections: a copy of the frame, downscaled if narrower than 4056 px. */
+    @DynamoDbBean
+    @Getter
+    @Setter
+    public static class Photos {
+        @NotNull
+        private Integer widthPx;
+        @NotNull
+        private Integer jpegQuality;
+        @NotNull
+        private Integer maxWaitingFrames;
+        @NotNull
+        private Integer maxStored;
+    }
+
     /** Capture settings; the resolution is fixed (4056x3040). */
     @DynamoDbBean
     @Getter
@@ -94,6 +148,11 @@ public class DeviceSettings {
         private WhiteBalance whiteBalance;
         @NotNull
         private Double fps;
+        /** How the camera is mounted: the image is flipped back before it reaches the models. */
+        @NotNull
+        private Boolean hflip;
+        @NotNull
+        private Boolean vflip;
     }
 
     @DynamoDbBean
@@ -112,6 +171,11 @@ public class DeviceSettings {
         private Double maxGain;
         @NotNull
         private Double targetBrightness;
+        /** The metered band of rows, shares of the frame height; meteringTop < meteringBottom (ConfigurationService). */
+        @NotNull
+        private Double meteringTop;
+        @NotNull
+        private Double meteringBottom;
     }
 
     @DynamoDbBean
@@ -126,7 +190,7 @@ public class DeviceSettings {
         private Double blueGain;
     }
 
-    /** The modes of the software auto exposure on the device (rpi-edge/autoexposure.py). */
+    /** The modes of the software auto exposure on the device (rpi-edge/common/autoexposure.py). */
     public enum ExposureMode {
         MANUAL, AUTO, AUTO_GAIN, AUTO_EXPOSURE
     }

@@ -1,0 +1,47 @@
+# Detector v3: detector v2 fine-tuned on a band of the frame at a lower resolution, for latency on the Pi 5 (v2 at
+# 1280x960 takes about 600 ms per frame there). Every labeled plate (589 of at least 70 px, 40 sessions) lies at
+# 0.43-0.71 of the frame height (ignore regions 0.41-0.72), so the detector sees only rows 0.337-0.795 at full
+# width, resized to 1024x352: 0.29 of v2's pixels at a similar scale (3.96 vs 3.17 original px per input px).
+# Chosen 2026-11-15 from a latency study (scratch runs, same data as v2): fine-tuning v2 beat training from COCO
+# at this input (val, OCR v3 behind it: 132 vs 130 of 143 readable plates read right; v2 135), and lower inputs
+# (768 wide) lost plates of 70-110 px. A full-width band keeps every plate in view for the mount used so far; a
+# different camera mount needs a new crop and a new model.
+run_name: v3
+
+dataset:
+  name: pose_1024x352_v3          # datasets/<name>/, built by anpr_ml.detector.dataset
+  exports: [train_001, train_002, val_001, val_002]  # labeling/exports/<batch>.jsonl; the split comes from splits.json
+  size: [1024, 352]               # detector input (width, height)
+  crop: [0.337, 0.795]            # frame rows the detector sees (top, bottom), shares of the frame height
+  min_plate_px: 70                # narrower plates (on the original) are painted like plate_ignore
+  ignore_margin_px: 3             # dilation of painted regions at detector scale
+
+model:
+  from_run: v2                    # fine-tunes runs/detector/v2/weights/best.pt (4 keypoints already)
+
+train:                            # passed to Ultralytics model.train() unchanged
+  imgsz: 1024
+  # Settings of the study's fine-tune (60 epochs, about 25 min; its best epoch was 58, longer was not tried).
+  epochs: 60
+  # No early stop: the first fine-tuning epochs score high on val fitness (box mAP) while the corners are still
+  # improving; with patience 20 a first attempt stopped at epoch 21 keeping epoch 1 (corner error p90 7.0 px
+  # instead of 5.4 px).
+  patience: 60
+  warmup_epochs: 1
+  batch: 4
+  workers: 2
+  device: 0
+  seed: 42
+  deterministic: false
+  amp: true
+  fliplr: 0.0                     # a mirrored plate is not a real case and would swap TL and TR
+  mosaic: 1.0
+  close_mosaic: 10
+  plots: true
+
+wandb:                            # anpr_ml.tracking; the project must be private (owner only)
+  enabled: true
+  project: anpr-detector
+  entity: null
+  mode: online
+  log_images: true

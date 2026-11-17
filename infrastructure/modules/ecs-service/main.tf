@@ -205,7 +205,7 @@ resource "aws_ecs_service" "this" {
     assign_public_ip = var.assign_public_ip
   }
 
-  # Read by the "start environment" workflow (infrastructure/scripts/environment_power.py).
+  # Read by the "start environment" workflow (infrastructure/scripts/environment/environment_power.py).
   # Tags do not touch running tasks, so changing start_count only takes effect at the next start.
   tags = {
     "finops:start-count" = tostring(var.start_count)

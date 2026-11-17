@@ -1,0 +1,41 @@
+# Detector v0: first plate detector, bootstraps the pre-labeling loop (ML_ASSUMPTIONS.md sections 4 and 6).
+# Decided on 2026-11-05: YOLO11n-pose, 1280x960 input, plate_ignore painted gray.
+run_name: v0
+
+dataset:
+  name: pose_1280x960_v0          # datasets/<name>/, built by anpr_ml.detector.dataset
+  exports: [train_001, val_001]   # labeling/exports/<batch>.jsonl; the split comes from splits.json
+  size: [1280, 960]               # detector input (width, height); OPEN, final after the Pi benchmark
+  min_plate_px: 70                # narrower plates (on the original) are painted like plate_ignore
+  ignore_margin_px: 3             # dilation of painted regions at detector scale
+
+model:
+  weights: yolo11n-pose.pt        # COCO-pose pretrained; the 17-keypoint head is rebuilt for 4 keypoints
+
+train:                            # passed to Ultralytics model.train() unchanged
+  imgsz: 1280
+  epochs: 150
+  patience: 40                    # early stop when val fitness has not improved for this many epochs
+  # Measured peak memory per step at 1280 (FP32): batch 4 = 3.6 GB, batch 8 = 7.2 GB (more than the 6 GB card).
+  # Ultralytics accumulates gradients up to nbs=64 images, so the optimizer still sees an effective batch of 64.
+  batch: 4
+  # Each worker is a separate process with its own torch + CUDA libraries on Windows, and validation uses twice
+  # as many; 4 workers (12 processes) plus CVAT's Docker VM ran the 16 GB PC out of memory.
+  workers: 2
+  device: 0
+  seed: 42
+  # Deterministic cuDNN kernels need ~10 GB at batch 4 and run 8x slower; runs with the same seed are close
+  # but not bit-identical.
+  deterministic: false
+  amp: true                       # Ultralytics runs its own AMP check on the GTX 1660 Super; see the log
+  fliplr: 0.0                     # a mirrored plate is not a real case and would swap TL and TR
+  mosaic: 1.0
+  close_mosaic: 10
+  plots: true                     # plots stay in the local run directory
+
+wandb:                            # anpr_ml.tracking; the project must be private (owner only)
+  enabled: true                   # needs `uv run wandb login` once
+  project: anpr-detector
+  entity: null                    # null = the default entity of the logged-in account
+  mode: online                    # offline: logged under runs/wandb/, upload later with `wandb sync`
+  log_images: true                # validation frames with labels and predictions drawn (decision 2026-11-05)

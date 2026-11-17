@@ -35,7 +35,7 @@ Naming pitfall, because the word "account" is used in two ways:
 
 - One user pool (Essentials tier, which the pre token generation trigger needs to change access tokens).
   Nobody signs up on their own: administrators create the users, people with
-  `infrastructure/scripts/create_user.py` (a permanent password the administrator types in) and devices through
+  `infrastructure/scripts/identity/create_user.py` (a permanent password the administrator types in) and devices through
   device-management (section 7).
 - Groups `users` and `devices`. Membership is assigned by the backend only and a client cannot change it.
   Every account is in exactly one group.
@@ -89,7 +89,7 @@ The **owner** of a request is resolved like this: a `user` caller is its own own
 | The device and its configuration (`GET /api/v1/device`, `GET /api/v1/device/config`) | user and device | No device id in the path. A device gets itself (`X-Account-Id` = `deviceId`), a user gets the device owned by `X-Account-Id`. A device that is not registered (deleted) gets 404 |
 | Editing the configuration (`PUT /api/v1/device/config`), metrics chart (`GET /api/v1/device/metrics`) | user | The device owned by `X-Account-Id` |
 | Reporting metrics (`POST /api/v1/device/metrics`) | device | The calling device, which must be registered |
-| Image upload URLs (`/api/v1/images/presigned-urls`) | device | Keys are assigned by device-management under the caller's prefix, `images/{deviceId}/{yyyy}/{MM}/{dd}/{frameId}.jpg`; ingest refuses a key of another device |
+| Image upload URLs (`/api/v1/images/presigned-urls`) | device | The key follows the contract, `images/{deviceId}/{yyyy}/{MM}/{dd}/{frameId}.jpg`; the device computes it and device-management signs the URL for the key under the caller's prefix; ingest refuses a key of another device |
 | Creating and deleting devices (`/api/v1/admin/devices`) | administrator | IAM (SigV4) |
 
 ## 6. Where the link is stored
@@ -147,9 +147,8 @@ owner of the device and returns all alerts of that account (supports `ETag` / `I
 ## 9. Changes to the bootstrap
 
 The rows about infrastructure (user pool, gateway, routes, ingest Lambda, messaging, task role permissions)
-are applied on `dev` and checked end to end by `infrastructure/scripts/identity_smoke_test.py`, with one
-exception: the body validation of the ingest Lambda (on `main`) is not deployed yet. Of the rows about service
-code, operations-service only recognises device callers so far (and answers 501 to them on the alert list);
+are applied on `dev`, with one exception: the body validation of the ingest Lambda (on `main`) is not deployed
+yet. Of the rows about service code, operations-service only recognises device callers so far (and answers 501 to them on the alert list);
 device-management is implemented and tested locally, not deployed.
 
 | Area | Bootstrap | Target |

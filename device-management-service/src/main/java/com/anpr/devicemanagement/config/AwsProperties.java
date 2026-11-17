@@ -13,7 +13,7 @@ import org.springframework.validation.annotation.Validated;
  *
  * @param region   AWS region of the clients
  * @param dynamodb DynamoDB endpoint and table names
- * @param s3       bucket of the photos the devices upload
+ * @param s3       buckets of the photos the devices upload and of the models they download
  * @param cognito  user pool of people and devices
  * @param sns      topic of the device events
  */
@@ -40,7 +40,7 @@ public record AwsProperties(
     public record Tables(@NotBlank String devices, @NotBlank String deviceConfigurations, @NotBlank String deviceMetrics) {
     }
 
-    public record S3(@NotBlank String imagesBucket) {
+    public record S3(@NotBlank String imagesBucket, @NotBlank String modelsBucket) {
     }
 
     /**

@@ -1,10 +1,11 @@
 name: Stop environment
 
-# Switches the dev environment OFF: every ECS service to 0 tasks, then RDS. Manual only.
+# Switches the dev environment OFF: every ECS service to 0 tasks, then RDS and the database access
+# host (EC2, tag "finops:switch"). Manual only.
 # Idempotent, so it is safe to run whenever: for example every few days, because AWS
 # starts a stopped RDS instance again after 7 days and this puts it back to sleep.
-# Stopped databases still cost for storage and backups; only instance hours are saved.
-# The logic lives in infrastructure/scripts/environment_power.py.
+# Stopped databases and instances still cost for storage and backups; only instance hours are saved.
+# The logic lives in infrastructure/scripts/environment/environment_power.py.
 on:
   workflow_dispatch:
 
@@ -49,9 +50,9 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Stop services and databases
-        run: python infrastructure/scripts/environment_power.py stop
+        run: python infrastructure/scripts/environment/environment_power.py stop
 
       # Shown on the workflow run page. Runs even when the step above failed.
       - name: Summary
         if: always()
-        run: python infrastructure/scripts/environment_power.py status
+        run: python infrastructure/scripts/environment/environment_power.py status

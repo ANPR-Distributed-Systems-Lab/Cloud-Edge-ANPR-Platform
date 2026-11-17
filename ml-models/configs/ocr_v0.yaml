@@ -1,0 +1,24 @@
+# OCR v0: the pretrained fast-plate-ocr cct-s-v2-global model, not fine-tuned (its training data includes Polish
+# plates). The baseline every fine-tuned OCR is compared against.
+run_name: v0
+
+dataset:
+  name: ocr_128x64_v0             # datasets/<name>/, built by anpr_ml.ocr.dataset
+  exports: [train_001, train_002, val_001, val_002]
+  size: [128, 64]                 # (width, height): the pretrained model's input
+  margin: 0.08                    # the plate quad is widened by this share of its size before rectifying
+  jitter_copies: 8                # crops per train plate, each from randomly displaced corners
+  jitter_sigma: 0.015             # per corner and axis, as a fraction of the plate width
+  seed: 42
+
+model:
+  name: cct_s_v2_global           # pretrained release files, see anpr_ml.ocr.config.PRETRAINED
+
+train: null                       # baseline: the pretrained weights are exported and evaluated unchanged
+
+wandb:                            # anpr_ml.tracking; the project must be private (owner only)
+  enabled: true
+  project: anpr-ocr
+  entity: null
+  mode: online
+  log_images: true                # val crops with their readings (decision 2026-11-09)

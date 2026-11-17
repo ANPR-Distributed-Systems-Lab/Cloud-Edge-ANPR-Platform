@@ -90,7 +90,8 @@ module "api" {
       ]
     }
 
-    # The device reports its metrics and asks for upload URLs of its photos.
+    # The device reports its metrics, asks for upload URLs of its photos and for download URLs of the
+    # model versions of its configuration.
     device_management_devices = {
       discovery_service_arn = module.device_management_service.discovery_service_arn
       authorizer            = "devices"
@@ -98,6 +99,7 @@ module "api" {
       routes = [
         "POST /api/v1/device/metrics",
         "POST /api/v1/images/presigned-urls",
+        "GET /api/v1/device/models",
       ]
     }
 

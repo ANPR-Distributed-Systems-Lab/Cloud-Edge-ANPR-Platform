@@ -10,6 +10,7 @@ app:
         device-metrics: device-metrics
     s3:
       images-bucket: test-images-bucket
+      models-bucket: test-models-bucket
     cognito:
       user-pool-id: eu-central-1_test
       users-group: users

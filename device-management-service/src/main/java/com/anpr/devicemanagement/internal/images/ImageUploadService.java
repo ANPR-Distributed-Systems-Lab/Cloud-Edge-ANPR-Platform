@@ -20,8 +20,9 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Presigned URLs for the photos of detections. The device never chooses the key: it gets one under its own prefix
- * and sends it unchanged in its detections, where the ingest Lambda refuses a key of another device.
+ * Presigned URLs for the photos of detections. The key layout is fixed by the contract and the device computes it
+ * for its detections; the key signed here is always under the prefix of the caller, so a device cannot upload to the
+ * prefix of another one, and the ingest Lambda refuses a detection with a key of another device.
  */
 @Service
 public class ImageUploadService {

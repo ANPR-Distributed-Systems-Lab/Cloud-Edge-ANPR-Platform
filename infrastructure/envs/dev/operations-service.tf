@@ -11,7 +11,7 @@ module "operations_ecr" {
 }
 
 # ---------------------------------------------------------------- database
-# Private: reachable only from the service's tasks.
+# Private: reachable only from the service's tasks and from the database access host (db-access.tf).
 # Developers work against a local PostgreSQL (docker-compose); this one serves the deployed environment.
 
 module "operations_rds" {
@@ -21,7 +21,10 @@ module "operations_rds" {
   vpc_id     = module.network.vpc_id
   subnet_ids = module.network.private_subnet_ids
 
-  allowed_security_group_ids = [module.operations_service.task_security_group_id]
+  allowed_security_group_ids = [
+    module.operations_service.task_security_group_id,
+    module.db_access_host.security_group_id,
+  ]
 
   ssm_prefix      = "/anpr/${var.environment}/operations-service"
   database_name   = "operations"
@@ -35,8 +38,9 @@ module "operations_rds" {
 #   ReceiveMessage (QueueUrl = EVENTS_QUEUE_URL, MessageAttributeNames = All) -> process -> DeleteMessage
 #
 #   body        the device's JSON, unchanged
-#   attributes  eventType (detection | device-location), traceId, accountId, deviceId
-#               (accountId and deviceId come from the device's token, never from the body)
+#   attributes  eventType (detection | device-location), traceId, deviceId
+#               (deviceId comes from the device's token, never from the body; the service finds the
+#               accountId of the device in its own pairings table, fed by the device events queue below)
 #
 # A message that is not deleted within the visibility timeout (60 s) is delivered again, and
 # after 5 deliveries it moves to the DLQ: processing must be idempotent.
@@ -128,7 +132,7 @@ module "operations_service" {
   desired_count = 0
 
   # Tasks the "start environment" workflow runs for this service (0 = never started automatically).
-  start_count = 1
+  start_count = 0
 }
 
 # ---------------------------------------------------------------- deploy role

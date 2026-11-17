@@ -1,0 +1,112 @@
+"""The device configuration of device-management (GET /api/v1/device/config, DeviceConfigurationResponse).
+
+It is the only source of the settings of the detection mode: device-management holds the defaults and the owner
+edits them (View 4); the device keeps a copy (config/store.py). The ranges below are those of the contract.
+"""
+from dataclasses import dataclass
+
+from common.sensor import MAX_EXPOSURE_US, MAX_FPS
+from detection.contract.parsing import ContractError, bounded, matching, one_of, parse
+
+UUID = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+MODEL_VERSION = r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}"  # also a directory name in the model cache
+
+
+@dataclass(frozen=True)
+class BatchingConfiguration:
+    detections_batch_size: int = bounded(1, 100)  # detections per ingest request
+    locations_batch_size: int = bounded(1, 500)  # track points per request
+    image_urls_batch_size: int = bounded(1, 100)  # frames per presigned URL request
+    image_uploads_low_priority: bool  # photos go out only while the other streams are idle (delivery/uploads.py)
+    max_batch_delay_seconds: int = bounded(1, 300)  # a batch that is not full leaves after this long
+
+
+@dataclass(frozen=True)
+class MlConfiguration:
+    """The send rule (rules/send_rule.py)."""
+    detector_min_confidence: float = bounded(0, 1)
+    ocr_min_confidence: float = bounded(0, 1)
+    readable_min_probability: float = bounded(0, 1)
+    min_plate_width_px: int = bounded(10, 4056)
+    min_edge_margin_px: int = bounded(0, 1000)
+
+
+@dataclass(frozen=True)
+class ModelVersions:
+    """The published model versions the device runs (cloud/model_updater.py)."""
+    detector: str = matching(MODEL_VERSION)
+    ocr: str = matching(MODEL_VERSION)
+
+
+@dataclass(frozen=True)
+class IntervalsConfiguration:
+    metrics_seconds: int = bounded(3, 3600)
+    config_poll_seconds: int = bounded(3, 3600)
+    alerts_poll_seconds: int = bounded(3, 3600)
+    location_sample_seconds: int = bounded(1, 3600)  # a point of the track this often, moving or not
+
+
+@dataclass(frozen=True)
+class GpsConfiguration:
+    max_fix_age_seconds: int = bounded(1, 300)  # an older fix is not the position of a frame (gps/source.py)
+
+
+@dataclass(frozen=True)
+class PhotosConfiguration:
+    """The uploaded photo of a frame with detections (delivery/photos.py)."""
+    width_px: int = bounded(640, 4056)  # below the frame width the photo is downscaled, keeping 4:3
+    jpeg_quality: int = bounded(50, 100)
+    max_waiting_frames: int = bounded(1, 10)  # frames in memory waiting for the encoder, about 37 MB each
+    max_stored: int = bounded(10, 20_000)  # photos kept on the SD card until uploaded
+
+
+@dataclass(frozen=True)
+class ExposureConfiguration:
+    mode: str = one_of("MANUAL", "AUTO", "AUTO_GAIN", "AUTO_EXPOSURE")
+    exposure_us: int = bounded(20, MAX_EXPOSURE_US)
+    gain: float = bounded(1, 22)
+    max_exposure_us: int = bounded(20, MAX_EXPOSURE_US)
+    max_gain: float = bounded(1, 22)
+    target_brightness: float = bounded(0.1, 0.8)
+    metering_top: float = bounded(0, 0.95)  # the rows the automatic modes measure, shares of the frame height
+    metering_bottom: float = bounded(0.05, 1)
+
+
+@dataclass(frozen=True)
+class WhiteBalanceConfiguration:
+    mode: str = one_of("AUTO", "DAYLIGHT", "CLOUDY", "TUNGSTEN", "FLUORESCENT", "INDOOR", "MANUAL")
+    red_gain: float = bounded(0.5, 8)
+    blue_gain: float = bounded(0.5, 8)
+
+
+@dataclass(frozen=True)
+class CameraConfiguration:
+    exposure: ExposureConfiguration
+    white_balance: WhiteBalanceConfiguration
+    fps: float = bounded(0.1, MAX_FPS)  # the most frames analysed per second
+    hflip: bool  # how the camera is mounted, so the models see the scene upright and unmirrored
+    vflip: bool
+
+
+@dataclass(frozen=True)
+class DeviceConfiguration:
+    device_id: str = matching(UUID)
+    version: int = bounded(0, 2**63 - 1)  # changes with every edit of the owner
+    updated_at: str = matching(r".+")
+    plate_cooldown_seconds: int = bounded(0, 3600)
+    batching: BatchingConfiguration
+    ml: MlConfiguration
+    models: ModelVersions
+    intervals: IntervalsConfiguration
+    gps: GpsConfiguration
+    photos: PhotosConfiguration
+    camera: CameraConfiguration
+
+    @classmethod
+    def from_document(cls, document) -> "DeviceConfiguration":
+        """Raises ContractError naming every field that is missing or outside the contract."""
+        configuration = parse(cls, document)
+        exposure = configuration.camera.exposure
+        if exposure.metering_bottom <= exposure.metering_top:  # the one rule across fields of the contract
+            raise ContractError(["camera.exposure.meteringBottom must be greater than meteringTop"])
+        return configuration

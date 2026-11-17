@@ -1,9 +1,10 @@
 name: Start environment
 
-# Switches the dev environment ON: RDS first, then every ECS service with the number of
-# tasks from its "finops:start-count" tag (set by Terraform: start_count). Manual only.
+# Switches the dev environment ON: RDS and the database access host (EC2, tag "finops:switch") first,
+# then every ECS service with the number of tasks from its "finops:start-count" tag (set by
+# Terraform: start_count). Manual only.
 # Idempotent: running it on an already running environment changes nothing.
-# The logic lives in infrastructure/scripts/environment_power.py.
+# The logic lives in infrastructure/scripts/environment/environment_power.py.
 on:
   workflow_dispatch:
 
@@ -48,9 +49,9 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Start databases and services
-        run: python infrastructure/scripts/environment_power.py start
+        run: python infrastructure/scripts/environment/environment_power.py start
 
       # Shown on the workflow run page. Runs even when the step above failed.
       - name: Summary
         if: always()
-        run: python infrastructure/scripts/environment_power.py status
+        run: python infrastructure/scripts/environment/environment_power.py status

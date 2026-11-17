@@ -28,7 +28,7 @@ The IoT application running on the Raspberry Pi 5 is implemented in **Python**.
 The development environment setup relies on a hybrid approach designed to maximize debugging speed:
 * Application code (Spring Boot / Python) is run natively, directly from the developer's IDE (IntelliJ, PyCharm).
 * Infrastructure dependencies (PostgreSQL, local DynamoDB Local instance) are launched using a `docker-compose.yml` file.
-* Databases are always local during development. The databases in the deployed `dev` environment on AWS are private and reachable only by the deployed services.
+* Databases are always local during development. The databases in the deployed `dev` environment on AWS are private and reachable only by the deployed services and, for administrators, through an AWS Systems Manager port-forwarding session via the database access host (`infrastructure/scripts/environment/db_tunnel.py`).
 * The locally running application does not connect to SQS/SNS in the deployed `dev` cloud environment on AWS: a local consumer would compete with the deployed one for the same messages. How messaging is exercised locally (mocks, a local emulator, ...) is each developer's choice.
 
 ## 5. Infrastructure (IaC), Security, and FinOps

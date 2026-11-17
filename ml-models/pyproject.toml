@@ -1,0 +1,100 @@
+[project]
+name = "anpr-ml"
+version = "0.1.0"
+description = "Dataset preparation, labeling tooling and model training for the ANPR edge node"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "pillow>=10.3",
+    "opencv-python>=4.10",
+    "pyyaml>=6",
+]
+
+[project.scripts]
+# Labeling pipeline
+anpr-index = "anpr_ml.labeling.frame_index:main"
+anpr-splits = "anpr_ml.labeling.splits:main"
+anpr-select = "anpr_ml.labeling.selection:main"
+anpr-validate = "anpr_ml.labeling.validation:main"
+# Detector
+anpr-yolo-dataset = "anpr_ml.detector.dataset:main"
+anpr-train-detector = "anpr_ml.detector.train:main"
+anpr-eval-detector = "anpr_ml.detector.evaluate:main"
+anpr-export-detector = "anpr_ml.detector.export:main"
+# OCR
+anpr-ocr-dataset = "anpr_ml.ocr.dataset:main"
+anpr-train-ocr = "anpr_ml.ocr.train:main"
+anpr-eval-ocr = "anpr_ml.ocr.evaluate:main"
+# Detector + OCR
+anpr-eval-pipeline = "anpr_ml.pipeline:main"
+# Distribution to the edge devices
+anpr-publish-model = "anpr_ml.publish:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+]
+# Heavy and GPU-bound; the labeling tools and the unit tests import none of it.
+train = [
+    "torch>=2.13",
+    "torchvision>=0.28",
+    "ultralytics>=8.4",
+    "wandb>=0.21",
+    # Ultralytics simplifies ONNX exports with it and would otherwise install it on the fly.
+    "onnxslim>=0.1.99",
+]
+# OCR on Keras 3 with the torch backend (torch comes from `train`); TensorFlow is deliberately not installed.
+# fast-plate-ocr is pinned exactly because the ONNX export reuses two of its internal helpers.
+ocr = [
+    "fast-plate-ocr[onnx]==1.1.0",
+    "keras>=3.10,<4",
+    "albumentations>=2",
+    "pydantic>=2.5,<3",
+    "click>=8",
+    "onnx>=1.17",
+    "onnxscript>=0.5",
+]
+# Uploading model versions to the models bucket (anpr-publish-model).
+publish = [
+    "boto3>=1.40",
+]
+notebook = [
+    "jupyterlab>=4.2",
+    "jupytext>=1.16",
+    "ipykernel>=6.29",
+    "matplotlib>=3.8",
+    "pandas>=2.2",
+]
+
+[tool.uv]
+default-groups = ["dev", "train", "ocr", "publish", "notebook"]
+# The CUDA index has no macOS wheels; locking only for the platforms we run on keeps resolution possible.
+environments = ["sys_platform == 'win32'", "sys_platform == 'linux'"]
+# fast-plate-ocr and albumentations ask for opencv-python-headless, Ultralytics for opencv-python. Both ship the
+# same cv2 package into one folder and would overwrite each other, so only opencv-python is installed.
+override-dependencies = ["opencv-python-headless; sys_platform == 'never'"]
+
+# CUDA 12.6 build: the training PC driver (566.14) supports CUDA up to 12.7.
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu126" }
+torchvision = { index = "pytorch-cu126" }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/anpr_ml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+src = ["src", "tests"]

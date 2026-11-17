@@ -1,8 +1,12 @@
 package com.anpr.devicemanagement.support;
 
+import com.anpr.devicemanagement.internal.models.ModelName;
+import com.anpr.devicemanagement.internal.models.ModelRelease;
+import com.anpr.devicemanagement.internal.models.ModelReleases;
 import com.anpr.devicemanagement.internal.provisioning.AccountDirectory;
 import com.anpr.devicemanagement.internal.provisioning.DeviceEvents;
 import com.jayway.jsonpath.JsonPath;
+import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
@@ -10,8 +14,11 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
+import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
@@ -19,9 +26,9 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Base of the API tests: the whole application over MockMvc with DynamoDB Local. Cognito and SNS are replaced by
- * mocks of their ports (the adapters have their own unit tests). The identity headers are set as API Gateway sets
- * them.
+ * Base of the API tests: the whole application over MockMvc with DynamoDB Local. Cognito, SNS and the models bucket
+ * are replaced by mocks of their ports (the adapters have their own unit tests); every model version counts as
+ * published unless a test says otherwise. The identity headers are set as API Gateway sets them.
  */
 @AutoConfigureMockMvc
 public abstract class ApiTestSupport extends DynamoDbLocalSupport {
@@ -38,6 +45,18 @@ public abstract class ApiTestSupport extends DynamoDbLocalSupport {
     protected AccountDirectory accounts;
     @MockitoBean
     protected DeviceEvents events;
+    @MockitoBean
+    protected ModelReleases releases;
+
+    @BeforeEach
+    void everyModelVersionIsPublished() {
+        when(releases.find(any(), anyString())).thenAnswer(call -> Optional.of(
+                release(call.getArgument(0), call.getArgument(1))));
+    }
+
+    protected static ModelRelease release(ModelName model, String version) {
+        return new ModelRelease(model.id(), version, List.of(new ModelRelease.File("model.onnx", "a".repeat(64), 1234)));
+    }
 
     protected static RequestPostProcessor person(UUID accountId) {
         return identity("user", accountId.toString());

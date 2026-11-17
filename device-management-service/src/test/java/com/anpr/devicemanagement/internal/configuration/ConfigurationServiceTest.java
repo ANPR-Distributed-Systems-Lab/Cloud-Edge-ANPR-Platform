@@ -2,10 +2,12 @@ package com.anpr.devicemanagement.internal.configuration;
 
 import com.anpr.devicemanagement.internal.devices.Device;
 import com.anpr.devicemanagement.internal.devices.DeviceLookup;
+import com.anpr.devicemanagement.internal.models.PublishedModels;
 import com.anpr.devicemanagement.shared.error.ConflictException;
 import com.anpr.devicemanagement.shared.error.ErrorCodes;
 import com.anpr.devicemanagement.shared.error.ForbiddenException;
 import com.anpr.devicemanagement.shared.error.TechnicalException;
+import com.anpr.devicemanagement.shared.error.ValidationException;
 import com.anpr.devicemanagement.shared.security.Caller;
 import com.anpr.devicemanagement.support.TestData;
 import org.junit.jupiter.api.BeforeEach;
@@ -17,12 +19,14 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -39,12 +43,14 @@ class ConfigurationServiceTest {
     private DeviceLookup deviceLookup;
     @Mock
     private DeviceConfigurationRepository configurations;
+    @Mock
+    private PublishedModels publishedModels;
 
     private ConfigurationService service;
 
     @BeforeEach
     void setUp() {
-        service = new ConfigurationService(deviceLookup, configurations, Clock.fixed(NOW, ZoneOffset.UTC));
+        service = new ConfigurationService(deviceLookup, configurations, publishedModels, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     @Test
@@ -69,6 +75,17 @@ class ConfigurationServiceTest {
         assertThatThrownBy(() -> service.update(OWNER, 4L, TestData.settings(30)))
                 .isInstanceOf(ConflictException.class)
                 .hasFieldOrPropertyWithValue("code", ErrorCodes.CONCURRENT_MODIFICATION);
+        verify(configurations, never()).update(any());
+    }
+
+    @Test
+    void aModelVersionThatIsNotPublishedIsRefusedAndNothingIsWritten() {
+        when(deviceLookup.deviceOf(OWNER)).thenReturn(device());
+        when(configurations.findByDeviceId(DEVICE_ID)).thenReturn(Optional.of(storedConfiguration(4L)));
+        DeviceSettings newSettings = TestData.settings(30);
+        doThrow(new ValidationException(List.of())).when(publishedModels).requirePublished(newSettings.getModels());
+
+        assertThatThrownBy(() -> service.update(OWNER, 4L, newSettings)).isInstanceOf(ValidationException.class);
         verify(configurations, never()).update(any());
     }
 

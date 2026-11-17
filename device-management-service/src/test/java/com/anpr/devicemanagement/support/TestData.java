@@ -16,18 +16,34 @@ public final class TestData {
         batching.setDetectionsBatchSize(20);
         batching.setLocationsBatchSize(100);
         batching.setImageUrlsBatchSize(20);
+        batching.setImageUploadsLowPriority(true);
         batching.setMaxBatchDelaySeconds(10);
 
         DeviceSettings.Ml ml = new DeviceSettings.Ml();
         ml.setDetectorMinConfidence(0.5);
         ml.setOcrMinConfidence(0.6);
+        ml.setReadableMinProbability(0.8);
         ml.setMinPlateWidthPx(60);
+        ml.setMinEdgeMarginPx(10);
+
+        DeviceSettings.Models models = new DeviceSettings.Models();
+        models.setDetector("v2");
+        models.setOcr("v3");
 
         DeviceSettings.Intervals intervals = new DeviceSettings.Intervals();
         intervals.setMetricsSeconds(metricsSeconds);
         intervals.setConfigPollSeconds(60);
         intervals.setAlertsPollSeconds(60);
         intervals.setLocationSampleSeconds(5);
+
+        DeviceSettings.Gps gps = new DeviceSettings.Gps();
+        gps.setMaxFixAgeSeconds(30);
+
+        DeviceSettings.Photos photos = new DeviceSettings.Photos();
+        photos.setWidthPx(4056);
+        photos.setJpegQuality(90);
+        photos.setMaxWaitingFrames(3);
+        photos.setMaxStored(2000);
 
         DeviceSettings.Exposure exposure = new DeviceSettings.Exposure();
         exposure.setMode(DeviceSettings.ExposureMode.MANUAL);
@@ -36,6 +52,8 @@ public final class TestData {
         exposure.setMaxExposureUs(4000);
         exposure.setMaxGain(12.0);
         exposure.setTargetBrightness(0.4);
+        exposure.setMeteringTop(0.337);
+        exposure.setMeteringBottom(0.795);
 
         DeviceSettings.WhiteBalance whiteBalance = new DeviceSettings.WhiteBalance();
         whiteBalance.setMode(DeviceSettings.WhiteBalanceMode.DAYLIGHT);
@@ -46,12 +64,17 @@ public final class TestData {
         camera.setExposure(exposure);
         camera.setWhiteBalance(whiteBalance);
         camera.setFps(2.0);
+        camera.setHflip(true);
+        camera.setVflip(false);
 
         DeviceSettings settings = new DeviceSettings();
         settings.setPlateCooldownSeconds(60);
         settings.setBatching(batching);
         settings.setMl(ml);
+        settings.setModels(models);
         settings.setIntervals(intervals);
+        settings.setGps(gps);
+        settings.setPhotos(photos);
         settings.setCamera(camera);
         return settings;
     }

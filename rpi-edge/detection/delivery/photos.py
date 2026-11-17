@@ -5,9 +5,9 @@ photos.jpegQuality, both as configured when the frame was analysed. The corners 
 frame, so they fit the photo at any size.
 
 The frame loop must not wait for the encoder, so a frame is handed over here and encoded by a background thread. When
-the encoder is behind (a few frames queued), further photos are not saved and counted: a detection without a photo is
-better than a slower detection. The photo is written to a .part file first, so a power cut never leaves half a JPEG
-under its final name.
+photos.maxWaitingFrames frames are already waiting, further photos are not saved and counted: a detection without a
+photo is better than a slower detection. The photo is written to a .part file first, so a power cut never leaves half
+a JPEG under its final name.
 """
 import queue
 import threading
@@ -24,7 +24,6 @@ from detection.delivery.uploads import ImageJob
 from detection.pipeline import FrameResult
 from detection.vision.frame import Frame
 
-MAX_WAITING_FRAMES = 3  # each holds a 37 MB BGR frame
 WAIT_SECONDS = 1.0
 
 
@@ -35,7 +34,8 @@ class FrameSaver:
         self.images = images
         self.configuration = configuration
         self.encode = encode or encode_jpeg
-        self._waiting: queue.Queue[tuple[Frame, str, PhotosConfiguration]] = queue.Queue(maxsize=MAX_WAITING_FRAMES)
+        # Unbounded: the limit is photos.maxWaitingFrames at the time of each frame (submit), so it can change live.
+        self._waiting: queue.Queue[tuple[Frame, str, PhotosConfiguration]] = queue.Queue()
         self.not_saved = 0
         directory.mkdir(parents=True, exist_ok=True)
         for leftover in directory.glob("*.part"):  # a power cut during a write
@@ -45,12 +45,13 @@ class FrameSaver:
         """A frame observer of the loop: keeps the photo of a frame that produced detections."""
         if not result.events:
             return
-        try:
-            self._waiting.put_nowait((frame, result.frame_id, self.configuration.current.photos))
-        except queue.Full:
+        photos = self.configuration.current.photos
+        if self._waiting.qsize() >= photos.max_waiting_frames:  # only this thread adds, so the check holds
             self.not_saved += 1
             log("photo_not_saved", level="warning", frameId=result.frame_id, reason="encoder busy",
                 not_saved=self.not_saved)
+            return
+        self._waiting.put_nowait((frame, result.frame_id, photos))
 
     def run(self, stop: threading.Event) -> None:
         while not stop.is_set():

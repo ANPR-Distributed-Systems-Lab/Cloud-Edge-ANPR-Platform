@@ -76,6 +76,13 @@ def test_prune_keeps_the_newest_rows_over_the_limit(tmp_path):
     assert ids(box) == ["id-3", "id-4"]
 
 
+def test_a_lower_limit_from_the_configuration_applies_but_never_a_higher_one(tmp_path):
+    box = open_queue(tmp_path, clock=lambda: 10.0, max_rows=4)
+    box.add([detection_event(n, 9.0) for n in range(6)])
+    assert len(box.prune(max_rows=10)) == 2  # the queue's own ceiling stays
+    assert len(box.prune(max_rows=1)) == 3 and ids(box) == ["id-5"]
+
+
 def test_the_limits_apply_to_the_quarantine_too(tmp_path, monkeypatch):
     box = open_queue(tmp_path, clock=lambda: 10.0, max_rows=1)
     box.add([detection_event(n, 9.0) for n in range(3)])

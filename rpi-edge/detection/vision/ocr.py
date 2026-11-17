@@ -1,6 +1,7 @@
 """The plate OCR: fast-plate-ocr's cct-s-v2-global fine-tuned in ml-models, run with ONNX Runtime.
 
-The model takes one 128x64 RGB uint8 crop (batch size 1) and has up to two outputs, both already probabilities:
+The model takes one RGB uint8 crop (batch size 1) of the size in its plate_config.yaml (128x64 for the
+cct-s-v2-global models; the ONNX input must agree) and has up to two outputs, both already probabilities:
   plate   10 slots x alphabet: the character in each slot, the pad character after the end of the text
   region  the readability head (OCR v3 on), classes listed in plate_config.yaml (`plate_regions`: readable,
           unreadable); a model without it gives no P(readable), and the send rule then skips that check
@@ -58,8 +59,18 @@ class Reader:
     def __init__(self, model_path: str, plate_config_path: str) -> None:
         self.config = PlateConfig.load(plate_config_path)
         self.session = onnx.session(model_path)
-        self.input_name = self.session.get_inputs()[0].name
+        model_input = self.session.get_inputs()[0]
+        self.input_name = model_input.name
+        _, height, width, _ = model_input.shape  # NHWC, fixed at export
+        if (width, height) != self.config.size:
+            raise ValueError(f"the OCR input is {width}x{height}, its plate_config.yaml says "
+                             f"{self.config.size[0]}x{self.config.size[1]}")
         self.outputs = [o.name for o in self.session.get_outputs()]  # "plate", optionally "region"
+
+    @property
+    def input_size(self) -> tuple[int, int]:
+        """(width, height) of the crop the model reads: rectify_plate() makes it this size."""
+        return self.config.size
 
     def read(self, crop_bgr: np.ndarray) -> Reading:
         rgb = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2RGB)

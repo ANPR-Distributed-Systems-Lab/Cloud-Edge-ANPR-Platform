@@ -77,7 +77,14 @@ here.
   records a point of its track, moving or not.
 - `photos.widthPx` (640 to 4056, default 4056) and `photos.jpegQuality` (50 to 100, default 90) set the uploaded
   photo: a width below 4056 is a downscaled copy of the frame (4:3 kept). The corners of a detection are relative
-  to the frame, so they fit a photo of any size.
+  to the frame, so they fit a photo of any size. `photos.maxWaitingFrames` (1 to 10, default 3, about 37 MB each)
+  is how many frames may wait in memory for the JPEG encoder before further photos are not saved, and
+  `photos.maxStored` (10 to 20 000, default 2000) how many photos the device keeps until they are uploaded.
+- `camera.exposure.meteringTop` / `meteringBottom` (shares of the frame height, defaults 0.337 / 0.795, the band of
+  detector v3) are the rows whose brightness the automatic exposure modes measure, at full width. The bottom must be
+  below the top in the frame: a `PUT` with `meteringBottom <= meteringTop` is `400 VALIDATION_FAILED` with the field
+  code `RANGE` on `camera.exposure.meteringBottom` (the only rule across fields; `DefaultSettingsIT` checks the
+  defaults against it).
 - The resolution is fixed at 4056x3040, so `camera.fps` is at most 11.7. `exposureUs` and `maxExposureUs` are at
   most 80 ms: an exposure must end before the next frame starts, and the sensor runs at 10 fps or faster.
 - `ETag` is the quoted version (`"3"`) and `If-None-Match` is compared weakly (RFC 9110).

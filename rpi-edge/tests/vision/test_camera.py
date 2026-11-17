@@ -169,6 +169,15 @@ def test_the_automatic_exposure_never_goes_past_the_configured_limits():
     assert frame.image.shape == (100, 100, 3)
 
 
+def test_the_automatic_exposure_measures_only_the_configured_band_of_rows():
+    cam, picam = opened(exposure={"mode": "AUTO", "meteringTop": 0.4, "meteringBottom": 0.6})
+    picam.image[:] = 255  # sky and bonnet blown out
+    picam.image[40:60] = 10  # the band where the plates pass is dark: the exposure must go up
+    picam.metadata = {"ExposureTime": 200, "AnalogueGain": 1.0, "DigitalGain": 1.0}
+    cam.capture()
+    assert picam.controls_sent[-1]["ExposureTime"] > 200
+
+
 def test_auto_gain_keeps_the_configured_exposure_time():
     cam, picam = opened(exposure={"mode": "AUTO_GAIN", "exposureUs": 300, "maxGain": 6.0})
     cam.capture()

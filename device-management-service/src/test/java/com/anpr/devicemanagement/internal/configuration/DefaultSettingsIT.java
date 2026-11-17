@@ -37,6 +37,9 @@ class DefaultSettingsIT {
         DeviceConfigurationResponse response = mapper.toResponse(configuration);
 
         assertThat(validator.validate(response)).isEmpty();
+        // The one rule across fields, which the contract cannot express (ConfigurationService checks it on PUT).
+        DeviceSettings.Exposure exposure = configuration.getSettings().getCamera().getExposure();
+        assertThat(exposure.getMeteringBottom()).isGreaterThan(exposure.getMeteringTop());
     }
 
     @Test

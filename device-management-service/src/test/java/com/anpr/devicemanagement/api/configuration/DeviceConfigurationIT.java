@@ -40,6 +40,10 @@ class DeviceConfigurationIT extends ApiTestSupport {
                 .andExpect(jsonPath("$.gps.maxFixAgeSeconds").value(30))
                 .andExpect(jsonPath("$.photos.widthPx").value(4056))
                 .andExpect(jsonPath("$.photos.jpegQuality").value(90))
+                .andExpect(jsonPath("$.photos.maxWaitingFrames").value(3))
+                .andExpect(jsonPath("$.photos.maxStored").value(2000))
+                .andExpect(jsonPath("$.camera.exposure.meteringTop").value(0.337))
+                .andExpect(jsonPath("$.camera.exposure.meteringBottom").value(0.795))
                 .andExpect(jsonPath("$.camera.exposure.mode").value("AUTO"))
                 .andExpect(jsonPath("$.camera.whiteBalance.mode").value("DAYLIGHT"))
                 .andExpect(jsonPath("$.camera.fps").value(3.0))
@@ -82,6 +86,10 @@ class DeviceConfigurationIT extends ApiTestSupport {
                 .andExpect(jsonPath("$.gps.maxFixAgeSeconds").value(10))
                 .andExpect(jsonPath("$.photos.widthPx").value(2028))
                 .andExpect(jsonPath("$.photos.jpegQuality").value(80))
+                .andExpect(jsonPath("$.photos.maxWaitingFrames").value(5))
+                .andExpect(jsonPath("$.photos.maxStored").value(500))
+                .andExpect(jsonPath("$.camera.exposure.meteringTop").value(0.3))
+                .andExpect(jsonPath("$.camera.exposure.meteringBottom").value(0.8))
                 .andExpect(jsonPath("$.camera.vflip").value(false));
     }
 
@@ -143,6 +151,33 @@ class DeviceConfigurationIT extends ApiTestSupport {
     }
 
     @Test
+    void anEmptyMeteredBandIsRefused() throws Exception {
+        PersonWithDevice owner = createPersonWithDevice();
+        String request = updateRequest(versionOf(owner), 15).replace("\"meteringBottom\": 0.8", "\"meteringBottom\": 0.3");
+
+        mockMvc.perform(put("/api/v1/device/config").with(person(owner.accountId()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.fields[0].field").value("camera.exposure.meteringBottom"))
+                .andExpect(jsonPath("$.fields[0].code").value("RANGE"));
+    }
+
+    @Test
+    void tooManyWaitingFramesAreRefused() throws Exception {
+        PersonWithDevice owner = createPersonWithDevice();
+        String request = updateRequest(versionOf(owner), 15).replace("\"maxWaitingFrames\": 5", "\"maxWaitingFrames\": 11");
+
+        mockMvc.perform(put("/api/v1/device/config").with(person(owner.accountId()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fields[0].field").value("photos.maxWaitingFrames"))
+                .andExpect(jsonPath("$.fields[0].code").value("RANGE"));
+    }
+
+    @Test
     void aDeviceMayNotEditItsConfiguration() throws Exception {
         PersonWithDevice owner = createPersonWithDevice();
 
@@ -183,9 +218,10 @@ class DeviceConfigurationIT extends ApiTestSupport {
                   "models": { "detector": "v2", "ocr": "v4" },
                   "intervals": { "metricsSeconds": %d, "configPollSeconds": 30, "alertsPollSeconds": 30, "locationSampleSeconds": 2 },
                   "gps": { "maxFixAgeSeconds": 10 },
-                  "photos": { "widthPx": 2028, "jpegQuality": 80 },
+                  "photos": { "widthPx": 2028, "jpegQuality": 80, "maxWaitingFrames": 5, "maxStored": 500 },
                   "camera": {
-                    "exposure": { "mode": "AUTO", "exposureUs": 1000, "gain": 2.0, "maxExposureUs": 3000, "maxGain": 8.0, "targetBrightness": 0.45 },
+                    "exposure": { "mode": "AUTO", "exposureUs": 1000, "gain": 2.0, "maxExposureUs": 3000, "maxGain": 8.0, "targetBrightness": 0.45,
+                                  "meteringTop": 0.3, "meteringBottom": 0.8 },
                     "whiteBalance": { "mode": "MANUAL", "redGain": 1.8, "blueGain": 1.5 },
                     "fps": 4.0,
                     "hflip": true,

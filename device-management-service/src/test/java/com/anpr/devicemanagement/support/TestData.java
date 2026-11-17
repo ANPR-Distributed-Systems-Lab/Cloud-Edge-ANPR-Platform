@@ -42,6 +42,8 @@ public final class TestData {
         DeviceSettings.Photos photos = new DeviceSettings.Photos();
         photos.setWidthPx(4056);
         photos.setJpegQuality(90);
+        photos.setMaxWaitingFrames(3);
+        photos.setMaxStored(2000);
 
         DeviceSettings.Exposure exposure = new DeviceSettings.Exposure();
         exposure.setMode(DeviceSettings.ExposureMode.MANUAL);
@@ -50,6 +52,8 @@ public final class TestData {
         exposure.setMaxExposureUs(4000);
         exposure.setMaxGain(12.0);
         exposure.setTargetBrightness(0.4);
+        exposure.setMeteringTop(0.337);
+        exposure.setMeteringBottom(0.795);
 
         DeviceSettings.WhiteBalance whiteBalance = new DeviceSettings.WhiteBalance();
         whiteBalance.setMode(DeviceSettings.WhiteBalanceMode.DAYLIGHT);

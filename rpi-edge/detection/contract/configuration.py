@@ -5,7 +5,7 @@ edits them (View 4); the device keeps a copy (config/store.py). The ranges below
 """
 from dataclasses import dataclass
 
-from detection.contract.parsing import bounded, matching, one_of, parse
+from detection.contract.parsing import ContractError, bounded, matching, one_of, parse
 
 UUID = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
 MODEL_VERSION = r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}"  # also a directory name in the model cache
@@ -57,6 +57,8 @@ class PhotosConfiguration:
     """The uploaded photo of a frame with detections (delivery/photos.py)."""
     width_px: int = bounded(640, 4056)  # below the frame width the photo is downscaled, keeping 4:3
     jpeg_quality: int = bounded(50, 100)
+    max_waiting_frames: int = bounded(1, 10)  # frames in memory waiting for the encoder, about 37 MB each
+    max_stored: int = bounded(10, 20_000)  # photos kept on the SD card until uploaded
 
 
 @dataclass(frozen=True)
@@ -67,6 +69,8 @@ class ExposureConfiguration:
     max_exposure_us: int = bounded(20, MAX_EXPOSURE_US)
     max_gain: float = bounded(1, 22)
     target_brightness: float = bounded(0.1, 0.8)
+    metering_top: float = bounded(0, 0.95)  # the rows the automatic modes measure, shares of the frame height
+    metering_bottom: float = bounded(0.05, 1)
 
 
 @dataclass(frozen=True)
@@ -102,4 +106,8 @@ class DeviceConfiguration:
     @classmethod
     def from_document(cls, document) -> "DeviceConfiguration":
         """Raises ContractError naming every field that is missing or outside the contract."""
-        return parse(cls, document)
+        configuration = parse(cls, document)
+        exposure = configuration.camera.exposure
+        if exposure.metering_bottom <= exposure.metering_top:  # the one rule across fields of the contract
+            raise ContractError(["camera.exposure.meteringBottom must be greater than meteringTop"])
+        return configuration

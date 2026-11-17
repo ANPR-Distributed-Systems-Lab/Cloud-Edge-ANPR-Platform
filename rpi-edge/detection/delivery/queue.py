@@ -134,19 +134,21 @@ class PersistentQueue[T]:
                     (now, status, reason, row_id))
                 self._db.execute(f"DELETE FROM {self.name} WHERE id = ?", (row_id,))
 
-    def prune(self) -> list[T]:
-        """Drops the items past the retention and beyond max_rows. Returns the waiting items that were dropped."""
+    def prune(self, max_rows: int | None = None) -> list[T]:
+        """Drops the items past the retention and beyond max_rows (the queue's own, or a lower one from the
+        configuration). Returns the waiting items that were dropped."""
+        max_rows = self.max_rows if max_rows is None else min(max_rows, self.max_rows)
         cutoff = self.clock() - self.retention_seconds
         with self._lock, self._db:
             doomed = self._db.execute(
                 f"SELECT id, body FROM {self.name} WHERE item_time < ? "
                 f"OR id NOT IN (SELECT id FROM {self.name} ORDER BY id DESC LIMIT ?)",
-                (cutoff, self.max_rows)).fetchall()
+                (cutoff, max_rows)).fetchall()
             self._db.executemany(f"DELETE FROM {self.name} WHERE id = ?", [(row_id,) for row_id, _ in doomed])
             quarantine = f"{self.name}_quarantine"
             self._db.execute(f"DELETE FROM {quarantine} WHERE item_time < ?", (cutoff,))
             self._db.execute(f"DELETE FROM {quarantine} WHERE id NOT IN "
-                             f"(SELECT id FROM {quarantine} ORDER BY id DESC LIMIT ?)", (self.max_rows,))
+                             f"(SELECT id FROM {quarantine} ORDER BY id DESC LIMIT ?)", (max_rows,))
         return [self.codec.from_document(json.loads(body)) for _, body in doomed]
 
     def _count(self, table: str) -> int:

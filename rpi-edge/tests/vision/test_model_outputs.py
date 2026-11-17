@@ -3,8 +3,9 @@ import numpy as np
 import pytest
 
 from detection.vision import detector as detector_module
+from detection.vision import ocr as ocr_module
 from detection.vision.detector import Detector, parse_crop, parse_output
-from detection.vision.ocr import PlateConfig, decode
+from detection.vision.ocr import PlateConfig, Reader, decode
 
 ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_"
 CONFIG = PlateConfig(ALPHABET, "_", 10, (128, 64), ("readable", "unreadable"))
@@ -125,3 +126,33 @@ def test_plate_config_refuses_a_grayscale_model(tmp_path):
                     "keep_aspect_ratio: false\nimage_color_mode: grayscale\n")
     with pytest.raises(ValueError):
         PlateConfig.load(str(path))
+
+
+PLATE_CONFIG_YAML = ("max_plate_slots: 10\nalphabet: 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_\npad_char: _\n"
+                     "img_height: 64\nimg_width: 128\nkeep_aspect_ratio: false\nimage_color_mode: rgb\n")
+
+
+class FakeOcrSession:
+    def __init__(self, shape):
+        self.shape = shape
+
+    def get_inputs(self):
+        return [type("Input", (), {"name": "input", "shape": self.shape})()]
+
+    def get_outputs(self):
+        return [type("Output", (), {"name": "plate"})()]
+
+
+def reader_with(monkeypatch, tmp_path, shape):
+    (tmp_path / "plate_config.yaml").write_text(PLATE_CONFIG_YAML)
+    monkeypatch.setattr(ocr_module.onnx, "session", lambda _path: FakeOcrSession(shape))
+    return Reader("model.onnx", str(tmp_path / "plate_config.yaml"))
+
+
+def test_the_ocr_input_size_comes_from_the_plate_config(monkeypatch, tmp_path):
+    assert reader_with(monkeypatch, tmp_path, [1, 64, 128, 3]).input_size == (128, 64)
+
+
+def test_an_ocr_whose_input_disagrees_with_its_plate_config_is_refused(monkeypatch, tmp_path):
+    with pytest.raises(ValueError, match="96x48"):
+        reader_with(monkeypatch, tmp_path, [1, 48, 96, 3])

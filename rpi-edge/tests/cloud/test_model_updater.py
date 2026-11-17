@@ -2,6 +2,7 @@ import threading
 
 from samples import configuration
 
+from common.faults import FaultBoard
 from detection.cloud.model_store import ModelsUnavailable
 from detection.cloud.model_updater import CHECK_SECONDS, RETRY_FIRST_SECONDS, ModelUpdater
 from detection.contract.configuration import ModelVersions
@@ -41,18 +42,21 @@ def load(model_set):
     return LoadedModels(model_set.versions, detector=None, reader=None)
 
 
-def updater(store, config=None):
+def updater(store, config=None, faults=None):
     slot = ModelSlot()
-    return ModelUpdater(store, config or FakeConfiguration(), slot, load=load), slot
+    return ModelUpdater(store, config or FakeConfiguration(), slot, faults or FaultBoard(), load=load), slot
 
 
 def test_the_cached_set_is_used_at_once_even_offline():
-    store = FakeStore(cached=model_set("v1"), offline=True)
-    up, slot = updater(store)
+    store, faults = FakeStore(cached=model_set("v1"), offline=True), FaultBoard()
+    up, slot = updater(store, faults=faults)
     up.load_cached()
     assert slot.get().versions.detector == "v1"
     assert up.update_once() == RETRY_FIRST_SECONDS  # the configuration wants v2: keeps trying
     assert slot.get().versions.detector == "v1"  # and keeps detecting with what it has
+    assert [f.text for f in faults.active()] == ["models not updated"]
+    store.offline = False
+    assert up.update_once() == CHECK_SECONDS and faults.active() == []
 
 
 def test_a_new_version_in_the_configuration_is_downloaded_and_swapped_in():
@@ -65,10 +69,11 @@ def test_a_new_version_in_the_configuration_is_downloaded_and_swapped_in():
 
 
 def test_failures_back_off():
-    up, slot = updater(FakeStore(offline=True))
+    faults = FaultBoard()
+    up, slot = updater(FakeStore(offline=True), faults=faults)
     waits = [up.update_once() for _ in range(4)]
     assert waits == sorted(waits) and waits[-1] > waits[0]
-    assert slot.get() is None
+    assert slot.get() is None and [f.text for f in faults.active()] == ["no models"]
 
 
 def test_nothing_happens_before_the_first_configuration():

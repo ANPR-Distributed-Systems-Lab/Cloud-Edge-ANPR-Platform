@@ -436,10 +436,19 @@ What the in-car hardware is wired to (both modes use the same peripherals, `comm
 | Peripheral | Signal | BCM GPIO | Physical pin | Used by |
 |---|---|---|---|---|
 | LCD 4x20 (HD44780 + PCF8574, address `0x27`) | SDA / SCL, 5V, GND | GPIO2 / GPIO3 | 3 / 5, 2 or 4, any GND | both modes |
-| LED | anode through a resistor | GPIO17 | 11 | both modes |
+| LED run (green) | anode through ~1 kΩ | GPIO5 | 29 | both modes |
+| LED net (green) | anode through ~1 kΩ | GPIO6 | 31 | detection |
+| LED gps (green) | anode through ~1 kΩ | GPIO13 | 33 | detection |
+| LED queue (yellow) | anode through ~1 kΩ | GPIO19 | 35 | both modes |
+| LED alert (red) | anode through ~1 kΩ | GPIO26 | 37 | both modes (recording in collection) |
+| LED fault (red) | anode through ~1 kΩ | GPIO12 | 32 | both modes |
 | Buzzer | signal | GPIO27 | 13 | both modes |
-| Tact switch | to GND | GPIO22 | 15 | both modes: a long press (2 s) switches the mode; a short one starts / stops recording in collection |
+| Run switch | to GND (internal pull-up) | GPIO22 | 15 | both modes: a long press (2 s) switches the mode; a short one starts / stops recording or the detection |
+| Page switch | to GND (internal pull-up) | GPIO23 | 16 | both modes: the next LCD page, a long press the home page |
 | GNSS module (Waveshare LC76G) | module TX -> Pi RXD, module RX -> Pi TXD, VCC to 3.3V, GND | GPIO15 / GPIO14 (UART0, `/dev/ttyAMA0`) | 10 / 8, 1, 34 | detection (position, track) |
+
+Each LED goes from its GPIO through the resistor to the anode, the cathode (short leg) to GND. To check the wiring
+part by part, run `tools/wiring_check.py` (its docstring has the commands).
 
 ### GNSS module (Waveshare LC76G)
 

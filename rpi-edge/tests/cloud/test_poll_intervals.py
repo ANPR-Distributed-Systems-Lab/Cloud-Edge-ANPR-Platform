@@ -2,6 +2,7 @@
 from fakes import FakeApi, response
 from samples import configuration_document
 
+from common.faults import FaultBoard
 from detection.cloud.alert_poll import UNCONFIGURED_POLL_SECONDS, AlertPoller
 from detection.cloud.config_poll import ConfigPoller
 from detection.config.store import ConfigurationStore
@@ -39,14 +40,15 @@ def test_the_configuration_is_polled_at_its_own_interval_once_there_is_one(tmp_p
     api = FakeApi(response(200, configuration_document(intervals={"configPollSeconds": 45}), {"ETag": '"1"'}),
                   response(304))
     stop = StopAfter(2)
-    ConfigPoller(api, URL, store).run(stop)
+    ConfigPoller(api, URL, store, FaultBoard()).run(stop)
     assert stop.waits == [45, 45]  # the first answer already sets the interval
 
 
 def test_without_a_configuration_the_poll_retries_soon(tmp_path):
-    stop = StopAfter(2)
-    ConfigPoller(FakeApi(response(500), response(500)), URL, ConfigurationStore(tmp_path / "config")).run(stop)
+    stop, faults = StopAfter(2), FaultBoard()
+    ConfigPoller(FakeApi(response(500), response(500)), URL, ConfigurationStore(tmp_path / "config"), faults).run(stop)
     assert stop.waits == [10.0, 10.0]
+    assert [f.code for f in faults.active()] == ["no_config"]
 
 
 def test_the_alert_list_is_polled_at_its_interval(tmp_path):

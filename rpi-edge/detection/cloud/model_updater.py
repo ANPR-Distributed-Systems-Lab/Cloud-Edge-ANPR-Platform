@@ -4,11 +4,15 @@ Runs in its own thread. At startup it hands the cached set to the frame loop at 
 the device detects without network. Whenever the loaded versions differ from the configuration it fetches the
 download URLs, installs the files and loads the new set, while the loop goes on with the old one; then it swaps
 them (vision/models.py). A failure keeps the old set and is retried with a growing delay.
+
+Fault (common/faults.py) while the device does not run the versions of its configuration after a failure: no
+models at all, a set that does not load, or an update that does not arrive; it clears once the versions run.
 """
 import threading
 from collections.abc import Callable
 from dataclasses import asdict
 
+from common.faults import FaultBoard
 from common.jsonlog import log
 from detection.cloud.model_store import ModelStore, ModelsUnavailable
 from detection.config.store import ConfigurationStore
@@ -17,14 +21,16 @@ from detection.vision.models import LoadedModels, ModelSet, ModelSlot
 CHECK_SECONDS = 5.0  # how soon a changed configuration is noticed
 RETRY_FIRST_SECONDS = 5.0
 RETRY_MAX_SECONDS = 300.0
+FAULT = "models"
 
 
 class ModelUpdater:
-    def __init__(self, store: ModelStore, configuration: ConfigurationStore, slot: ModelSlot,
+    def __init__(self, store: ModelStore, configuration: ConfigurationStore, slot: ModelSlot, faults: FaultBoard,
                  load: Callable[[ModelSet], LoadedModels] = LoadedModels.load) -> None:
         self.store = store
         self.configuration = configuration
         self.slot = slot
+        self.faults = faults
         self.load = load
         self.failures = 0
 
@@ -35,6 +41,7 @@ class ModelUpdater:
                 wait = self.update_once()
             except Exception as e:  # never let the updater thread die; a model that fails to load lands here
                 log("models_update_error", level="error", error=repr(e))
+                self.faults.report(FAULT, "model load failed")
                 wait = self._retry_delay()
             stop.wait(wait)
 
@@ -50,6 +57,7 @@ class ModelUpdater:
         loaded = self.slot.get()
         if configuration is None or (loaded is not None and loaded.versions == configuration.models):
             self.failures = 0
+            self.faults.clear(FAULT)
             return CHECK_SECONDS
         wanted = configuration.models
         try:
@@ -57,12 +65,14 @@ class ModelUpdater:
         except ModelsUnavailable as e:
             log("models_update_failed", level="warning", detector=wanted.detector, ocr=wanted.ocr, error=str(e),
                 running=None if loaded is None else asdict(loaded.versions))
+            self.faults.report(FAULT, "no models" if loaded is None else "models not updated")
             return self._retry_delay()
         self.slot.put(self.load(model_set))
         log("models_loaded", source="cloud", detector=model_set.versions.detector, ocr=model_set.versions.ocr)
         if model_set.versions != wanted:  # the configuration changed again meanwhile
             return self._retry_delay()
         self.failures = 0
+        self.faults.clear(FAULT)
         return CHECK_SECONDS
 
     def _retry_delay(self) -> float:

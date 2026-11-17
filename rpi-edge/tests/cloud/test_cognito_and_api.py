@@ -6,7 +6,7 @@ import time
 import pytest
 from fakes import FakeHttp, response
 
-from detection.cloud.api import Api
+from detection.cloud.api import Api, CloudHealth
 from detection.cloud.cognito import AuthError, CognitoAuth
 from detection.cloud.transport import NetworkError
 
@@ -132,3 +132,27 @@ def test_api_without_auth_sends_no_token():
     http = FakeHttp(response(200))
     Api(http, None, BASE).request("GET", BASE + "/api/v1/device/config", trace_id="t")
     assert "Authorization" not in http.requests[0]["headers"]
+
+
+def test_the_health_tells_a_failed_sign_in_and_a_403_for_the_screen():
+    class NoToken(StubAuth):
+        def token(self):
+            raise AuthError("device credentials unusable")
+
+    url = BASE + "/api/v1/device/config"
+    api = Api(FakeHttp(), NoToken(), BASE)
+    with pytest.raises(AuthError):
+        api.request("GET", url, trace_id="t")
+    assert api.health.sign_in_failed and api.health.online is False
+
+    api = Api(FakeHttp(response(403), response(200)), StubAuth(), BASE)
+    api.request("GET", url, trace_id="t")
+    assert api.health.forbidden and not api.health.sign_in_failed and api.health.online
+    api.request("GET", url, trace_id="t")
+    assert not api.health.forbidden
+
+
+def test_cloud_health_follows_the_latest_request():
+    assert CloudHealth().online is None
+    assert CloudHealth(last_answer_at=5.0, last_failure_at=3.0).online is True
+    assert CloudHealth(last_answer_at=5.0, last_failure_at=6.0).online is False

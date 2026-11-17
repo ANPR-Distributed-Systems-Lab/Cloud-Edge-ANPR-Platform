@@ -12,6 +12,13 @@ MAX_RATIO = 4.0  # largest correction per update (the measurement is not linear 
 DEADBAND = 0.04  # ignore brightness errors smaller than this ratio
 
 
+def metered_rows(height: int, top: float, bottom: float) -> tuple[int, int]:
+    """Rows [y0, y1) of an image of `height` rows whose brightness is measured: the band top..bottom (shares of the
+    height), at full width in both modes. Never empty, so a band thinner than a row still measures one."""
+    y0 = min(round(top * height), height - 1)
+    return y0, max(round(bottom * height), y0 + 1)
+
+
 def _clamp(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
 

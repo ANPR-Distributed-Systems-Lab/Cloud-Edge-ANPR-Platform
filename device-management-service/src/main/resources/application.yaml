@@ -109,7 +109,7 @@ app:
           mode: DAYLIGHT                  # a preset of the camera, or MANUAL with the gains below
           red-gain: 2.0                   # red gain of MANUAL
           blue-gain: 1.6                  # blue gain of MANUAL
-        fps: 3.0                          # the most frames analysed per second (the Pi manages ~1.6)
+        fps: 3.0                          # the most frames analysed per second
         # The devices built so far hold the camera upside down.
         hflip: true                       # mirror horizontally
         vflip: true                       # flip vertically

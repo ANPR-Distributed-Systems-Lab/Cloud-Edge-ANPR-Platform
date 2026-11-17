@@ -1,4 +1,5 @@
-"""What the driver sees and hears in detection mode: the 4x20 LCD, the buzzer and the LED (common/peripherals.py).
+"""What the driver sees and hears in detection mode: the 4x20 LCD, the buzzer and the LED (common/peripherals.py,
+opened by main.py and shared with the collection mode).
 
 Status screen, refreshed every second:
 
@@ -21,7 +22,7 @@ from datetime import UTC, datetime
 
 from common import system_info
 from common.jsonlog import log
-from common.peripherals import LCD_COLS, Beeper, Lcd, open_led
+from common.peripherals import LCD_COLS, Beeper, Lcd
 from detection.cloud.api import CloudHealth
 from detection.config.store import ConfigurationStore
 from detection.contract.alerts import Alert
@@ -130,10 +131,6 @@ class Feedback:
         self._alert: Alert | None = None
         self._alert_until = 0.0
         self._ready = False
-
-    @classmethod
-    def open(cls, sources: StatusSources) -> "Feedback":
-        return cls(sources, Lcd.open(), Beeper.open(), open_led())
 
     def on_frame(self, frame: Frame, result: FrameResult) -> None:
         """A frame observer of the loop (loop.py)."""

@@ -1,5 +1,5 @@
-# One service for both modes: EDGE_MODE in .env picks what main.py runs (README.md). Only one container
-# ever holds the camera: changing the mode recreates this one.
+# One service for both modes: EDGE_MODE in .env is the mode main.py starts in, a long press of the tact switch
+# switches between them inside this container (README.md). Only this one container ever holds the camera.
 services:
   rpi-edge:
     build: .
@@ -8,7 +8,7 @@ services:
     restart: unless-stopped   # comes back by itself after power-up in the car
     stop_grace_period: 40s    # time to flush the last frames and unmount the USB stick on `docker stop`
     env_file:
-      - path: .env            # EDGE_MODE and the cloud endpoints; copy .env.example. Without it: collection mode
+      - path: .env            # EDGE_MODE and the cloud endpoints; copy .env.example. Without it: detection mode
         required: false
     volumes:
       - /dev:/dev                # camera, USB hot-plug, and picamera2 uses system RAM for buffers when it sees the host's /dev

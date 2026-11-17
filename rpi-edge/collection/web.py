@@ -12,6 +12,7 @@ from collection import settings as cfg
 from collection.camera_service import CameraService
 from collection.storage import Storage
 from common.jsonlog import log
+from common.sensor import MAX_FPS
 
 UI_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui", "index.html")
 
@@ -59,8 +60,7 @@ def make_server(app: App, port: int) -> server.HTTPServer:
                 "ok": True,
                 "settings": app.store.get(),
                 "status": app.camera.status(),
-                "resolutions": list(cfg.RESOLUTIONS),
-                "max_fps": cfg.MAX_SENSOR_FPS,
+                "max_fps": MAX_FPS,
             }
 
         # --- routes ------------------------------------------------------------------------------------------

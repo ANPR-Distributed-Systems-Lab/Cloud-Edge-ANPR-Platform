@@ -8,7 +8,8 @@ USB stick that can be read directly on Windows. The code is in `collection/`.
 ## Run it
 
 From `rpi-edge/`, with the Docker context pointing at the Pi (see `RASPBERRY_PI_SETUP.md`), and
-`EDGE_MODE=collection` in `.env` (or no `.env` at all, see [README.md](README.md)):
+`EDGE_MODE=collection` in `.env` ([README.md](README.md)). Or, from the detection mode, **hold the tact switch for
+2 s**: the detection mode stops completely and the collection mode starts; hold it again to go back.
 
 ```bash
 docker compose up --build
@@ -30,9 +31,32 @@ Settings are saved in a Docker volume (`/config`), they survive rebuilds and reb
 | Auto gain | Exposure time fixed, gain automatic (up to its limit) |
 | Auto exposure | Gain fixed, exposure time automatic (up to its limit) |
 
-Also: target brightness for the auto modes, white balance (presets, manual R/B gains, or "lock current" to
-freeze what the camera currently measures), recording fps, recording resolution, JPEG quality, image flips,
-minimum free space and autostart.
+Also: target brightness for the auto modes, the **metered band**, white balance (presets, manual R/B gains, or
+"lock current" to freeze what the camera currently measures), recording fps, JPEG quality, image flips, minimum
+free space and autostart. Frames are always the full sensor, 4056x3040, as in the detection mode.
+
+The metered band (top and bottom, shares of the frame height, at full width) is the area whose brightness the auto
+modes measure; the preview shows it as two green dashed lines. Set it to where the plates pass, so the sky or the
+bonnet does not decide the exposure.
+
+**Carrying settings over to the detection mode.** The collection mode is the place to experiment: its settings
+are its own, typed in here, and it never reads the device configuration. Values that work are entered by hand
+into the device configuration in the web application (View 4). The camera settings have the same meaning, ranges
+and defaults in both (the defaults of a new device in device-management, `tests/collection/` checks them), only
+spelled differently:
+
+| Here | Device configuration (`camera.`) |
+|---|---|
+| mode `manual` / `auto` / `auto_gain` / `auto_exposure` | `exposure.mode` `MANUAL` / `AUTO` / `AUTO_GAIN` / `AUTO_EXPOSURE` |
+| exposure time, exposure time limit (µs, at most 80 000) | `exposure.exposureUs`, `exposure.maxExposureUs` |
+| gain, gain limit | `exposure.gain`, `exposure.maxGain` |
+| target brightness (%) | `exposure.targetBrightness` (0 to 1: 40 % is 0.4) |
+| metered band top / bottom | `exposure.meteringTop`, `exposure.meteringBottom` |
+| white balance preset or manual, red / blue gain | `whiteBalance.mode` (upper case), `whiteBalance.redGain`, `whiteBalance.blueGain` |
+| flip horizontally / vertically | `hflip`, `vflip` |
+
+The frame rates are not the same setting: here it is the recording rate, there `camera.fps` is the most frames the
+detection mode analyses per second.
 
 Gain 1.0 is about ISO 100 (gain 4.0 is about ISO 400). For moving cars use a short exposure (1/1000 s or less)
 and let the gain make up for the light, a blurred plate is useless for training. For a consistent data set use
@@ -46,12 +70,14 @@ of the same scene and light). Click the live preview to move the crop.
 **3. Recording.** Start/stop, counters, write speed, estimated time until the stick is full, mount and
 safe-eject buttons. Eject (or stop recording and wait for the LED to go off) before pulling the stick out.
 
-fps, resolution, JPEG quality and image flips cannot be changed while recording. Exposure and white balance can.
+fps, JPEG quality and image flips cannot be changed while recording. Exposure and white balance can.
 
 ## In the car (no laptop)
 
-- **Tact switch (GPIO22)** starts/stops recording. **LED (GPIO17)** is on while recording. **Buzzer (GPIO27)**:
-  one beep on start, two on stop, one long beep on error.
+- **Tact switch (GPIO22)**: a short press starts/stops recording; holding it for 2 s switches to the detection
+  mode (two long beeps, "SWITCHING TO" on the LCD; recording stops and the USB stick is ejected first).
+  **LED (GPIO17)** is on while recording. **Buzzer (GPIO27)**: one beep on start, two on stop, one long beep on
+  error.
 - **LCD** shows state and frame counter, free space on the stick, current shutter and ISO, IP address and CPU
   temperature (`UV!` appears when the Pi reports under-voltage).
 - Optional **autostart**: recording starts by itself once the USB stick is available.
@@ -84,7 +110,7 @@ scene was a dim room. Real scenes give larger JPEGs (3 to 5 MB at 12 MP).
 - 12 MP (4056x3040) JPEG: about 47 ms per frame per encoder thread, 2 threads. No dropped frames at 11.5 fps
   (the sensor limit for this mode is about 11.7 fps) and over 2 minutes at 5 fps (649 frames, 0 dropped).
 - Process memory stays flat (no leak over 650+ frames), CPU temperature rose from 35 to 37 °C.
-- Sensor limits per resolution (fps): 4056x3040 11.7, 4056x2160 16.3, 2028x1520 45, 2028x1080 62, 1332x990 101.
+- The sensor delivers 4056x3040 at up to 11.7 fps.
 - At 12 MP and 10 fps real scenes need about 40 to 50 MB/s of sustained write speed. Use a USB 3 stick in a blue
   USB 3 port, and watch the "dropped" counter and the write speed in the page on the first drive.
 

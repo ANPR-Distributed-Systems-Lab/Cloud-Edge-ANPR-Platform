@@ -27,7 +27,7 @@ Decided 2026-11-12. Each line is the decision, the reason follows in the section
 
 | Area | Decision |
 |---|---|
-| Modes | One image and one Python project; `EDGE_MODE` in `rpi-edge/.env` picks `collection` or `detection` ([README](README.md)) |
+| Modes | One image and one Python project; `EDGE_MODE` in `rpi-edge/.env` is the mode the container starts in, a 2 s press of the tact switch switches to the other one, which starts only once the first has stopped ([README](README.md)) |
 | Runtime | ONNX Runtime on the CPU for both models; opencv pinned to the version of the golden preprocessing checksums |
 | Preprocessing parity | Identical pixels to ml-models on x86; on the Pi the detector input is identical and the OCR crop within ±1 on at most 0.1 % of its values ([section 2](#2-pipeline)) |
 | Send rule | Geometry before the OCR, then format / confidence / readability per frame, then a cooldown per plate text; no tracking yet ([section 3](#3-send-rule)) |
@@ -172,8 +172,8 @@ pipeline and the pause with that one object, so a configuration that arrives mea
 change of the flips or the sensor rate restarts the camera, a change of `models` starts the model update
 ([section 6](#6-models)).
 
-`camera.fps` is the most frames analysed per second, an upper limit: the analysis takes about 600 ms a frame
-([section 13](#13-measured-on-the-pi)), so above ~1.6 it changes nothing. The exposure times (`exposureUs`,
+`camera.fps` is the most frames analysed per second, an upper limit: with detector v3 a frame takes about 210 ms
+([section 13](#13-measured-on-the-pi)), so above ~4.8 it changes nothing. The exposure times (`exposureUs`,
 `maxExposureUs`) are at most 80 ms in the contract: an exposure must end before the next frame starts, and the
 sensor runs at 10 fps or faster (83 ms per frame at 11.7 fps), so a longer value could not be applied.
 
@@ -385,7 +385,9 @@ GPS 3D 13   AL 5        the GNSS fix and satellites used, alerts on the list (? 
 - One short beep when the first frame is analysed: the mode is running. The LED is on while frames are analysed.
 - `NET` follows the latest request to the platform (`cloud/api.py`, `CloudHealth`): offline after a request
   without an answer, ok after one with any answer.
-- Every part is optional: without an LCD, buzzer or LED the mode works the same and only the log tells.
+- Holding the tact switch for 2 s switches to the collection mode: the frame loop, the workers and the camera stop
+  first, the queues stay on the SD card and go out after the switch back. A short press does nothing here.
+- Every part is optional: without an LCD, buzzer, LED or switch the mode works the same and only the log tells.
 
 ## 12. Logs
 

@@ -23,7 +23,7 @@ class Storage:
         self.mount_point = DATA_DIR
         self._lock = threading.RLock()
         self.error: str | None = None
-        self._ejected_device: str | None = None  # no automatic re-mount of a stick the user ejected, until it is unplugged
+        self._ejected_device: str | None = None  # an ejected stick is not mounted again until it is unplugged
 
     @property
     def root(self) -> str:

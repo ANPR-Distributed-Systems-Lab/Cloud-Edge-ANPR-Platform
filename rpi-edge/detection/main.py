@@ -15,13 +15,13 @@ own, started here:
   feedback        the LCD, buzzer and LED in the car                        feedback.py
 
 The loop starts once there is a configuration (from the cloud or the copy on the device) and a set of models (the
-cache or a download).
+cache or a download). main.py runs the mode until it is switched or the container stops.
 """
-import signal
 import threading
 from collections.abc import Callable
 
 from common.jsonlog import log
+from common.peripherals import Peripherals
 from detection.cloud.alert_poll import AlertPoller
 from detection.cloud.api import Api
 from detection.cloud.cognito import CognitoAuth
@@ -54,13 +54,13 @@ WORKER_JOIN_SECONDS = 20  # a request in flight finishes or times out; the queue
 Worker = Callable[[threading.Event], None]
 
 
-def main() -> None:
+def run(stop: threading.Event, peripherals: Peripherals) -> None:
+    """Runs until `stop`, then closes the camera and waits for the workers, so the collection mode can take over."""
     try:
         env = Environment.from_env()
     except EnvironmentIncomplete as e:
         log("detection_not_configured", level="error", error=str(e))
-        raise SystemExit(1) from None
-    stop = _stop_on_signals()
+        return
     http = Http()
     auth = CognitoAuth(env.cognito_region, env.cognito_client_id, env.credentials_file, http) if env.signs_in else None
     api = Api(http, auth, env.api_base_url)
@@ -68,7 +68,8 @@ def main() -> None:
     models, alerts, frames = ModelSlot(), AlertWatch(), FrameCounter()
     queues = Queues.open(env.state_dir / "outbox")
     gps, gps_workers = _gnss(env)
-    feedback = Feedback.open(StatusSources(configuration, models, queues.detections, gps, api.health, alerts))
+    feedback = Feedback(StatusSources(configuration, models, queues.detections, gps, api.health, alerts),
+                        peripherals.lcd, peripherals.beeper, peripherals.led)
     photos = FrameSaver(env.state_dir / "frames", queues.images, configuration)
     log("detection_starting", cloud=env.api_base_url, authenticated=auth is not None, gps=_gps_kind(env),
         pending=queues.detections.pending())
@@ -93,7 +94,7 @@ def main() -> None:
         FrameLoop(camera, Pipeline(), configuration, models, gps, queues.detections,
                   observers=(feedback.on_frame, photos.submit, lambda frame, result: frames.tick())).run(stop)
 
-    log("shutting_down")
+    log("detection_stopping")
     for worker in workers:
         worker.join(timeout=WORKER_JOIN_SECONDS)
     queues.close()
@@ -114,13 +115,6 @@ def _gnss(env: Environment) -> tuple[LocationSource, dict[str, Worker]]:
 
 def _gps_kind(env: Environment) -> str:
     return "module" if env.gps_device else "fixed" if env.gps_fixed_location else "none"
-
-
-def _stop_on_signals() -> threading.Event:
-    stop = threading.Event()
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        signal.signal(sig, lambda *_: stop.set())
-    return stop
 
 
 def _start_workers(targets: dict[str, Worker], stop: threading.Event) -> list[threading.Thread]:

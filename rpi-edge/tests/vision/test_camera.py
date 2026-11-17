@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from samples import configuration
 
-from detection.contract.configuration import MAX_EXPOSURE_US
+from common.sensor import MAX_EXPOSURE_US
 from detection.vision.camera import Camera
 
 

@@ -12,6 +12,7 @@ import com.anpr.operations.shared.error.ErrorCodes;
 import com.anpr.operations.shared.error.NotFoundException;
 import com.anpr.operations.shared.geo.Wgs84;
 import com.anpr.operations.shared.security.CurrentAccount;
+import com.anpr.operations.shared.time.TimeRange;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Limit;
@@ -28,7 +29,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-/** Detections: stored from the edge events queue, read by View 1 (search), View 3 (live feed) and D18 (one detection). */
+/** Detections: stored from the edge events queue, read by Views 1, 2 and 3 and D18 (one detection). */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -107,6 +108,14 @@ public class DetectionService {
                                                 OffsetDateTime storedUntil, int limit) {
         return withAlerts(accountId, detectionRepository.findStoredAfter(accountId, afterStoredAt, afterId,
                 storedUntil, Limit.of(limit)));
+    }
+
+    /** View 2: detections within the radius, newest first, with their alerts. */
+    @Transactional(readOnly = true)
+    public List<DetectionWithAlert> withinRadius(UUID accountId, double lat, double lon, int radiusMeters,
+                                                 TimeRange period, int limit) {
+        return withAlerts(accountId, detectionRepository.findWithinRadius(accountId, lat, lon, radiusMeters,
+                period.from(), period.to(), limit));
     }
 
     private List<DetectionWithAlert> withAlerts(UUID accountId, List<Detection> detections) {

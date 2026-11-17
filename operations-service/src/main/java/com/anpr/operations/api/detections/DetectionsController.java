@@ -6,6 +6,7 @@ import com.anpr.operations.api.generated.model.DetectionResponse;
 import com.anpr.operations.api.generated.model.DetectionSortField;
 import com.anpr.operations.api.generated.model.LiveFeedResponse;
 import com.anpr.operations.api.generated.model.PlateSuggestionList;
+import com.anpr.operations.api.generated.model.RadialAnalysisResponse;
 import com.anpr.operations.api.generated.model.SortDirection;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -32,6 +33,14 @@ public class DetectionsController implements DetectionsApi {
     @Override
     public ResponseEntity<PlateSuggestionList> suggestPlates(String q, Integer limit) {
         return facade.suggestPlates(q, limit);
+    }
+
+    /** View 2. */
+    @Override
+    public ResponseEntity<RadialAnalysisResponse> analyzeRadius(Double lat, Double lon, Integer radiusMeters,
+                                                                OffsetDateTime from, OffsetDateTime to,
+                                                                Integer trackIntervalSeconds) {
+        return facade.radialAnalysis(lat, lon, radiusMeters, from, to, trackIntervalSeconds);
     }
 
     /** View 3. */

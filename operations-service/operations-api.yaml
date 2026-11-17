@@ -17,9 +17,7 @@ security:
   - cognitoJwt: []
 tags:
   - name: detections
-    description: Everything under /api/v1/detections - View 1 (search), View 3 (live feed) and a single detection (D18)
-  - name: radialAnalysis
-    description: View 2 - radial analysis and route verification (PostGIS); joins the detections tag once implemented
+    description: Everything under /api/v1/detections - View 1 (search), View 2 (radial analysis), View 3 (live feed) and a single detection (D18)
   - name: alerts
     description: View 6 - alert management panel, and the alert list polled by the Raspberry Pi edge device
 
@@ -87,9 +85,9 @@ paths:
 
   /api/v1/detections/radial-analysis:
     get:
-      tags: [radialAnalysis]
+      tags: [detections]
       operationId: analyzeRadius
-      summary: Detections within a radius of a point, plus the device route
+      summary: View 2 - Detections within a radius of a point, plus the device route
       description: |
         View 2. Detections within radiusMeters of the given point in the time range,
         overlaid on the route of the edge device in the same time range.
@@ -97,6 +95,7 @@ paths:
         otherwise 400 VALIDATION_FAILED; at most 5000 detections and at most 5000 points per route, each with its own
         truncated flag. The density of the route is chosen by the client with trackIntervalSeconds: to get a whole
         range within the limit, use at least (range in seconds) / 5000, e.g. 121 for 7 days.
+        A "to" that is not after "from" returns 400 INVALID_TIME_RANGE.
       parameters:
         - name: lat
           in: query
@@ -117,9 +116,9 @@ paths:
         - name: trackIntervalSeconds
           in: query
           description: |
-            Minimal time between route points: the time range is split into windows of this length and the route has
-            at most one point per window, the first one recorded in it. 1 returns every point (the device records at
-            most one per second).
+            Minimal time between route points: the time range is split into windows of this length, starting at from,
+            and the route has at most one point per window, the first one recorded in it. 1 returns every point (the
+            device records at most one per second).
           schema: { type: integer, minimum: 1, maximum: 180, default: 1 }
       responses:
         '200':
@@ -573,7 +572,7 @@ components:
           items: { $ref: '#/components/schemas/DetectionResponse' }
         tracks:
           type: array
-          description: Device route for the whole time range, not clipped to the radius. One element per device (currently one device per account).
+          description: Device routes for the whole time range, not clipped to the radius. One element per device that recorded positions in the account within the time range (more than one after a device was replaced).
           items: { $ref: '#/components/schemas/DeviceTrack' }
         truncated:
           type: boolean

@@ -3,8 +3,10 @@ package com.anpr.operations.internal.locations;
 import com.anpr.operations.internal.devices.DevicePairingService;
 import com.anpr.operations.internal.locations.model.DeviceLocation;
 import com.anpr.operations.internal.locations.repository.DeviceLocationRepository;
+import com.anpr.operations.internal.locations.repository.DevicePoint;
 import com.anpr.operations.internal.locations.repository.LocationPoint;
 import com.anpr.operations.shared.geo.Wgs84;
+import com.anpr.operations.shared.time.TimeRange;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -48,5 +50,12 @@ public class DeviceLocationService {
     @Transactional(readOnly = true)
     public Optional<LocationPoint> latest(UUID accountId, UUID deviceId) {
         return deviceLocationRepository.findLatest(accountId, deviceId);
+    }
+
+    /** View 2: thinned routes of every device of the account in the range, oldest point first per device. */
+    @Transactional(readOnly = true)
+    public List<DevicePoint> tracks(UUID accountId, TimeRange period, int intervalSeconds, int limitPerDevice) {
+        return deviceLocationRepository.findTracks(accountId, period.from(), period.to(), intervalSeconds,
+                limitPerDevice);
     }
 }

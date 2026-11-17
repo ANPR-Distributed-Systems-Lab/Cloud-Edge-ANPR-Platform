@@ -1,9 +1,6 @@
 package com.anpr.operations.internal.alerts.model;
 
-import java.time.OffsetDateTime;
+import com.anpr.operations.shared.time.TimeRange;
 
-public record AlertFilter(
-        String plate,
-        OffsetDateTime from,
-        OffsetDateTime to
-) { }
+public record AlertFilter(String plate, TimeRange period) {
+}

@@ -20,12 +20,13 @@ Endpoints of the diagram, as changed by deviations D11-D16 — the contract must
 | `PUT /api/v1/alerts/{alertId}` | 6 | Update alert text (the plate is immutable) |
 | `DELETE /api/v1/alerts/{alertId}` | 6 | Delete alert |
 
-- Additions not on the diagram, **pending agreement with the teammate** (then add them to the diagram, or remove from the contract): `GET /api/v1/alerts/{alertId}` (edit form, refresh after 409), `GET /api/v1/detections/{detectionId}` (details of one detection, D18) and `GET /api/v1/detections/plate-suggestions` (lightweight autocomplete). Fallback if rejected: autocomplete as a parameter of the search.
+- Additions not on the diagram, agreed: `GET /api/v1/detections/{detectionId}` (details of one detection, D18).
+- Additions not on the diagram, **pending agreement with the teammate** (then add them to the diagram, or remove from the contract): `GET /api/v1/alerts/{alertId}` (edit form, refresh after 409) and `GET /api/v1/detections/plate-suggestions` (lightweight autocomplete). Fallback if rejected: autocomplete as a parameter of the search.
 - Out of scope: Views 4 (Raspberry Pi settings) and 5 (device health) — DynamoDB, another service. The frontend (same owner) consumes that service's contract.
 - Diagram response fields include `id_konta`; the contract omits it from responses (D3) and it is never an input parameter (see section 2).
 - Detections return a presigned GET `imageUrl` instead of `s3_key` (D4, proposal).
 - Indexes: the diagram lists single-column B-Trees; we use composite indexes `(account_id, detected_at)` etc. (D1, section 5) — a deliberate design decision for the thesis.
-- Deviations are referenced in the contract as `D1`..`D18`, `D24` and `D25` — never write `#` after a space in an unquoted YAML string (it starts a comment and truncates the text).
+- Deviations are referenced in the contract as `D1`..`D18` and `D24`..`D27` — never write `#` after a space in an unquoted YAML string (it starts a comment and truncates the text).
 - Naming is open: diagram says "Alerts-And-Views-Service", repo directory is `operations-service`.
 
 ## 1. Package layout
@@ -41,12 +42,15 @@ com.anpr.operations
 
 Areas: `search` (View 1), `radial` (View 2), `livefeed` (View 3), `alerts` (View 6 + device alert list), `detections`, `locations`.
 
+- In `api/`, one package, one contract tag, one controller and one facade per URL tree: `api/detections/` serves everything under `/api/v1/detections` (Views 1 and 3, D18; View 2 joins the `detections` tag once implemented), `api/alerts/` serves `/api/v1/alerts`. Mappers sit next to them.
+- `internal/` is split by data, not by view (`detections`, `locations`, `devices`, `alerts`), because one view may read several of them.
+
 - Split by business area, not by class kind.
 - Inside an `internal/<area>/`: services and exceptions (what other areas use) in the area root, entities and value records in `model/`, repositories, specifications and query projections in `repository/`.
 - `internal/` never imports from `api/` or `messaging/`. Message DTOs and generated API DTOs are converted at the boundary.
 - Entities never leave `internal/`. Responses are always generated OpenAPI models, mapped with MapStruct (`@Mapper`), never field by field in a service.
 - Controller = take request, call one facade/service method, return. No business conditions.
-- Facade only when an operation composes more than one source. One delegation = call the service directly.
+- Every controller calls only a facade: one facade per URL tree, `AlertsFacade` for `/alerts` and `DetectionsFacade` (in `api/detections/`) for everything under `/detections/*`. The facade holds what is not the service's business: choosing a variant by caller, sorting and filters, ETag, `Location`, combining services, MapStruct mapping; it returns the `ResponseEntity`. Controllers never call services or mappers.
 
 ## 2. Contract first (OpenAPI)
 
@@ -78,7 +82,7 @@ Areas: `search` (View 1), `radial` (View 2), `livefeed` (View 3), `alerts` (View
 - Schema only via Flyway. Never edit a migration that has been merged. Changes follow expand → migrate → contract.
 - `ddl-auto: validate`.
 - Coordinates as `geography(Point, 4326)` so `ST_DWithin` works in metres; GiST index on them.
-- Composite indexes matching real queries, e.g. `(account_id, detected_at DESC)`, `(account_id, plate, detected_at DESC)`; `pg_trgm` GIN for plate autocomplete.
+- Composite indexes matching real queries, e.g. `(account_id, detected_at DESC)`, `(account_id, plate varchar_pattern_ops, detected_at DESC)`; `varchar_pattern_ops` makes the plate prefix autocomplete (`LIKE 'WA1%'`) an index range. The LIKE pattern is built in Java, never concatenated in SQL (the planner would not see the prefix).
 - `@Transactional(readOnly = true)` on every read path.
 - Transaction boundary = business operation, in the service or facade. Never in controllers or repositories.
 - No network calls (SNS, S3, HTTP) inside a transaction. Publish events with `@TransactionalEventListener(phase = AFTER_COMMIT)`. Known gap (commit ok, publish failed) is documented; transactional outbox is the upgrade path.

@@ -24,4 +24,8 @@ public interface AlertRepository extends JpaRepository<Alert, UUID>, JpaSpecific
             WHERE a.accountId = :accountId AND a.plate IN :plates
             """)
     List<PlateAlert> findAlertIdsByPlates(UUID accountId, Collection<String> plates);
+
+    /** Only id and version: enough to tell whether the device list changed, without computing lastDetectedAt. */
+    @Query("SELECT a.alertId AS alertId, a.version AS version FROM Alert a WHERE a.accountId = :accountId")
+    List<AlertVersion> findVersionsByAccountId(UUID accountId);
 }

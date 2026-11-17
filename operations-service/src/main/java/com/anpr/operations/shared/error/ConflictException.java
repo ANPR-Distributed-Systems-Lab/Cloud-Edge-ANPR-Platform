@@ -4,4 +4,8 @@ public class ConflictException extends BusinessException{
     public ConflictException(ErrorCodes code, String message) {
         super(code, message);
     }
+
+    public ConflictException(ErrorCodes code, String message, Throwable cause) {
+        super(code, message, cause);
+    }
 }

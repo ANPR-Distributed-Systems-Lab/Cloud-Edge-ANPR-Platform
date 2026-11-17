@@ -1,6 +1,6 @@
 package com.anpr.operations.internal.devices;
 
-import com.anpr.operations.internal.accounts.repository.AccountRepository;
+import com.anpr.operations.internal.accounts.AccountService;
 import com.anpr.operations.internal.devices.model.Device;
 import com.anpr.operations.internal.devices.repository.DeviceRepository;
 import lombok.RequiredArgsConstructor;
@@ -20,7 +20,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class DevicePairingService {
     private final DeviceRepository deviceRepository;
-    private final AccountRepository accountRepository;
+    private final AccountService accountService;
 
     @Transactional
     public void pair(UUID deviceId, UUID accountId, long version) {
@@ -30,7 +30,7 @@ public class DevicePairingService {
             return;
         }
         // The account first: devices.account_id references accounts.
-        accountRepository.insertIfAbsent(accountId);
+        accountService.ensureExists(accountId);
         stored.ifPresentOrElse(
                 device -> device.pair(accountId, version),
                 () -> deviceRepository.save(Device.paired(deviceId, accountId, version)));

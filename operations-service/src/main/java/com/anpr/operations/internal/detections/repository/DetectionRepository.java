@@ -9,9 +9,12 @@ import org.springframework.data.jpa.repository.Query;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 public interface DetectionRepository extends JpaRepository<Detection, UUID>, JpaSpecificationExecutor<Detection> {
+
+    Optional<Detection> findByDetectionIdAndAccountId(UUID detectionId, UUID accountId);
 
     /** Returns 0 when the detection is already stored (a redelivered message), 1 when it was inserted. */
     @Modifying
@@ -25,15 +28,18 @@ public interface DetectionRepository extends JpaRepository<Detection, UUID>, Jpa
             """, nativeQuery = true)
     int insertIfAbsent(Detection detection);
 
-    /** Distinct plates of the account starting with the prefix, most recently detected first. */
+    /**
+     * Distinct plates of the account matching the pattern, most recently detected first. The pattern comes ready-made
+     * ("WA1%"): a pattern concatenated in SQL is not known at planning time, so the plate index would not be used.
+     */
     @Query("""
             SELECT d.plate AS plate, MAX(d.detectedAt) AS lastDetectedAt
             FROM Detection d
-            WHERE d.accountId = :accountId AND d.plate LIKE CONCAT(:prefix, '%')
+            WHERE d.accountId = :accountId AND d.plate LIKE :pattern
             GROUP BY d.plate
             ORDER BY MAX(d.detectedAt) DESC
             """)
-    List<PlateSuggestionRow> findPlateSuggestions(UUID accountId, String prefix, Limit limit);
+    List<PlateSuggestionRow> findPlateSuggestions(UUID accountId, String pattern, Limit limit);
 
     /** Live feed, first poll: the most recently stored detections, newest first. */
     @Query("""

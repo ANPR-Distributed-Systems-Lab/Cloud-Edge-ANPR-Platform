@@ -359,6 +359,22 @@ class AlertsControllerIT {
     }
 
     @Test
+    void createdAlertAlreadyCarriesTheLastDetectionOfThePlate() throws Exception {
+        String account = UUID.randomUUID().toString();
+        OffsetDateTime t0 = OffsetDateTime.of(2026, 10, 30, 9, 0, 0, 0, ZoneOffset.UTC);
+        detect(account, detection("WA60021", t0));
+
+        mockMvc.perform(post("/api/v1/alerts")
+                        .header(ACCOUNT_HEADER, account)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "plate": "WA60021" }
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.lastDetectedAt").value("2026-10-30T09:00:00Z"));
+    }
+
+    @Test
     void sortingByLastDetectionPutsNeverDetectedPlatesLast() throws Exception {
         String account = UUID.randomUUID().toString();
         OffsetDateTime t0 = OffsetDateTime.of(2026, 10, 30, 9, 0, 0, 0, ZoneOffset.UTC);

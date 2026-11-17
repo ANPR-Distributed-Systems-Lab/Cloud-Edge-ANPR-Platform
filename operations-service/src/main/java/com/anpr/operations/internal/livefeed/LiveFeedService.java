@@ -6,7 +6,7 @@ import com.anpr.operations.internal.devices.DevicePairingService;
 import com.anpr.operations.internal.livefeed.model.DeviceLive;
 import com.anpr.operations.internal.livefeed.model.LiveFeed;
 import com.anpr.operations.internal.locations.DeviceLocationService;
-import com.anpr.operations.internal.locations.model.DeviceLocation;
+import com.anpr.operations.internal.locations.repository.LocationPoint;
 import com.anpr.operations.shared.security.CurrentAccount;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -80,8 +80,8 @@ public class LiveFeedService {
 
     /** The last point of the route is the latest position; only a device silent for the whole window needs a lookup. */
     private Optional<DeviceLive> liveState(UUID accountId, UUID deviceId, OffsetDateTime since) {
-        List<DeviceLocation> track = locationService.track(accountId, deviceId, since);
-        Optional<DeviceLocation> last = track.isEmpty()
+        List<LocationPoint> track = locationService.track(accountId, deviceId, since);
+        Optional<LocationPoint> last = track.isEmpty()
                 ? locationService.latest(accountId, deviceId)
                 : Optional.of(track.getLast());
         return last.map(location -> new DeviceLive(deviceId, location, track));

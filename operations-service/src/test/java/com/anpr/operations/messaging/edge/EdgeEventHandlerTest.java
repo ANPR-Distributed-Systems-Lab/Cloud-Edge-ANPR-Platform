@@ -58,6 +58,14 @@ class EdgeEventHandlerTest {
     }
 
     @Test
+    void eventWithoutTypeIsRejected() throws IOException {
+        assertThatThrownBy(() -> handler.handle(message(null, DEVICE.toString(), resource("detection-batch.json"))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("eventType");
+        verifyNoInteractions(detectionService, deviceLocationService);
+    }
+
+    @Test
     void eventWithoutDeviceIsRejected() throws IOException {
         assertThatThrownBy(() -> handler.handle(message("detection", null, resource("detection-batch.json"))))
                 .isInstanceOf(IllegalArgumentException.class);

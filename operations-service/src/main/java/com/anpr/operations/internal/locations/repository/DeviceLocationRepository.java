@@ -23,12 +23,26 @@ public interface DeviceLocationRepository extends JpaRepository<DeviceLocation, 
             """, nativeQuery = true)
     int insertIfAbsent(DeviceLocation location);
 
-    Optional<DeviceLocation> findFirstByAccountIdAndDeviceIdOrderByRecordedAtDesc(UUID accountId, UUID deviceId);
+    /** The latest position, also when it is older than any time window. Native like findTrack, same columns. */
+    @Query(value = """
+            SELECT recorded_at AS "recordedAt", ST_Y(position::geometry) AS "lat", ST_X(position::geometry) AS "lon"
+            FROM device_locations
+            WHERE account_id = :accountId AND device_id = :deviceId
+            ORDER BY recorded_at DESC
+            LIMIT 1
+            """, nativeQuery = true)
+    Optional<LocationPoint> findLatest(UUID accountId, UUID deviceId);
 
-    @Query("""
-            SELECT l FROM DeviceLocation l
-            WHERE l.accountId = :accountId AND l.deviceId = :deviceId AND l.recordedAt >= :since
-            ORDER BY l.recordedAt
-            """)
-    List<DeviceLocation> findTrack(UUID accountId, UUID deviceId, OffsetDateTime since);
+    /**
+     * Route since the given time, oldest point first, with at most one point per 10 seconds (the last fix of each):
+     * a 60-minute live feed window stays within 360 points however often the device sends GPS fixes.
+     */
+    @Query(value = """
+            SELECT DISTINCT ON (date_bin('10 seconds', recorded_at, TIMESTAMPTZ 'epoch'))
+                   recorded_at AS "recordedAt", ST_Y(position::geometry) AS "lat", ST_X(position::geometry) AS "lon"
+            FROM device_locations
+            WHERE account_id = :accountId AND device_id = :deviceId AND recorded_at >= :since
+            ORDER BY date_bin('10 seconds', recorded_at, TIMESTAMPTZ 'epoch'), recorded_at DESC
+            """, nativeQuery = true)
+    List<LocationPoint> findTrack(UUID accountId, UUID deviceId, OffsetDateTime since);
 }

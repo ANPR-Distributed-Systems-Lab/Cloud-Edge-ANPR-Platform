@@ -51,6 +51,16 @@ class DeviceEventHandlerTest {
     }
 
     @Test
+    void eventWithoutTypeIsRejected() {
+        assertThatThrownBy(() -> handler.handle(message(null, """
+                { "version": 2, "deviceId": "%s" }
+                """.formatted(DEVICE))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("eventType");
+        verifyNoInteractions(pairingService);
+    }
+
+    @Test
     void pairedEventWithoutAccountIsRejected() {
         assertThatThrownBy(() -> handler.handle(message("device.paired", """
                 { "version": 1, "deviceId": "%s" }

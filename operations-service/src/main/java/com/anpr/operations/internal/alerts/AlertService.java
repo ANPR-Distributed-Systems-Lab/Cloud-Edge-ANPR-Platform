@@ -4,16 +4,19 @@ import com.anpr.operations.internal.alerts.model.Alert;
 import com.anpr.operations.internal.alerts.model.AlertFilter;
 import com.anpr.operations.internal.alerts.repository.AlertRepository;
 import com.anpr.operations.internal.alerts.repository.AlertSpecification;
+import com.anpr.operations.internal.alerts.repository.AlertVersion;
 import com.anpr.operations.internal.alerts.repository.PlateAlert;
 import com.anpr.operations.internal.devices.DevicePairingService;
-import com.anpr.operations.shared.error.BadRequestException;
 import com.anpr.operations.shared.error.ConflictException;
 import com.anpr.operations.shared.error.ErrorCodes;
 import com.anpr.operations.shared.error.ForbiddenException;
 import com.anpr.operations.shared.error.NotFoundException;
 import com.anpr.operations.shared.security.CurrentAccount;
+import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.hibernate.exception.ConstraintViolationException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -34,10 +37,13 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class AlertService {
+    private static final String PLATE_UNIQUE_CONSTRAINT = "uq_alerts_account_plate";
+
     private final AlertRepository alertRepository;
     private final CurrentAccount currentAccount;
     private final Clock clock;
     private final DevicePairingService pairingService;
+    private final EntityManager entityManager;
 
     @Transactional
     public Alert create(String plate, String alertText) {
@@ -46,7 +52,18 @@ public class AlertService {
             throw new ConflictException(ErrorCodes.ALERT_ALREADY_EXISTS, "Alert for this plate already exists");
         }
         Alert alert = Alert.create(accountId, plate, alertText, OffsetDateTime.now(clock));
-        return alertRepository.save(alert);
+        try {
+            // Flushed here so that a concurrent create of the same plate fails inside this method, not at commit.
+            Alert saved = alertRepository.saveAndFlush(alert);
+            // Read back so the database computes lastDetectedAt (@Formula): the plate may have been detected before.
+            entityManager.refresh(saved);
+            return saved;
+        } catch (DataIntegrityViolationException e) {
+            if (violates(e, PLATE_UNIQUE_CONSTRAINT)) {
+                throw new ConflictException(ErrorCodes.ALERT_ALREADY_EXISTS, "Alert for this plate already exists", e);
+            }
+            throw e;
+        }
     }
 
     public Alert get(UUID alertId) {
@@ -54,19 +71,15 @@ public class AlertService {
     }
 
     public Page<Alert> list(AlertFilter filters, Pageable pageable) {
-        if (filters.from() != null && filters.to() != null && !filters.from().isBefore(filters.to())) {
-            throw new BadRequestException(ErrorCodes.INVALID_TIME_RANGE, "'to' must be after 'from'");
-        }
-
         Specification<Alert> spec = AlertSpecification.ofAccount(currentAccount.id());
         if (filters.plate() != null) {
-            spec = spec.and(AlertSpecification.plateStartWith(filters.plate()));
+            spec = spec.and(AlertSpecification.plateStartsWith(filters.plate()));
         }
-        if (filters.from() != null) {
-            spec = spec.and(AlertSpecification.createAtFrom(filters.from()));
+        if (filters.period().from() != null) {
+            spec = spec.and(AlertSpecification.createdFrom(filters.period().from()));
         }
-        if (filters.to() != null) {
-            spec = spec.and(AlertSpecification.createAtTo(filters.to()));
+        if (filters.period().to() != null) {
+            spec = spec.and(AlertSpecification.createdBefore(filters.period().to()));
         }
 
         return alertRepository.findAll(spec, pageable);
@@ -88,13 +101,14 @@ public class AlertService {
         alertRepository.delete(findOwned(alertId));
     }
 
+    /** Every alert of the owner of the calling device. */
     public List<Alert> listForDevice() {
-        UUID deviceId = currentAccount.id();
-        UUID ownerId = pairingService.findOwner(deviceId).orElseThrow(() -> {
-            log.warn("Device {} asked for alerts but has no owner", deviceId);
-            return new ForbiddenException(ErrorCodes.DEVICE_NOT_PAIRED, "The device is not paired with an account");
-        });
-        return alertRepository.findAllByAccountIdOrderByCreatedAtAsc(ownerId);
+        return alertRepository.findAllByAccountIdOrderByCreatedAtAsc(ownerOfDevice());
+    }
+
+    /** Id and version of every alert of the owner of the calling device: a cheap check whether the list changed. */
+    public List<AlertVersion> versionsForDevice() {
+        return alertRepository.findVersionsByAccountId(ownerOfDevice());
     }
 
     /**
@@ -107,6 +121,23 @@ public class AlertService {
         }
         return alertRepository.findAlertIdsByPlates(accountId, plates).stream()
                 .collect(Collectors.toMap(PlateAlert::getPlate, PlateAlert::getAlertId));
+    }
+
+    private static boolean violates(DataIntegrityViolationException e, String constraint) {
+        for (Throwable cause = e; cause != null; cause = cause.getCause()) {
+            if (cause instanceof ConstraintViolationException violation) {
+                return constraint.equalsIgnoreCase(violation.getConstraintName());
+            }
+        }
+        return false;
+    }
+
+    private UUID ownerOfDevice() {
+        UUID deviceId = currentAccount.id();
+        return pairingService.findOwner(deviceId).orElseThrow(() -> {
+            log.warn("Device {} asked for alerts but has no owner", deviceId);
+            return new ForbiddenException(ErrorCodes.DEVICE_NOT_PAIRED, "The device is not paired with an account");
+        });
     }
 
     private Alert findOwned(UUID alertId) {

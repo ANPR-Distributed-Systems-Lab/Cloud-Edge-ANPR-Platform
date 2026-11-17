@@ -1,4 +1,4 @@
-package com.anpr.operations.api.livefeed;
+package com.anpr.operations.api.detections;
 
 import com.anpr.operations.TestcontainersConfiguration;
 import com.anpr.operations.internal.detections.DetectionService;
@@ -188,6 +188,22 @@ class LiveFeedIT {
                 .andExpect(jsonPath("$.devices[0].track[*].recordedAt",
                         contains("2026-10-30T09:10:00Z", "2026-10-30T09:19:00Z")))
                 .andExpect(jsonPath("$.devices[0].lastSeenAt").value("2026-10-30T09:19:00Z"));
+    }
+
+    @Test
+    void theRouteKeepsAtMostOnePointPerTenSecondsTheLastOfEach() throws Exception {
+        UUID account = UUID.randomUUID();
+        UUID device = pairedDevice(account);
+        // One fix per second for 30 s: 09:19:20 .. 09:19:49, three 10-second buckets.
+        OffsetDateTime first = NOW.minusSeconds(40);
+        locate(device, java.util.stream.IntStream.range(0, 30).mapToObj(first::plusSeconds)
+                .toArray(OffsetDateTime[]::new));
+
+        mockMvc.perform(get(LIVE_FEED).param("windowMinutes", "20").header(ACCOUNT_HEADER, account.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.devices[0].track[*].recordedAt",
+                        contains("2026-10-30T09:19:29Z", "2026-10-30T09:19:39Z", "2026-10-30T09:19:49Z")))
+                .andExpect(jsonPath("$.devices[0].lastSeenAt").value("2026-10-30T09:19:49Z"));
     }
 
     @Test

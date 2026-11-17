@@ -1,4 +1,4 @@
-package com.anpr.operations.api.search;
+package com.anpr.operations.api.detections;
 
 import com.anpr.operations.TestcontainersConfiguration;
 import com.anpr.operations.internal.detections.DetectionService;

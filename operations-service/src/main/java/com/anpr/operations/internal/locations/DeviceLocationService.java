@@ -3,6 +3,7 @@ package com.anpr.operations.internal.locations;
 import com.anpr.operations.internal.devices.DevicePairingService;
 import com.anpr.operations.internal.locations.model.DeviceLocation;
 import com.anpr.operations.internal.locations.repository.DeviceLocationRepository;
+import com.anpr.operations.internal.locations.repository.LocationPoint;
 import com.anpr.operations.shared.geo.Wgs84;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -38,12 +39,14 @@ public class DeviceLocationService {
     }
 
     /** Route of a device since the given time, oldest point first. */
-    public List<DeviceLocation> track(UUID accountId, UUID deviceId, OffsetDateTime since) {
+    @Transactional(readOnly = true)
+    public List<LocationPoint> track(UUID accountId, UUID deviceId, OffsetDateTime since) {
         return deviceLocationRepository.findTrack(accountId, deviceId, since);
     }
 
     /** The latest position of a device, also when it is older than any time window. */
-    public Optional<DeviceLocation> latest(UUID accountId, UUID deviceId) {
-        return deviceLocationRepository.findFirstByAccountIdAndDeviceIdOrderByRecordedAtDesc(accountId, deviceId);
+    @Transactional(readOnly = true)
+    public Optional<LocationPoint> latest(UUID accountId, UUID deviceId) {
+        return deviceLocationRepository.findLatest(accountId, deviceId);
     }
 }

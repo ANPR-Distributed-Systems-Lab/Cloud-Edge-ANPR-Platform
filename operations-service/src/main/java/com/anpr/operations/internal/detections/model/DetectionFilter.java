@@ -1,9 +1,6 @@
 package com.anpr.operations.internal.detections.model;
 
-import java.time.OffsetDateTime;
+import com.anpr.operations.shared.time.TimeRange;
 
-public record DetectionFilter(
-        String plate,
-        OffsetDateTime from,
-        OffsetDateTime to)
-{}
+public record DetectionFilter(String plate, TimeRange period) {
+}

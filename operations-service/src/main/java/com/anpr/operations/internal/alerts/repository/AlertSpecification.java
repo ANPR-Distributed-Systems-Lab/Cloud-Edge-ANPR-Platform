@@ -15,15 +15,15 @@ public final class AlertSpecification {
     }
 
     // The contract validates the prefix as [A-Z0-9], so it is already uppercase and needs no LIKE escaping.
-    public static Specification<Alert> plateStartWith(String prefix) {
+    public static Specification<Alert> plateStartsWith(String prefix) {
         return (root, query, cb) -> cb.like(root.get("plate"), prefix + "%");
     }
 
-    public static Specification<Alert> createAtFrom(OffsetDateTime from) {
+    public static Specification<Alert> createdFrom(OffsetDateTime from) {
         return (root, query, cb) -> cb.greaterThanOrEqualTo(root.get("createdAt"), from);
     }
 
-    public static Specification<Alert> createAtTo(OffsetDateTime to) {
+    public static Specification<Alert> createdBefore(OffsetDateTime to) {
         return (root, query, cb) -> cb.lessThan(root.get("createdAt"), to);
     }
 }

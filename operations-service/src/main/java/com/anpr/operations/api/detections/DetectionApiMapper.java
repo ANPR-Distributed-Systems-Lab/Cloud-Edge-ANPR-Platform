@@ -1,4 +1,4 @@
-package com.anpr.operations.api.search;
+package com.anpr.operations.api.detections;
 
 import com.anpr.operations.api.generated.model.DetectionPage;
 import com.anpr.operations.api.generated.model.DetectionResponse;

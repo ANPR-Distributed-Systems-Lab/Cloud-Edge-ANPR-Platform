@@ -38,7 +38,7 @@ device-management --publish (after the DynamoDB write)--> SNS topic "device-even
 | Attribute | Notes |
 |---|---|
 | `eventType` | `device.paired` or `device.unpaired`; subscriptions can filter on it |
-| `traceId` | Trace id of the pairing request, copied into the logs of every consumer |
+| `traceId` | Trace id of the pairing request, copied into the logs of every consumer. A consumer that receives a message without it logs a WARN and uses the SQS message id instead, so its logs still carry a trace id |
 
 ### Body
 

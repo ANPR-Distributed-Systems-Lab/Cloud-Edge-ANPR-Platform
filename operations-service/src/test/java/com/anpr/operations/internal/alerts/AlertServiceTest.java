@@ -4,18 +4,21 @@ import com.anpr.operations.internal.alerts.model.Alert;
 import com.anpr.operations.internal.alerts.model.AlertFilter;
 import com.anpr.operations.internal.alerts.repository.AlertRepository;
 import com.anpr.operations.internal.devices.DevicePairingService;
-import com.anpr.operations.shared.error.BadRequestException;
 import com.anpr.operations.shared.error.ConflictException;
 import com.anpr.operations.shared.error.ErrorCodes;
 import com.anpr.operations.shared.error.ForbiddenException;
 import com.anpr.operations.shared.error.NotFoundException;
 import com.anpr.operations.shared.security.CurrentAccount;
+import com.anpr.operations.shared.time.TimeRange;
+import jakarta.persistence.EntityManager;
+import org.hibernate.exception.ConstraintViolationException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -23,6 +26,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.sql.SQLException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -56,19 +60,22 @@ class AlertServiceTest {
     @Mock
     private DevicePairingService pairingService;
 
+    @Mock
+    private EntityManager entityManager;
+
     private AlertService alertService;
 
     @BeforeEach
     void setUp() {
         Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
-        alertService = new AlertService(alertRepository, currentAccount, clock, pairingService);
+        alertService = new AlertService(alertRepository, currentAccount, clock, pairingService, entityManager);
         lenient().when(currentAccount.id()).thenReturn(ACCOUNT_ID);
     }
 
     @Test
     void createSavesAlertForCurrentAccount() {
         when(alertRepository.existsByAccountIdAndPlate(ACCOUNT_ID, "WA12345")).thenReturn(false);
-        when(alertRepository.save(any(Alert.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(alertRepository.saveAndFlush(any(Alert.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         Alert created = alertService.create("WA12345", "Stolen");
 
@@ -84,7 +91,28 @@ class AlertServiceTest {
         assertThatThrownBy(() -> alertService.create("WA12345", null))
                 .isInstanceOfSatisfying(ConflictException.class,
                         e -> assertThat(e.getCode()).isEqualTo(ErrorCodes.ALERT_ALREADY_EXISTS));
-        verify(alertRepository, never()).save(any());
+        verify(alertRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void createRacingAnotherCreateOfThePlateThrowsConflict() {
+        when(alertRepository.existsByAccountIdAndPlate(ACCOUNT_ID, "WA12345")).thenReturn(false);
+        when(alertRepository.saveAndFlush(any(Alert.class))).thenThrow(violationOf("uq_alerts_account_plate"));
+
+        assertThatThrownBy(() -> alertService.create("WA12345", null))
+                .isInstanceOfSatisfying(ConflictException.class, e -> {
+                    assertThat(e.getCode()).isEqualTo(ErrorCodes.ALERT_ALREADY_EXISTS);
+                    assertThat(e.getCause()).isInstanceOf(DataIntegrityViolationException.class);
+                });
+    }
+
+    @Test
+    void createFailingOnAnotherConstraintIsNotAConflict() {
+        when(alertRepository.existsByAccountIdAndPlate(ACCOUNT_ID, "WA12345")).thenReturn(false);
+        when(alertRepository.saveAndFlush(any(Alert.class))).thenThrow(violationOf("some_other_constraint"));
+
+        assertThatThrownBy(() -> alertService.create("WA12345", null))
+                .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test
@@ -103,17 +131,7 @@ class AlertServiceTest {
         Page<Alert> page = new PageImpl<>(List.of(existingAlert("WA12345", 0L)));
         when(alertRepository.findAll(ArgumentMatchers.<Specification<Alert>>any(), eq(pageable))).thenReturn(page);
 
-        assertThat(alertService.list(new AlertFilter("WA1", null, null), pageable)).isSameAs(page);
-    }
-
-    @Test
-    void listWithToNotAfterFromThrowsBadRequest() {
-        OffsetDateTime at = OffsetDateTime.parse("2026-10-01T00:00:00Z");
-
-        assertThatThrownBy(() -> alertService.list(new AlertFilter(null, at, at), PageRequest.of(0, 20)))
-                .isInstanceOfSatisfying(BadRequestException.class,
-                        e -> assertThat(e.getCode()).isEqualTo(ErrorCodes.INVALID_TIME_RANGE));
-        verify(alertRepository, never()).findAll(ArgumentMatchers.<Specification<Alert>>any(), any(Pageable.class));
+        assertThat(alertService.list(new AlertFilter("WA1", new TimeRange(null, null)), pageable)).isSameAs(page);
     }
 
     @Test
@@ -171,6 +189,25 @@ class AlertServiceTest {
     }
 
     @Test
+    void versionsForDeviceAreReadForTheOwnerOnly() {
+        UUID owner = UUID.fromString("22222222-2222-2222-2222-222222222222");
+        when(pairingService.findOwner(ACCOUNT_ID)).thenReturn(Optional.of(owner));
+        when(alertRepository.findVersionsByAccountId(owner)).thenReturn(List.of());
+
+        assertThat(alertService.versionsForDevice()).isEmpty();
+        verify(alertRepository, never()).findAllByAccountIdOrderByCreatedAtAsc(any());
+    }
+
+    @Test
+    void versionsForDeviceWithNoOwnerAreForbidden() {
+        when(pairingService.findOwner(ACCOUNT_ID)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> alertService.versionsForDevice())
+                .isInstanceOf(ForbiddenException.class)
+                .extracting("code").isEqualTo(ErrorCodes.DEVICE_NOT_PAIRED);
+    }
+
+    @Test
     void listForDeviceWithNoOwnerIsForbidden() {
         when(pairingService.findOwner(ACCOUNT_ID)).thenReturn(Optional.empty());
 
@@ -184,5 +221,11 @@ class AlertServiceTest {
         Alert alert = Alert.create(ACCOUNT_ID, plate, null, OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC));
         ReflectionTestUtils.setField(alert, "version", version);
         return alert;
+    }
+
+    /** The shape in which Spring Data reports a unique violation from Hibernate. */
+    private static DataIntegrityViolationException violationOf(String constraint) {
+        return new DataIntegrityViolationException("could not execute statement",
+                new ConstraintViolationException("duplicate key", new SQLException("duplicate key"), constraint));
     }
 }

@@ -8,14 +8,15 @@ import com.anpr.operations.internal.detections.repository.DetectionRepository;
 import com.anpr.operations.internal.detections.repository.DetectionSpecification;
 import com.anpr.operations.internal.detections.repository.PlateSuggestionRow;
 import com.anpr.operations.internal.devices.DevicePairingService;
-import com.anpr.operations.shared.error.BadRequestException;
 import com.anpr.operations.shared.error.ErrorCodes;
+import com.anpr.operations.shared.error.NotFoundException;
 import com.anpr.operations.shared.geo.Wgs84;
 import com.anpr.operations.shared.security.CurrentAccount;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Limit;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
@@ -27,7 +28,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-/** Detections: stored from the edge events queue, read by View 1 (search) and View 3 (live feed). */
+/** Detections: stored from the edge events queue, read by View 1 (search), View 3 (live feed) and D18 (one detection). */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -55,42 +56,53 @@ public class DetectionService {
         log.debug("Stored {} new of {} detections of device {}", inserted, detections.size(), deviceId);
     }
 
+    /**
+     * One detection of the caller's account (D18). A detection of another account is reported as not found, so the
+     * response does not reveal which ids exist.
+     */
+    @Transactional(readOnly = true)
+    public DetectionWithAlert get(UUID detectionId) {
+        UUID accountId = currentAccount.id();
+        Detection detection = detectionRepository.findByDetectionIdAndAccountId(detectionId, accountId)
+                .orElseThrow(() -> new NotFoundException(ErrorCodes.DETECTION_NOT_FOUND, "Detection not found"));
+        return withAlerts(accountId, List.of(detection)).getFirst();
+    }
+
     /** View 1: detections of the caller's account by optional exact plate and time range. */
     @Transactional(readOnly = true)
     public Page<DetectionWithAlert> search(DetectionFilter filter, Pageable pageable) {
-        if (filter.from() != null && filter.to() != null && !filter.from().isBefore(filter.to())) {
-            throw new BadRequestException(ErrorCodes.INVALID_TIME_RANGE, "'to' must be after 'from'");
-        }
         UUID accountId = currentAccount.id();
 
         Specification<Detection> spec = DetectionSpecification.ofAccount(accountId);
         if (filter.plate() != null) {
             spec = spec.and(DetectionSpecification.plateEquals(filter.plate()));
         }
-        if (filter.from() != null) {
-            spec = spec.and(DetectionSpecification.detectedFrom(filter.from()));
+        if (filter.period().from() != null) {
+            spec = spec.and(DetectionSpecification.detectedFrom(filter.period().from()));
         }
-        if (filter.to() != null) {
-            spec = spec.and(DetectionSpecification.detectedBefore(filter.to()));
+        if (filter.period().to() != null) {
+            spec = spec.and(DetectionSpecification.detectedBefore(filter.period().to()));
         }
 
         Page<Detection> page = detectionRepository.findAll(spec, pageable);
-        Map<String, UUID> alertIds = alertIdsOf(accountId, page.getContent());
-        return page.map(detection -> new DetectionWithAlert(detection, alertIds.get(detection.getPlate())));
+        return new PageImpl<>(withAlerts(accountId, page.getContent()), pageable, page.getTotalElements());
     }
 
     /** View 1: distinct plates of the caller's account by prefix, most recently detected first. */
     @Transactional(readOnly = true)
     public List<PlateSuggestionRow> suggestPlates(String prefix, int limit) {
-        return detectionRepository.findPlateSuggestions(currentAccount.id(), prefix, Limit.of(limit));
+        // The contract allows only A-Z and 0-9 in the prefix, so it cannot carry LIKE wildcards of its own.
+        return detectionRepository.findPlateSuggestions(currentAccount.id(), prefix + "%", Limit.of(limit));
     }
 
     /** View 3, first poll: the most recently stored detections, newest first. */
+    @Transactional(readOnly = true)
     public List<DetectionWithAlert> latestStored(UUID accountId, OffsetDateTime storedUntil, int limit) {
         return withAlerts(accountId, detectionRepository.findLatestStored(accountId, storedUntil, Limit.of(limit)));
     }
 
     /** View 3, next polls: detections stored after the given one, in the order they were stored. */
+    @Transactional(readOnly = true)
     public List<DetectionWithAlert> storedAfter(UUID accountId, OffsetDateTime afterStoredAt, UUID afterId,
                                                 OffsetDateTime storedUntil, int limit) {
         return withAlerts(accountId, detectionRepository.findStoredAfter(accountId, afterStoredAt, afterId,

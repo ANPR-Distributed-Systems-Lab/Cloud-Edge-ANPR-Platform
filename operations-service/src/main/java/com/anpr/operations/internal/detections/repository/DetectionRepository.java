@@ -58,4 +58,18 @@ public interface DetectionRepository extends JpaRepository<Detection, UUID>, Jpa
             """)
     List<Detection> findStoredAfter(UUID accountId, OffsetDateTime afterStoredAt, UUID afterId,
                                     OffsetDateTime storedUntil, Limit limit);
+
+    /**
+     * View 2: detections within the radius in metres (geography), newest first. Native, because ST_DWithin is
+     * PostGIS. The limit is a plain parameter, like the rest of this native query.
+     */
+    @Query(value = """
+            SELECT * FROM detections
+            WHERE account_id = :accountId AND detected_at >= :from AND detected_at < :to
+              AND ST_DWithin(position, ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)::geography, :radiusMeters)
+            ORDER BY detected_at DESC, detection_id DESC
+            LIMIT :limit
+            """, nativeQuery = true)
+    List<Detection> findWithinRadius(UUID accountId, double lat, double lon, int radiusMeters,
+                                     OffsetDateTime from, OffsetDateTime to, int limit);
 }

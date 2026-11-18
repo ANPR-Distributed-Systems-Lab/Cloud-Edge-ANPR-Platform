@@ -45,4 +45,33 @@ public interface DeviceLocationRepository extends JpaRepository<DeviceLocation, 
             ORDER BY date_bin('10 seconds', recorded_at, TIMESTAMPTZ 'epoch'), recorded_at DESC
             """, nativeQuery = true)
     List<LocationPoint> findTrack(UUID accountId, UUID deviceId, OffsetDateTime since);
+
+    /**
+     * View 2: routes of every device of the account in the range, oldest point first per device. The range is split
+     * into windows of intervalSeconds starting at 'from', and the first fix of each window is kept; of those, at most
+     * 'limit' most recent per device. Coordinates are extracted last, only for the points that are returned.
+     * The window is computed once as a column: each use of a named parameter is bound separately, so repeating the
+     * date_bin expression in DISTINCT ON and ORDER BY would not count as the same expression in PostgreSQL.
+     */
+    @Query(value = """
+            WITH windowed AS (
+                SELECT device_id, recorded_at, position,
+                       date_bin(make_interval(secs => :intervalSeconds), recorded_at, :from) AS time_window
+                FROM device_locations
+                WHERE account_id = :accountId AND recorded_at >= :from AND recorded_at < :to
+            ), thinned AS (
+                SELECT DISTINCT ON (device_id, time_window) device_id, recorded_at, position
+                FROM windowed
+                ORDER BY device_id, time_window, recorded_at
+            ), ranked AS (
+                SELECT thinned.*, row_number() OVER (PARTITION BY device_id ORDER BY recorded_at DESC) AS rn
+                FROM thinned
+            )
+            SELECT device_id AS "deviceId", recorded_at AS "recordedAt",
+                   ST_Y(position::geometry) AS "lat", ST_X(position::geometry) AS "lon"
+            FROM ranked
+            WHERE rn <= :limit
+            ORDER BY device_id, recorded_at
+            """, nativeQuery = true)
+    List<DevicePoint> findTracks(UUID accountId, OffsetDateTime from, OffsetDateTime to, int intervalSeconds, int limit);
 }

@@ -42,7 +42,7 @@ com.anpr.operations
 
 Areas: `search` (View 1), `radial` (View 2), `livefeed` (View 3), `alerts` (View 6 + device alert list), `detections`, `locations`.
 
-- In `api/`, one package, one contract tag, one controller and one facade per URL tree: `api/detections/` serves everything under `/api/v1/detections` (Views 1 and 3, D18; View 2 joins the `detections` tag once implemented), `api/alerts/` serves `/api/v1/alerts`. Mappers sit next to them.
+- In `api/`, one package, one contract tag, one controller and one facade per URL tree: `api/detections/` serves everything under `/api/v1/detections` (Views 1, 2 and 3, D18), `api/alerts/` serves `/api/v1/alerts`. Mappers sit next to them.
 - `internal/` is split by data, not by view (`detections`, `locations`, `devices`, `alerts`), because one view may read several of them.
 
 - Split by business area, not by class kind.

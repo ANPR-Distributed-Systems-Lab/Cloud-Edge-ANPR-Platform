@@ -4,6 +4,7 @@ import com.anpr.operations.shared.error.BadRequestException;
 import com.anpr.operations.shared.error.ErrorCodes;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.time.OffsetDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -36,5 +37,17 @@ class TimeRangeTest {
     void toBeforeFromIsRejected() {
         assertThatThrownBy(() -> new TimeRange(T0, T0.minusHours(1)))
                 .isInstanceOf(BadRequestException.class);
+    }
+
+    @Test
+    void isLongerThanOnlyWhenTheRangeExceedsTheLimit() {
+        assertThat(new TimeRange(T0, T0.plusDays(7)).isLongerThan(Duration.ofDays(7))).isFalse();
+        assertThat(new TimeRange(T0, T0.plusDays(7).plusNanos(1000)).isLongerThan(Duration.ofDays(7))).isTrue();
+    }
+
+    @Test
+    void anOpenRangeIsNeverLongerThanTheLimit() {
+        assertThat(new TimeRange(T0, null).isLongerThan(Duration.ofDays(7))).isFalse();
+        assertThat(new TimeRange(null, T0).isLongerThan(Duration.ofDays(7))).isFalse();
     }
 }

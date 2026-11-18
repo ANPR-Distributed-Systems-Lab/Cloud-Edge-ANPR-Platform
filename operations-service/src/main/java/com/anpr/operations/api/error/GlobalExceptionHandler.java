@@ -1,7 +1,9 @@
 package com.anpr.operations.api.error;
 
+import com.anpr.operations.shared.error.BadRequestException;
 import com.anpr.operations.shared.error.ConflictException;
 import com.anpr.operations.shared.error.ErrorCodes;
+import com.anpr.operations.shared.error.FieldCodes;
 import com.anpr.operations.shared.error.NotFoundException;
 import com.anpr.operations.shared.error.UnauthorizedException;
 import com.anpr.operations.shared.tracing.TraceId;
@@ -30,13 +32,13 @@ import java.util.UUID;
 public class GlobalExceptionHandler {
     /** Bean Validation constraint names translated to the field codes shared with device-management and ingest. */
     private static final Map<String, String> FIELD_CODES = Map.of(
-            "NotNull", ErrorCodes.REQUIRED,
-            "Min", ErrorCodes.RANGE,
-            "Max", ErrorCodes.RANGE,
-            "DecimalMin", ErrorCodes.RANGE,
-            "DecimalMax", ErrorCodes.RANGE,
-            "Size", ErrorCodes.SIZE,
-            "Pattern", ErrorCodes.PATTERN);
+            "NotNull", FieldCodes.REQUIRED.name(),
+            "Min", FieldCodes.RANGE.name(),
+            "Max", FieldCodes.RANGE.name(),
+            "DecimalMin", FieldCodes.RANGE.name(),
+            "DecimalMax", FieldCodes.RANGE.name(),
+            "Size", FieldCodes.SIZE.name(),
+            "Pattern", FieldCodes.PATTERN.name());
 
     @ExceptionHandler(NotFoundException.class)
     ProblemDetail handleNotFound(NotFoundException ex) {
@@ -48,11 +50,9 @@ public class GlobalExceptionHandler {
         return problem(HttpStatus.CONFLICT, ex.getCode(), ex.getMessage());
     }
 
-    private ProblemDetail problem(HttpStatusCode status, String code, String detail) {
-        ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, detail);
-        problem.setProperty("code", code);
-        problem.setProperty("requestId", TraceId.current().orElseGet(() -> UUID.randomUUID().toString()));
-        return problem;
+    @ExceptionHandler(BadRequestException.class)
+    ProblemDetail handleInvalidInput(BadRequestException ex) {
+        return problem(HttpStatus.BAD_REQUEST, ex.getCode(), ex.getMessage());
     }
 
     @ExceptionHandler(UnauthorizedException.class)
@@ -101,5 +101,12 @@ public class GlobalExceptionHandler {
     ProblemDetail handleUnexpected(Exception ex) {
         log.error("Unexpected error", ex);
         return problem(HttpStatus.INTERNAL_SERVER_ERROR, ErrorCodes.INTERNAL_ERROR, "Unexpected error");
+    }
+
+    private ProblemDetail problem(HttpStatusCode status, ErrorCodes code, String detail) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, detail);
+        problem.setProperty("code", code.name());
+        problem.setProperty("requestId", TraceId.current().orElseGet(() -> UUID.randomUUID().toString()));
+        return problem;
     }
 }

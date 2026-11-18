@@ -13,3 +13,14 @@ management:
     health:
       probes:
         enabled: true
+
+logging:
+  structured:
+    format:
+      console: ecs
+
+app:
+  aws:
+    region: ${AWS_REGION:eu-central-1}
+    sqs:
+      device-events-queue-url: ${DEVICE_EVENTS_QUEUE_URL:}

@@ -1,7 +1,8 @@
 """The faults of the detection mode (common/faults.py): those the threads report, and those read at each refresh.
 
   reported   no configuration, config refused, device not paired (cloud/config_poll.py); no models, model load
-             failed, models not updated (cloud/model_updater.py); frame loop error (loop.py)
+             failed, models not updated (cloud/model_updater.py); alert list failing / invalid
+             (cloud/alert_poll.py); frame loop error (loop.py)
   read here  sign-in failed and access denied (the latest request, cloud/api.py); refused items (rows the
              platform refused since the mode started, kept in a quarantine of the queues for diagnosis); SD card low;
              power too low, CPU throttled, CPU hot

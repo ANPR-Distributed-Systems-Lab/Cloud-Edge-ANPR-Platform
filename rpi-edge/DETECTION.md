@@ -398,7 +398,8 @@ LAST PLATES   the last two plates accepted for sending (ALERT when on the list) 
 | fault (12) | red | a fault | | none |
 
 - Faults (`common/faults.py`, `feedback/faults.py`): no configuration, config refused, device not paired, no
-  models, model load failed, models not updated, frame loop error, sign-in failed, access denied (403), refused
+  models, model load failed, models not updated, alert list failing or invalid (an error answer: no alerts, or
+  only those of an old list), frame loop error, sign-in failed, access denied (403), refused
   items (rows the platform refused since the mode started: older ones stay in the quarantine for diagnosis but do
   not light the LED), SD card low (under 1 GB), power too low, CPU throttled, CPU hot (80 °C). A fault that
   appears sounds the buzzer for 3 s, once (not again when it comes back within 10 min). The network and the GPS

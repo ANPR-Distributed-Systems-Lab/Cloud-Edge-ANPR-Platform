@@ -54,10 +54,11 @@ def test_without_a_configuration_the_poll_retries_soon(tmp_path):
 def test_the_alert_list_is_polled_at_its_interval(tmp_path):
     stop = StopAfter(2)
     store = store_with(tmp_path, alertsPollSeconds=20)
-    AlertPoller(FakeApi(response(304), response(304)), URL, AlertWatch(), store).run(stop)
+    AlertPoller(FakeApi(response(304), response(304)), URL, AlertWatch(), store, FaultBoard()).run(stop)
     assert stop.waits == [20, 20]
     stop = StopAfter(1)
-    AlertPoller(FakeApi(response(304)), URL, AlertWatch(), ConfigurationStore(tmp_path / "none")).run(stop)
+    AlertPoller(FakeApi(response(304)), URL, AlertWatch(), ConfigurationStore(tmp_path / "none"),
+                FaultBoard()).run(stop)
     assert stop.waits == [UNCONFIGURED_POLL_SECONDS]
 
 

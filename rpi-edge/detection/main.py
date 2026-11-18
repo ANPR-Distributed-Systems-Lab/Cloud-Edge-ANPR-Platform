@@ -82,7 +82,7 @@ def run(stop: threading.Event, peripherals: Peripherals) -> None:
         "config-poll": ConfigPoller(api, env.config_url, configuration, faults).run,
         "model-updater": ModelUpdater(ModelStore(env.state_dir / "models", api, http, env.models_url),
                                       configuration, models, faults).run,
-        "alert-poll": AlertPoller(api, env.alerts_url, alerts, configuration).run,
+        "alert-poll": AlertPoller(api, env.alerts_url, alerts, configuration, faults).run,
         **gps_workers,
         "locations": LocationRecorder(gps, queues.locations, configuration).run,
         "metrics": MetricsSampler(queues, gps, frames, configuration, env.state_dir).run,

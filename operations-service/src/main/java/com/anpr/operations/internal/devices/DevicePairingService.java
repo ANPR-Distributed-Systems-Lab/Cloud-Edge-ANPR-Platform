@@ -1,6 +1,8 @@
 package com.anpr.operations.internal.devices;
 
-import com.anpr.operations.internal.accounts.AccountRepository;
+import com.anpr.operations.internal.accounts.AccountService;
+import com.anpr.operations.internal.devices.model.Device;
+import com.anpr.operations.internal.devices.repository.DeviceRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -18,7 +20,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class DevicePairingService {
     private final DeviceRepository deviceRepository;
-    private final AccountRepository accountRepository;
+    private final AccountService accountService;
 
     @Transactional
     public void pair(UUID deviceId, UUID accountId, long version) {
@@ -28,10 +30,25 @@ public class DevicePairingService {
             return;
         }
         // The account first: devices.account_id references accounts.
-        accountRepository.insertIfAbsent(accountId);
+        accountService.ensureExists(accountId);
         stored.ifPresentOrElse(
                 device -> device.pair(accountId, version),
                 () -> deviceRepository.save(Device.paired(deviceId, accountId, version)));
+    }
+
+    /** The owner of a device; empty when the device is unknown or unpaired. */
+    public Optional<UUID> findOwner(UUID deviceId) {
+        return deviceRepository.findOwnerById(deviceId);
+    }
+
+    /** The owner of a device that sends data; until the pairing event arrives the message is retried. */
+    public UUID requireOwner(UUID deviceId) {
+        return findOwner(deviceId).orElseThrow(() -> new DeviceNotPairedException(deviceId));
+    }
+
+    /** The device currently paired with the account; an account has at most one. */
+    public Optional<UUID> findPairedDeviceId(UUID accountId) {
+        return deviceRepository.findPairedDeviceId(accountId);
     }
 
     @Transactional

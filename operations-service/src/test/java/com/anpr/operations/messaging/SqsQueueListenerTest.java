@@ -1,5 +1,6 @@
 package com.anpr.operations.messaging;
 
+import com.anpr.operations.internal.devices.DeviceNotPairedException;
 import com.anpr.operations.shared.tracing.TraceId;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -12,6 +13,7 @@ import software.amazon.awssdk.services.sqs.model.ReceiveMessageRequest;
 import software.amazon.awssdk.services.sqs.model.ReceiveMessageResponse;
 
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
@@ -72,6 +74,17 @@ class SqsQueueListenerTest {
         ArgumentCaptor<DeleteMessageRequest> delete = ArgumentCaptor.forClass(DeleteMessageRequest.class);
         verify(sqs).deleteMessage(delete.capture());
         assertThat(delete.getValue().receiptHandle()).isEqualTo("receipt-2");
+    }
+
+    @Test
+    void messageOfADeviceNotPairedYetStaysOnTheQueue() {
+        Message waiting = message("receipt-1");
+        receive(waiting);
+        doThrow(new DeviceNotPairedException(UUID.randomUUID())).when(handler).accept(waiting);
+
+        listener.pollOnce();
+
+        verify(sqs, never()).deleteMessage(any(DeleteMessageRequest.class));
     }
 
     @Test

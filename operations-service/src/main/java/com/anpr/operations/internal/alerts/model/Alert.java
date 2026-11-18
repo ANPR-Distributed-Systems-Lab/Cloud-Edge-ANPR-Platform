@@ -1,0 +1,45 @@
+package com.anpr.operations.internal.alerts.model;
+
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+import jakarta.persistence.Version;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import org.hibernate.annotations.Formula;
+
+import java.util.UUID;
+
+import java.time.OffsetDateTime;
+
+@Entity
+@Table(name = "alerts")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+public class Alert {
+    @Id
+    private UUID alertId;
+    private UUID accountId;
+    private String plate;
+    private String alertText;
+    private OffsetDateTime createdAt;
+    @Formula("(SELECT MAX(d.detected_at) FROM detections d WHERE d.account_id = account_id AND d.plate = plate)")
+    private OffsetDateTime lastDetectedAt;
+    @Version
+    private Long version;
+    public static Alert create(UUID accountId, String plate, String alertText, OffsetDateTime now) {
+        Alert alert = new Alert();
+        alert.alertId = UUID.randomUUID();
+        alert.accountId = accountId;
+        alert.plate = plate;
+        alert.alertText = alertText;
+        alert.createdAt = now;
+
+        return alert;
+    }
+
+    public void update(String alertText) {
+        this.alertText = alertText;
+    }
+}

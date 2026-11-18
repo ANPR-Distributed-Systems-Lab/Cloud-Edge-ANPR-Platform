@@ -1,6 +1,8 @@
 package com.anpr.operations.internal.devices;
 
-import com.anpr.operations.internal.accounts.AccountRepository;
+import com.anpr.operations.internal.accounts.AccountService;
+import com.anpr.operations.internal.devices.model.Device;
+import com.anpr.operations.internal.devices.repository.DeviceRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -28,13 +30,13 @@ class DevicePairingServiceTest {
     private DeviceRepository deviceRepository;
 
     @Mock
-    private AccountRepository accountRepository;
+    private AccountService accountService;
 
     private DevicePairingService service;
 
     @BeforeEach
     void setUp() {
-        service = new DevicePairingService(deviceRepository, accountRepository);
+        service = new DevicePairingService(deviceRepository, accountService);
     }
 
     @Test
@@ -43,7 +45,7 @@ class DevicePairingServiceTest {
 
         service.pair(DEVICE_ID, ACCOUNT_ID, 1);
 
-        verify(accountRepository).insertIfAbsent(ACCOUNT_ID);
+        verify(accountService).ensureExists(ACCOUNT_ID);
         ArgumentCaptor<Device> saved = ArgumentCaptor.forClass(Device.class);
         verify(deviceRepository).save(saved.capture());
         assertThat(saved.getValue().getAccountId()).isEqualTo(ACCOUNT_ID);
@@ -59,7 +61,7 @@ class DevicePairingServiceTest {
 
         assertThat(device.getAccountId()).isEqualTo(OTHER_ACCOUNT_ID);
         assertThat(device.getVersion()).isEqualTo(2);
-        verify(accountRepository).insertIfAbsent(OTHER_ACCOUNT_ID);
+        verify(accountService).ensureExists(OTHER_ACCOUNT_ID);
     }
 
     @Test
@@ -70,7 +72,7 @@ class DevicePairingServiceTest {
         service.pair(DEVICE_ID, ACCOUNT_ID, 1);
 
         assertThat(device.getVersion()).isEqualTo(1);
-        verify(accountRepository, never()).insertIfAbsent(any());
+        verify(accountService, never()).ensureExists(any());
         verify(deviceRepository, never()).save(any());
     }
 
@@ -106,6 +108,6 @@ class DevicePairingServiceTest {
 
         assertThat(device.getAccountId()).isNull();
         assertThat(device.getVersion()).isEqualTo(2);
-        verify(accountRepository, never()).insertIfAbsent(any());
+        verify(accountService, never()).ensureExists(any());
     }
 }

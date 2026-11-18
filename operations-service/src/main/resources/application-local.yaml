@@ -10,3 +10,5 @@ app:
     sqs:
       device-events-queue-url: local
       events-queue-url: local
+    s3:
+      images-bucket: local-images

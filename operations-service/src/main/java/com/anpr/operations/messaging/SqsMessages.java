@@ -18,6 +18,15 @@ public final class SqsMessages {
         return value == null ? null : value.stringValue();
     }
 
+    /** The string value of an attribute the message must carry; a message without it can never be handled. */
+    public static String requiredAttribute(Message message, String name) {
+        String value = attribute(message, name);
+        if (value == null) {
+            throw new IllegalArgumentException("Message without attribute " + name);
+        }
+        return value;
+    }
+
     /** The traceId attribute; without it the message id, so every log line still carries a trace id. */
     public static String traceIdOf(Message message) {
         String traceId = attribute(message, "traceId");

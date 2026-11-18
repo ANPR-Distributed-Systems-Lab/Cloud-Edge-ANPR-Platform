@@ -10,4 +10,9 @@ public abstract class BusinessException extends RuntimeException{
         super(message);
         this.code = code;
     }
+
+    protected BusinessException(ErrorCodes code, String message, Throwable cause) {
+        super(message, cause);
+        this.code = code;
+    }
 }

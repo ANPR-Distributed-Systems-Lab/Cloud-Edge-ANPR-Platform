@@ -9,7 +9,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 import java.util.UUID;
 
-import static com.anpr.operations.messaging.SqsMessages.attribute;
+import static com.anpr.operations.messaging.SqsMessages.requiredAttribute;
 
 /**
  * Turns one message of the device-events queue into a pairing change. Any exception leaves the message on the
@@ -26,12 +26,12 @@ public class DeviceEventHandler {
     private final DevicePairingService pairingService;
 
     public void handle(Message message) {
-        String eventType = attribute(message, "eventType");
+        String eventType = requiredAttribute(message, "eventType");
         DeviceEventMessage event = jsonMapper.readValue(message.body(), DeviceEventMessage.class);
         UUID deviceId = required(event.deviceId(), "deviceId");
         long version = required(event.version(), "version");
 
-        switch (eventType == null ? "" : eventType) {
+        switch (eventType) {
             case PAIRED -> pairingService.pair(deviceId, required(event.accountId(), "accountId"), version);
             case UNPAIRED -> pairingService.unpair(deviceId, version);
             default -> throw new IllegalArgumentException("Unknown device event type: " + eventType);

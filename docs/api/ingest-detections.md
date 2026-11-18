@@ -163,7 +163,7 @@ The Lambda publishes the validated body **unchanged**, as the message, with thes
 | Attribute | Value |
 |---|---|
 | `eventType` | `detection`, derived from the route and never taken from the client |
-| `traceId` | The trace id of the request |
+| `traceId` | The trace id of the request. A consumer that receives a message without it logs a WARN and uses the SQS message id instead |
 | `deviceId` | The `sub` of the device token |
 
 There is no owner in the event. Consumers resolve it from their pairing table (see

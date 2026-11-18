@@ -1,6 +1,8 @@
 package com.anpr.operations.internal.devices;
 
 import com.anpr.operations.TestcontainersConfiguration;
+import com.anpr.operations.internal.devices.model.Device;
+import com.anpr.operations.internal.devices.repository.DeviceRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;

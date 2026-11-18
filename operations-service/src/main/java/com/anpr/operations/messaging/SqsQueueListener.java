@@ -1,6 +1,8 @@
 package com.anpr.operations.messaging;
 
+import com.anpr.operations.internal.devices.DeviceNotPairedException;
 import com.anpr.operations.shared.tracing.TraceId;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
 import org.springframework.context.SmartLifecycle;
@@ -20,6 +22,7 @@ import java.util.function.Consumer;
  * QueueListenersConfig.
  */
 @Slf4j
+@RequiredArgsConstructor
 public class SqsQueueListener implements SmartLifecycle {
     // Maximum values allowed by SQS: fewer calls, and an empty queue costs one call per 20 seconds.
     private static final int MAX_MESSAGES = 10;
@@ -33,13 +36,6 @@ public class SqsQueueListener implements SmartLifecycle {
 
     private volatile boolean running;
     private Thread worker;
-
-    public SqsQueueListener(String name, SqsClient sqs, String queueUrl, Consumer<Message> handler) {
-        this.name = name;
-        this.sqs = sqs;
-        this.queueUrl = queueUrl;
-        this.handler = handler;
-    }
 
     @Override
     public void start() {
@@ -92,6 +88,11 @@ public class SqsQueueListener implements SmartLifecycle {
         try {
             try {
                 handler.accept(message);
+            } catch (DeviceNotPairedException e) {
+                // Expected until device.paired arrives: one line, a stack trace would only bury the real failures.
+                log.warn("{}: message {} waits for the pairing of its device and stays on the queue",
+                        name, message.messageId());
+                return;
             } catch (RuntimeException e) {
                 // Not an outage yet: the message is retried, and the DLQ catches it if it keeps failing.
                 log.warn("{}: message {} failed and stays on the queue", name, message.messageId(), e);

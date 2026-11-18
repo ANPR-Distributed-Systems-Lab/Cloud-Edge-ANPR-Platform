@@ -1,11 +1,14 @@
 package com.anpr.operations.internal.alerts;
 
+import com.anpr.operations.internal.devices.DeviceRepository;
 import com.anpr.operations.shared.error.BadRequestException;
 import com.anpr.operations.shared.error.ConflictException;
 import com.anpr.operations.shared.error.ErrorCodes;
+import com.anpr.operations.shared.error.ForbiddenException;
 import com.anpr.operations.shared.error.NotFoundException;
 import com.anpr.operations.shared.security.CurrentAccount;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -14,9 +17,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
@@ -24,6 +29,7 @@ public class AlertService {
     private final AlertRepository alertRepository;
     private final CurrentAccount currentAccount;
     private final Clock clock;
+    private final DeviceRepository deviceRepository;
 
     @Transactional
     public Alert create(String plate, String alertText) {
@@ -72,6 +78,15 @@ public class AlertService {
     @Transactional
     public void delete(UUID alertId) {
         alertRepository.delete(findOwned(alertId));
+    }
+
+    public List<Alert> listForDevice() {
+        UUID deviceId = currentAccount.id();
+        UUID ownerId = deviceRepository.findOwnerById(deviceId).orElseThrow(() -> {
+            log.warn("Device {} asked for alerts but has no owner", deviceId);
+            return new ForbiddenException(ErrorCodes.DEVICE_NOT_PAIRED, "The device is not paired with an account");
+        });
+        return alertRepository.findAllByAccountIdOrderByCreatedAtAsc(ownerId);
     }
 
     private Alert findOwned(UUID alertId) {

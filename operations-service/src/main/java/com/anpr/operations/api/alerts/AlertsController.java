@@ -9,12 +9,12 @@ import com.anpr.operations.shared.security.CurrentAccount;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.net.URI;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -41,8 +41,9 @@ public class AlertsController implements AlertsApi {
                                                 String plate, OffsetDateTime from, OffsetDateTime to,
                                                 String ifNoneMatch) {
         if (currentAccount.isDevice()) {
-            // A device reads the alerts of its owner: full list and ETag, once the devices table exists (next stage).
-            return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).build();
+            List<Alert> alerts = alertService.listForDevice();
+            // Spring compares this ETag with If-None-Match itself and answers 304 with no body when they match.
+            return ResponseEntity.ok().eTag(AlertListETag.of(alerts)).body(mapper.toDevicePage(alerts));
         }
         PageRequest pageable = PageRequest.of(page, size, toSort(sort, direction));
         return ResponseEntity.ok(mapper.toPage(alertService.list(new AlertFilter(plate, from, to), pageable)));

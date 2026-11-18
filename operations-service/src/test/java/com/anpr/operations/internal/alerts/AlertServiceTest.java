@@ -1,8 +1,10 @@
 package com.anpr.operations.internal.alerts;
 
+import com.anpr.operations.internal.devices.DeviceRepository;
 import com.anpr.operations.shared.error.BadRequestException;
 import com.anpr.operations.shared.error.ConflictException;
 import com.anpr.operations.shared.error.ErrorCodes;
+import com.anpr.operations.shared.error.ForbiddenException;
 import com.anpr.operations.shared.error.NotFoundException;
 import com.anpr.operations.shared.security.CurrentAccount;
 import org.junit.jupiter.api.BeforeEach;
@@ -48,12 +50,15 @@ class AlertServiceTest {
     @Mock
     private CurrentAccount currentAccount;
 
+    @Mock
+    private DeviceRepository deviceRepository;
+
     private AlertService alertService;
 
     @BeforeEach
     void setUp() {
         Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
-        alertService = new AlertService(alertRepository, currentAccount, clock);
+        alertService = new AlertService(alertRepository, currentAccount, clock, deviceRepository);
         lenient().when(currentAccount.id()).thenReturn(ACCOUNT_ID);
     }
 
@@ -150,6 +155,26 @@ class AlertServiceTest {
         assertThatThrownBy(() -> alertService.delete(alertId))
                 .isInstanceOf(NotFoundException.class);
         verify(alertRepository, never()).delete(any(Alert.class));
+    }
+
+    @Test
+    void listForDeviceReturnsAllAlertsOfTheOwner() {
+        UUID owner = UUID.fromString("22222222-2222-2222-2222-222222222222");
+        List<Alert> alerts = List.of(Alert.create(owner, "WA12345", null, OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC)));
+        when(deviceRepository.findOwnerById(ACCOUNT_ID)).thenReturn(Optional.of(owner));
+        when(alertRepository.findAllByAccountIdOrderByCreatedAtAsc(owner)).thenReturn(alerts);
+
+        assertThat(alertService.listForDevice()).isEqualTo(alerts);
+    }
+
+    @Test
+    void listForDeviceWithNoOwnerIsForbidden() {
+        when(deviceRepository.findOwnerById(ACCOUNT_ID)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> alertService.listForDevice())
+                .isInstanceOf(ForbiddenException.class)
+                .extracting("code").isEqualTo(ErrorCodes.DEVICE_NOT_PAIRED);
+        verify(alertRepository, never()).findAllByAccountIdOrderByCreatedAtAsc(any());
     }
 
     private static Alert existingAlert(String plate, long version) {

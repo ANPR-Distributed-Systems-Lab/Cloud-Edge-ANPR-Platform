@@ -8,6 +8,8 @@ import com.anpr.operations.api.generated.model.AlertResponse;
 import com.anpr.operations.api.generated.model.PageMeta;
 import com.anpr.operations.internal.alerts.Alert;
 
+import java.util.List;
+
 @Mapper(componentModel = "spring", unmappedTargetPolicy = ReportingPolicy.ERROR)
 public interface AlertApiMapper {
     AlertResponse toResponse(Alert alert);
@@ -20,5 +22,15 @@ public interface AlertApiMapper {
                         .size(page.getSize())
                         .totalElements(page.getTotalElements())
                         .totalPages(page.getTotalPages()));
+    }
+
+    default AlertPage toDevicePage(List<Alert> alerts) {
+        return new AlertPage()
+                .items(alerts.stream().map(this::toResponse).toList())
+                .page(new PageMeta()
+                        .page(0)
+                        .size(alerts.size())
+                        .totalElements((long) alerts.size())
+                        .totalPages(1));
     }
 }

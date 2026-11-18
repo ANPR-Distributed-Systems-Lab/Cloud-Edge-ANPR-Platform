@@ -25,7 +25,7 @@ Endpoints of the diagram, as changed by deviations D11-D16 — the contract must
 - Diagram response fields include `id_konta`; the contract omits it from responses (D3) and it is never an input parameter (see section 2).
 - Detections return a presigned GET `imageUrl` instead of `s3_key` (D4, proposal).
 - Indexes: the diagram lists single-column B-Trees; we use composite indexes `(account_id, detected_at)` etc. (D1, section 5) — a deliberate design decision for the thesis.
-- Deviations are referenced in the contract as `D1`..`D18` and `D24` — never write `#` after a space in an unquoted YAML string (it starts a comment and truncates the text).
+- Deviations are referenced in the contract as `D1`..`D18`, `D24` and `D25` — never write `#` after a space in an unquoted YAML string (it starts a comment and truncates the text).
 - Naming is open: diagram says "Alerts-And-Views-Service", repo directory is `operations-service`.
 
 ## 1. Package layout
@@ -60,7 +60,7 @@ Areas: `search` (View 1), `radial` (View 2), `livefeed` (View 3), `alerts` (View
 ## 3. Errors
 
 - One error body for the whole API: Spring `ProblemDetail` (RFC 9457) with extension fields `code` (stable, machine-readable), `requestId` (= trace id) and optional `fields[]` for validation.
-- Standard HTTP statuses only: 400 malformed/validation, 404 not found, 409 business conflict (incl. optimistic lock), 500 unexpected. No custom 5xx codes.
+- Standard HTTP statuses only: 400 malformed/validation, 403 caller may not use the endpoint (`DEVICE_NOT_PAIRED`), 404 not found, 409 business conflict (incl. optimistic lock), 500 unexpected. No custom 5xx codes.
 - Exception hierarchy: `BusinessException` (client's fault, logged at INFO), `NotFoundException`, `TechnicalException` (our fault, logged at ERROR with cause). All unchecked.
 - One `@RestControllerAdvice` with a catch-all `Exception` handler. Responses never contain stack traces, class/package names, SQL, table names or hostnames.
 - Error codes live in one catalog class (`ErrorCodes`). Codes are a contract; messages may change. Frontend reacts to `code`, translates it itself.

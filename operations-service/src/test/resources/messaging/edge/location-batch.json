@@ -1,0 +1,14 @@
+{
+  "batchId": "0192f3a4-9a10-7c3b-8e55-2a4b6c8d0e12",
+  "locations": [
+    {
+      "locationId": "0192f3a4-9a11-7d20-9c01-3b5d7f9a1c02",
+      "recordedAt": "2026-10-30T09:14:21.000Z",
+      "lat": 52.229676,
+      "lon": 21.012229,
+      "accuracyM": 4.5,
+      "speedMps": 13.9,
+      "headingDeg": 87.0
+    }
+  ]
+}

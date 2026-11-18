@@ -134,6 +134,10 @@
 			<groupId>software.amazon.awssdk</groupId>
 			<artifactId>sqs</artifactId>
 		</dependency>
+		<dependency>
+			<groupId>org.hibernate.orm</groupId>
+			<artifactId>hibernate-spatial</artifactId>
+		</dependency>
 	</dependencies>
 
 	<build>

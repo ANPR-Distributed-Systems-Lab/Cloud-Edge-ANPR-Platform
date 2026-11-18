@@ -1,6 +1,6 @@
 package com.anpr.operations;
 
-import com.anpr.operations.messaging.devices.DeviceEventsListener;
+import com.anpr.operations.messaging.SqsQueueListener;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -25,7 +25,7 @@ class OperationsServiceApplicationIT {
 	@Test
 	void queueListenersAreOffInTheTestProfile() {
 		// A listener here would poll real AWS queues from every integration test.
-		assertThat(context.getBeansOfType(DeviceEventsListener.class)).isEmpty();
+		assertThat(context.getBeansOfType(SqsQueueListener.class)).isEmpty();
 	}
 
 }

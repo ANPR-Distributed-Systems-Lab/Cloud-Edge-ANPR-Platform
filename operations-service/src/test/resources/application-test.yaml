@@ -4,3 +4,4 @@ app:
   aws:
     sqs:
       device-events-queue-url: https://sqs.eu-central-1.amazonaws.com/000000000000/operations-device-events
+      events-queue-url: https://sqs.eu-central-1.amazonaws.com/000000000000/operations-events

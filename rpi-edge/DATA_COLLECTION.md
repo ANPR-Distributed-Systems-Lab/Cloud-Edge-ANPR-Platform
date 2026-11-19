@@ -8,8 +8,8 @@ USB stick that can be read directly on Windows. The code is in `collection/`.
 ## Run it
 
 From `rpi-edge/`, with the Docker context pointing at the Pi (see `RASPBERRY_PI_SETUP.md`), and
-`EDGE_MODE=collection` in `.env` ([README.md](README.md)). Or, from the detection mode, **hold the tact switch for
-2 s**: the detection mode stops completely and the collection mode starts; hold it again to go back.
+`EDGE_MODE=collection` in `.env` ([README.md](README.md)). Or, from the detection mode, **hold the run switch
+(GPIO22) for 2 s**: the detection mode stops completely and the collection mode starts; hold it again to go back.
 
 ```bash
 docker compose up --build
@@ -68,18 +68,22 @@ the sensor with a sharpness number: turn the lens focus ring until the number is
 of the same scene and light). Click the live preview to move the crop.
 
 **3. Recording.** Start/stop, counters, write speed, estimated time until the stick is full, mount and
-safe-eject buttons. Eject (or stop recording and wait for the LED to go off) before pulling the stick out.
+safe-eject buttons. Eject (or stop recording and wait for the red alert LED to go off) before pulling the stick
+out.
 
 fps, JPEG quality and image flips cannot be changed while recording. Exposure and white balance can.
 
 ## In the car (no laptop)
 
-- **Tact switch (GPIO22)**: a short press starts/stops recording; holding it for 2 s switches to the detection
+- **Run switch (GPIO22)**: a short press starts/stops recording; holding it for 2 s switches to the detection
   mode (two long beeps, "SWITCHING TO" on the LCD; recording stops and the USB stick is ejected first).
-  **LED (GPIO17)** is on while recording. **Buzzer (GPIO27)**: one beep on start, two on stop, one long beep on
-  error.
-- **LCD** shows state and frame counter, free space on the stick, current shutter and ISO, IP address and CPU
-  temperature (`UV!` appears when the Pi reports under-voltage).
+  **Buzzer (GPIO27)**: one beep on start, two on stop, one long beep on error, a 3 s tone when a fault appears.
+- **Page switch (GPIO23)**: the next LCD page, a long press the home page. Home: `REC frames` and the count (or
+  `IDLE` and the frame rate set), free space on the stick, the exposure (shutter and ISO), the IP address and the
+  CPU temperature. FAULTS: camera error, dropped frames, power too low, CPU throttled, CPU hot.
+- **LEDs** (`collection/indicators.py`): run (green, GPIO5) blinks while the camera runs; queue (yellow, GPIO19)
+  blinks when less than 5 GB are free on the stick; alert (red, GPIO26) is on while recording; fault (red, GPIO12)
+  is on with a fault. net and gps stay off in this mode.
 - Optional **autostart**: recording starts by itself once the USB stick is available.
 
 ## What ends up on the stick

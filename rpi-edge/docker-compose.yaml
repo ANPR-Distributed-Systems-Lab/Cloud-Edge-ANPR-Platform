@@ -1,4 +1,4 @@
-# One service for both modes: EDGE_MODE in .env is the mode main.py starts in, a long press of the tact switch
+# One service for both modes: EDGE_MODE in .env is the mode main.py starts in, a long press of the run switch
 # switches between them inside this container (README.md). Only this one container ever holds the camera.
 services:
   rpi-edge:

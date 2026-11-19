@@ -40,7 +40,7 @@ def wait_started(modes):
 
 
 def switcher_with(modes, ending=()):
-    peripherals = Peripherals(None, None, None, TactSwitch(FakeButton()))
+    peripherals = Peripherals(run_switch=TactSwitch(FakeButton()))
     runs = {name: modes.mode(name, name in ending) for name in ("collection", "detection")}
     return ModeSwitcher(runs, peripherals), peripherals
 
@@ -50,7 +50,7 @@ def test_a_long_press_switches_to_the_other_mode_after_the_first_has_stopped():
     switcher, peripherals = switcher_with(modes)
     thread = start(switcher, "detection")
     wait_started(modes)
-    peripherals.switch.held()  # the long press, as gpiozero reports it
+    peripherals.run_switch.held()  # the long press, as gpiozero reports it
     wait_started(modes)
     switcher.request_switch()
     wait_started(modes)
@@ -85,7 +85,7 @@ def test_a_failing_mode_does_not_stop_the_switcher(capsys):
         ran.set()
         stop.wait()
 
-    switcher = ModeSwitcher({"detection": broken, "collection": working}, Peripherals(None, None, None, None))
+    switcher = ModeSwitcher({"detection": broken, "collection": working}, Peripherals())
     thread = start(switcher, "detection")
     assert failed.wait(2)
     switcher.request_switch()

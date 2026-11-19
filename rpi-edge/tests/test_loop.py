@@ -170,3 +170,25 @@ def test_summary_counts_and_resets():
     assert fields["rejected"] == {"too_small": 3, "cooldown": 1}
     assert fields["detect_ms_median"] == 500.0
     assert summary.frames == 0
+
+
+def test_a_failing_loop_is_a_fault_until_a_frame_goes_through(tmp_path, monkeypatch):
+    monkeypatch.setattr("detection.loop.CAMERA_RETRY_SECONDS", 0)
+    loop, stop, _, _, _ = loop_for(tmp_path, FixedLocationSource(52.2, 21.0), frames=1)
+    seen = []
+    loop.observers = (lambda frame, result: seen.append([f.code for f in loop.faults.active()]),)
+    loop.run(stop)
+    assert seen == [["frame_loop"]]  # reported after the failed capture, still there while the frame is observed
+    assert loop.faults.active() == []
+
+
+def test_a_held_loop_closes_the_camera_and_analyses_nothing(tmp_path, monkeypatch):
+    monkeypatch.setattr("detection.loop.HOLD_CHECK_SECONDS", 0)
+    loop, stop, pipeline, _, _ = loop_for(tmp_path, FixedLocationSource(52.2, 21.0))
+    loop.camera.is_open = True
+    assert loop.hold.toggle() is True
+    waits = []
+    stop.wait = lambda seconds: waits.append(seconds) or (len(waits) >= 3 and stop.set())
+    loop.run(stop)
+    assert not loop.camera.is_open and pipeline.n == 0 and waits == [0, 0, 0]
+    assert loop.hold.toggle() is False

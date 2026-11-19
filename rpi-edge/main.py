@@ -1,11 +1,12 @@
-"""Entry point of the container: runs one mode at a time and switches between them on a long press of the tact switch.
+"""Entry point of the container: runs one mode at a time and switches between them on a long press of the run switch.
 
   collection  tune the camera, record full-resolution frames for training (DATA_COLLECTION.md)
   detection   read plates and send them to the cloud (DETECTION.md)
 
-EDGE_MODE (rpi-edge/.env) picks the mode the container starts in. A long press (common/peripherals.py) stops the
-running mode completely, camera, threads and web server, before the other one starts, so the two never hold the
-camera at once. The peripherals are opened here once and handed to whichever mode runs.
+EDGE_MODE (rpi-edge/.env) picks the mode the container starts in. A long press of the run switch
+(common/peripherals.py) stops the running mode completely, camera, threads and web server, before the other one
+starts, so the two never hold the camera at once. The peripherals are opened here once and handed to whichever mode
+runs.
 """
 import os
 import signal
@@ -29,8 +30,8 @@ class ModeSwitcher:
         self._shutdown = threading.Event()
         self._stop = threading.Event()  # stops the running mode: a switch or the shutdown
         self._switch = False
-        if peripherals.switch is not None:
-            peripherals.switch.on_hold = self.request_switch
+        if peripherals.run_switch is not None:
+            peripherals.run_switch.on_hold = self.request_switch
 
     def run(self, mode: str) -> None:
         """Runs `mode`, and the other one after each switch, until shutdown()."""
@@ -62,7 +63,7 @@ class ModeSwitcher:
         if not self._stop.is_set():
             # A mode that ended by itself (e.g. detection without its environment) leaves the device waiting, so a
             # long press can still switch to the other one.
-            log("mode_ended", level="warning", mode=mode, hint="hold the tact switch to switch the mode")
+            log("mode_ended", level="warning", mode=mode, hint="hold the run switch to switch the mode")
             self.peripherals.show([mode.upper(), "not running", "see the log", "hold switch: change"])
             self._stop.wait()
 

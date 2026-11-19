@@ -9,9 +9,12 @@ from detection.cloud.transport import Http, NetworkError, Response
 
 @dataclass
 class CloudHealth:
-    """When the platform last answered and last failed to (monotonic seconds), for the screen in the car."""
+    """When the platform last answered and last failed to (monotonic seconds), and whether the device may use it,
+    for the LCD and the LEDs in the car (feedback/)."""
     last_answer_at: float | None = None
     last_failure_at: float | None = None
+    sign_in_failed: bool = False  # the latest request found no access token (credentials, Cognito)
+    forbidden: bool = False  # the latest answer was a 403: the token is not a device token
 
     @property
     def online(self) -> bool | None:
@@ -47,8 +50,12 @@ class Api:
                 log("access_token_refused", level="warning", traceId=trace_id)
                 self.auth.invalidate()
                 response = send()
-        except (NetworkError, AuthError):
+        except NetworkError:
             self.health.last_failure_at = self.clock()
             raise
-        self.health.last_answer_at = self.clock()
+        except AuthError:
+            self.health.last_failure_at, self.health.sign_in_failed = self.clock(), True
+            raise
+        self.health.last_answer_at, self.health.sign_in_failed = self.clock(), False
+        self.health.forbidden = response.status == 403 and self._authenticated(url)
         return response

@@ -12,14 +12,16 @@ own, started here:
   photos          encodes the photos of the frames of detections            delivery/photos.py
   uploader        uploads the photos to S3                                  delivery/uploads.py
   send-<stream>   sends detections, locations and metrics in batches        delivery/sender.py
-  feedback        the LCD, buzzer and LED in the car                        feedback.py
+  feedback        the LCD, the LEDs and the buzzer in the car               feedback/panel.py
 
 The loop starts once there is a configuration (from the cloud or the copy on the device) and a set of models (the
-cache or a download). main.py runs the mode until it is switched or the container stops.
+cache or a download). A short press of the run switch stops and starts the analysis (loop.Hold); the other workers
+go on. main.py runs the mode until it is switched or the container stops.
 """
 import threading
 from collections.abc import Callable
 
+from common.faults import FaultBoard
 from common.jsonlog import log
 from common.peripherals import Peripherals
 from detection.cloud.alert_poll import AlertPoller
@@ -35,12 +37,12 @@ from detection.delivery.photos import FrameSaver
 from detection.delivery.queues import Queues, streams
 from detection.delivery.sender import Sender
 from detection.delivery.uploads import ImageUploader
-from detection.feedback import Feedback, StatusSources
+from detection.feedback.panel import Feedback, FeedbackSources
 from detection.gps.recorder import LocationRecorder
 from detection.gps.serial_reader import SerialGpsReader
 from detection.gps.source import FixedLocationSource, LocationSource, NoLocationSource
 from detection.gps.tracker import GpsTracker
-from detection.loop import FrameLoop
+from detection.loop import FrameLoop, Hold
 from detection.metrics import MetricsSampler
 from detection.pipeline import Pipeline
 from detection.rules.alerts import AlertWatch
@@ -66,20 +68,21 @@ def run(stop: threading.Event, peripherals: Peripherals) -> None:
     api = Api(http, auth, env.api_base_url)
     configuration = ConfigurationStore(env.config_dir)
     models, alerts, frames = ModelSlot(), AlertWatch(), FrameCounter()
+    faults, hold = FaultBoard(), Hold()
     queues = Queues.open(env.state_dir / "outbox")
     gps, gps_workers = _gnss(env)
-    feedback = Feedback(StatusSources(configuration, models, queues.detections, gps, api.health, alerts),
-                        peripherals.lcd, peripherals.beeper, peripherals.led)
+    feedback = Feedback(FeedbackSources(configuration, models, queues, gps, api.health, alerts, faults, hold,
+                                        env.state_dir), peripherals)
     photos = FrameSaver(env.state_dir / "frames", queues.images, configuration)
     log("detection_starting", cloud=env.api_base_url, authenticated=auth is not None, gps=_gps_kind(env),
         pending=queues.detections.pending())
 
     senders = {s.name: Sender(s, api, configuration) for s in streams(queues, env)}
     workers = _start_workers({
-        "config-poll": ConfigPoller(api, env.config_url, configuration).run,
+        "config-poll": ConfigPoller(api, env.config_url, configuration, faults).run,
         "model-updater": ModelUpdater(ModelStore(env.state_dir / "models", api, http, env.models_url),
-                                      configuration, models).run,
-        "alert-poll": AlertPoller(api, env.alerts_url, alerts, configuration).run,
+                                      configuration, models, faults).run,
+        "alert-poll": AlertPoller(api, env.alerts_url, alerts, configuration, faults).run,
         **gps_workers,
         "locations": LocationRecorder(gps, queues.locations, configuration).run,
         "metrics": MetricsSampler(queues, gps, frames, configuration, env.state_dir).run,
@@ -92,7 +95,8 @@ def run(stop: threading.Event, peripherals: Peripherals) -> None:
     if configuration.wait_until_configured(stop) and models.wait(stop):
         camera = ReplayCamera(env.replay_dir) if env.replay_dir else Camera()
         FrameLoop(camera, Pipeline(), configuration, models, gps, queues.detections,
-                  observers=(feedback.on_frame, photos.submit, lambda frame, result: frames.tick())).run(stop)
+                  observers=(feedback.on_frame, photos.submit, lambda frame, result: frames.tick()),
+                  hold=hold, faults=faults).run(stop)
 
     log("detection_stopping")
     for worker in workers:

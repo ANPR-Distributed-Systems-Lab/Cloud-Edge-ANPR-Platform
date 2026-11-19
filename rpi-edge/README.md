@@ -25,9 +25,9 @@ docker compose up -d --build
 ```
 
 Both modes are the same service: `EDGE_MODE` is the mode the container starts in (`detection` without a `.env`).
-**Holding the tact switch for 2 s** switches to the other mode without touching the container: `main.py` stops the
-running mode completely (camera, threads, web server) before it starts the other one, so the two never run at
-once. After a restart the container starts in `EDGE_MODE` again. `docker compose logs -f` shows the JSON logs of
+**Holding the run switch (GPIO22) for 2 s** switches to the other mode without touching the container: `main.py`
+stops the running mode completely (camera, threads, web server) before it starts the other one, so the two never run
+at once. After a restart the container starts in `EDGE_MODE` again. `docker compose logs -f` shows the JSON logs of
 whichever mode runs (`mode_started`, `mode_switched`).
 
 `main.py` opens the peripherals once and runs `collection.main.run` or `detection.main.run`. Both modes keep their
@@ -40,11 +40,12 @@ model cache of the detection mode).
 ```
 main.py             entry point: runs one mode at a time, EDGE_MODE first, switched by a long press
 common/             shared by both modes: JSON logs, atomic JSON files, auto exposure, the sensor limits, Pi health,
-                    the peripherals (LCD, buzzer, LED, tact switch)
+                    the peripherals (LCD, buzzer, LEDs, tact switches), the LCD pages and the faults
 collection/         the data collection mode (web UI in collection/ui/)
 detection/          the detection mode: contract/, config/, gps/, vision/, rules/, delivery/, cloud/ (DETECTION.md, section 2)
 tests/              unit tests (pytest), no camera, network or GPU
-tools/              development tools: dev_cloud.py (the platform without AWS), stress_test.py (power supply test)
+tools/              development tools: dev_cloud.py (the platform without AWS), stress_test.py (power supply test),
+                    wiring_check.py (LEDs, buzzer and switches, one by one)
 ```
 
 ## Development

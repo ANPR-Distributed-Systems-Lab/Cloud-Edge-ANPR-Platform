@@ -1,29 +1,35 @@
-"""The in-car hardware in collection mode (common/peripherals.py): a short press of the tact switch starts / stops
-recording, the LED is on while recording, the buzzer confirms, and the 4x20 LCD shows the status and the IP address
-to open in the browser. A long press of the switch is main.py's: it switches to the detection mode.
+"""The in-car hardware in collection mode (common/peripherals.py); what the LCD and the LEDs show is in
+indicators.py. The web UI works the same without any of it.
 
-Every part is optional: whatever is missing is skipped, the web UI keeps working.
+Run switch: a short press starts / stops recording (one beep: started, two: stopped, one long: failed); a long press
+is main.py's (switch to the detection mode). Page switch: the next LCD page; a long press the home page. A fault
+sounds the buzzer for 3 s when it appears (common/faults.py).
 """
 import threading
 
 from collection.camera_service import CameraService
+from collection.indicators import collection_faults, home_lines, light_states
+from common.display import Pages, fault_lines
+from common.faults import FaultAlarm
 from common.jsonlog import log
 from common.peripherals import Peripherals
-from common.system_info import local_ip
+
+REFRESH_SECONDS = 1.0
+STARTED_BEEPS, STOPPED_BEEPS, FAILED_BEEPS = (1, 0.12), (2, 0.12), (1, 0.8)
+PAGES = 2  # home, FAULTS
 
 
 class Hardware:
     def __init__(self, camera: CameraService, peripherals: Peripherals) -> None:
         self.camera = camera
         self.peripherals = peripherals
+        self.pages = Pages(PAGES, peripherals.page_switch)
+        self.alarm = FaultAlarm(peripherals.beep_later)
         self._stop = threading.Event()
         self._busy = threading.Lock()
-        if peripherals.switch is not None:
-            peripherals.switch.on_press = self._toggle
+        if peripherals.run_switch is not None:
+            peripherals.run_switch.on_press = self._toggle
         threading.Thread(target=self._loop, name="hardware", daemon=True).start()
-
-    def _beep(self, count: int = 1, length: float = 0.12) -> None:
-        self.peripherals.beep(count, length)
 
     def _toggle(self) -> None:
         if not self._busy.acquire(blocking=False):  # ignore presses while the previous one is still being handled
@@ -31,57 +37,36 @@ class Hardware:
         try:
             if self.camera.recording_status() is None:
                 self.camera.start_recording("button")
-                self._beep(1)
+                self.peripherals.beep(*STARTED_BEEPS)
             else:
                 self.camera.stop_recording("button")
-                self._beep(2)
+                self.peripherals.beep(*STOPPED_BEEPS)
         except Exception as e:
             log("button_action_failed", error=str(e))
-            self._beep(1, 0.8)
+            self.peripherals.beep(*FAILED_BEEPS)
         finally:
             self._busy.release()
 
-    def _lines(self) -> list[str]:
-        status = self.camera.status()
-        cam, rec, usb = status["camera"], status["recording"], status["storage"]
-        fps = self.camera.store.get()["recording"]["fps"]
-        if rec is not None:
-            first = f"REC {rec['saved']:6d} {fps:g}fps"
-            if rec["dropped"]:
-                first += f" d{rec['dropped']}"
-        else:
-            first = f"IDLE {fps:g}fps"
-
-        if usb["usage"]:
-            second = f"USB {usb['usage']['free'] / 1e9:.1f}GB free"
-        elif usb["error"]:
-            second = "USB error"
-        else:
-            second = "USB: not mounted" if usb["device"] else "USB: none"
-
-        actual = cam["actual"]
-        if cam["error"] or not cam["running"]:
-            third = "CAMERA ERROR"
-        elif actual["exposure_us"]:
-            third = f"1/{round(1e6 / actual['exposure_us'])}s ISO{round(actual['gain'] * 100)}"
-        else:
-            third = "camera starting"
-
-        temp = status["system"]["temp_c"]
-        power = status["system"]["power"] or {}
-        warn = " UV!" if power.get("undervoltage_now") else ""
-        fourth = f"{local_ip()} {temp:.0f}C{warn}" if temp is not None else local_ip()
-        return [first, second, third, fourth]
-
     def _loop(self) -> None:
-        while not self._stop.wait(1.0):
+        while not self._stop.is_set():
+            self.pages.wait(REFRESH_SECONDS)
+            if self._stop.is_set():
+                break
             try:
-                if self.peripherals.led is not None:
-                    self.peripherals.led.value = 1 if self.camera.recording_status() is not None else 0
-                self.peripherals.show(self._lines())
+                self.refresh()
             except Exception as e:
                 log("hardware_error", error=repr(e))
 
+    def refresh(self) -> None:
+        status = self.camera.status()
+        faults = collection_faults(status)
+        self.alarm.check(faults)
+        self.peripherals.lights.show(**light_states(status, faults))
+        if self.pages.index == 0:
+            self.peripherals.show(home_lines(status, self.camera.store.get()["recording"]["fps"]))
+        else:
+            self.peripherals.show(fault_lines(faults, self.pages))
+
     def close(self) -> None:
-        """Stops the status updates; main.py clears the LED, the screen and the short press (Peripherals.reset)."""
+        """Stops the updates; main.py clears the LEDs, the screen and the switches (Peripherals.reset)."""
         self._stop.set()

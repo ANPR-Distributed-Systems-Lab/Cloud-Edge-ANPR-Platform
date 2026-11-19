@@ -174,6 +174,41 @@ def test_uses_the_api_gateway_request_id_when_the_client_trace_id_is_missing_or_
     assert response["headers"]["X-Trace-Id"] == REQUEST_ID
 
 
+def log_fields(caplog, message):
+    """traceId and gatewayRequestId of the log line with this message, as the JSON log of the function shows them."""
+    [record] = [r for r in caplog.records if r.getMessage() == message]
+    return {name: getattr(record, name) for name in ("traceId", "gatewayRequestId") if hasattr(record, name)}
+
+
+def test_logs_the_gateway_request_id_next_to_a_client_trace_id(ingest, sns, caplog):
+    body = json.dumps(detections_batch())
+    expect_publish(sns, body, trace_id="trace-from-device")
+    caplog.set_level("INFO")
+
+    headers = {"content-type": "application/json", "x-trace-id": "trace-from-device"}
+    ingest.handler(api_event(body, headers=headers), None)
+
+    assert log_fields(caplog, "Event published") == {"traceId": "trace-from-device", "gatewayRequestId": REQUEST_ID}
+
+
+def test_logs_only_the_trace_id_when_it_is_the_gateway_request_id(ingest, sns, caplog):
+    body = json.dumps(detections_batch())
+    expect_publish(sns, body)
+    caplog.set_level("INFO")
+
+    ingest.handler(api_event(body), None)
+
+    assert log_fields(caplog, "Event published") == {"traceId": REQUEST_ID}
+
+
+def test_a_rejection_is_logged_with_both_ids_too(ingest, sns, caplog):
+    caplog.set_level("INFO")
+
+    ingest.handler(api_event("not json", headers={"content-type": "application/json", "x-trace-id": "trace-1"}), None)
+
+    assert log_fields(caplog, "Event rejected") == {"traceId": "trace-1", "gatewayRequestId": REQUEST_ID}
+
+
 def test_decodes_base64_encoded_bodies(ingest, sns):
     body = json.dumps(detections_batch())
     expect_publish(sns, body)

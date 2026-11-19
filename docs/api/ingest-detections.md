@@ -172,7 +172,9 @@ the body and the attributes directly, and can filter on `eventType`.
 
 Each consumer reads the batch, deduplicates by `detectionId` and stores what it needs. The Trace ID of an
 individual detection is its `detectionId`; `traceId` identifies the request. All logs are JSON and contain
-these ids (project convention). Request bodies are never logged: they contain plates and GPS positions.
+these ids (project convention). When `traceId` is the client's `X-Trace-Id`, the log lines of the Lambda also carry
+`gatewayRequestId`, the API Gateway request id, which is the only id in the gateway's access logs. Request bodies
+are never logged: they contain plates and GPS positions.
 
 ## 6. Unpaired devices
 

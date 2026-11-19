@@ -13,6 +13,8 @@ public final class TraceId {
     /** Injected by API Gateway: its own id of the request, the one in its access logs. */
     public static final String GATEWAY_REQUEST_ID_HEADER = "X-Request-Id";
     public static final String MDC_KEY = "traceId";
+    /** Logged only when the trace id is the client's: links the log lines to the access logs of API Gateway. */
+    public static final String GATEWAY_REQUEST_ID_MDC_KEY = "gatewayRequestId";
 
     public static Optional<String> current() {
         return Optional.ofNullable(MDC.get(MDC_KEY));

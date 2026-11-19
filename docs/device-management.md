@@ -133,6 +133,9 @@ by themselves, and detections stay with the account they belonged to.
   request id of API Gateway (`X-Request-Id`, the id in its access logs), otherwise a generated one. This is the
   rule of the ingest Lambda and of operations-service too. The trace id is returned in the `X-Trace-Id` header and
   as `requestId` of errors, and the device events carry it as the attribute `traceId`.
+- When the trace id is the client's, every line of the request also carries `gatewayRequestId`, the request id of
+  API Gateway: its access logs know only that id, so this field joins them with the logs of the service. The ingest
+  Lambda logs the same field; operations-service does not yet.
 - Passwords are never logged or returned. Ids (device, account, event) are logged as fields.
 
 ## 7. Code layout

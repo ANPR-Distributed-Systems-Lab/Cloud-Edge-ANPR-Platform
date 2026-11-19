@@ -65,7 +65,7 @@ For service routes the gateway injects these headers, overwriting anything the c
 |---|---|
 | `X-Account-Id` | `sub` of the token (the caller's own account id) |
 | `X-Account-Type` | claim `account_type` (`user` or `device`) |
-| `X-Request-Id` | the request id of API Gateway (`$context.requestId`), the trace id when the client sent no `X-Trace-Id` |
+| `X-Request-Id` | the request id of API Gateway (`$context.requestId`), the trace id when the client sent no `X-Trace-Id`; otherwise logged as `gatewayRequestId` next to the client's trace id |
 
 Lambda integrations receive the claims in the request context instead of headers.
 

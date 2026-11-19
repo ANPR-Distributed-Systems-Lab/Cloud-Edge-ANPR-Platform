@@ -52,7 +52,30 @@ class TraceIdFilterTest {
         assertThat(MDC.get(TraceId.MDC_KEY)).isNull();
     }
 
-    private String traceIdFor(String clientTraceId, String gatewayRequestId) throws Exception {
+    @Test
+    void withTheClientTraceIdTheGatewayRequestIdIsLoggedToo() throws Exception {
+        assertThat(gatewayRequestIdInTheMdcFor("trace-abc-1", "JZoPFhq3FiAEMbA=")).isEqualTo("JZoPFhq3FiAEMbA=");
+        assertThat(MDC.get(TraceId.GATEWAY_REQUEST_ID_MDC_KEY)).isNull();
+    }
+
+    @Test
+    void theGatewayRequestIdIsNotRepeatedWhenItIsTheTraceId() throws Exception {
+        assertThat(gatewayRequestIdInTheMdcFor(null, "JZoPFhq3FiAEMbA=")).isNull();
+        assertThat(gatewayRequestIdInTheMdcFor("trace-abc-1", null)).isNull();
+    }
+
+    private String gatewayRequestIdInTheMdcFor(String clientTraceId, String gatewayRequestId) throws Exception {
+        AtomicReference<String> duringRequest = new AtomicReference<>();
+        filter.doFilter(request(clientTraceId, gatewayRequestId), new MockHttpServletResponse(), new MockFilterChain() {
+            @Override
+            public void doFilter(ServletRequest req, ServletResponse res) {
+                duringRequest.set(MDC.get(TraceId.GATEWAY_REQUEST_ID_MDC_KEY));
+            }
+        });
+        return duringRequest.get();
+    }
+
+    private static MockHttpServletRequest request(String clientTraceId, String gatewayRequestId) {
         MockHttpServletRequest request = new MockHttpServletRequest();
         if (clientTraceId != null) {
             request.addHeader(TraceId.HEADER, clientTraceId);
@@ -60,8 +83,12 @@ class TraceIdFilterTest {
         if (gatewayRequestId != null) {
             request.addHeader(TraceId.GATEWAY_REQUEST_ID_HEADER, gatewayRequestId);
         }
+        return request;
+    }
+
+    private String traceIdFor(String clientTraceId, String gatewayRequestId) throws Exception {
         MockHttpServletResponse response = new MockHttpServletResponse();
-        filter.doFilter(request, response, new MockFilterChain());
+        filter.doFilter(request(clientTraceId, gatewayRequestId), response, new MockFilterChain());
         return response.getHeader(TraceId.HEADER);
     }
 }

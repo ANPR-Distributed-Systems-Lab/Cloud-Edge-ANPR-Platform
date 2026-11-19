@@ -10,6 +10,7 @@ VALIDATION_FAILED listing every problem found, and nothing is published. A valid
     body        the request body, unchanged (a JSON object, at most MAX_BODY_BYTES; unknown properties stay)
     attributes  eventType   derived from the route, never taken from the client
                 traceId     the client's X-Trace-Id header if valid, otherwise the API Gateway request id
+                            (log lines carry gatewayRequestId too when the client's id was used)
                 deviceId    the id of the device (the token's sub), from the token (never from the body)
 
 The owner of the device is not in the message: every consumer resolves it from its own copy of the
@@ -30,6 +31,7 @@ import logging
 import math
 import os
 import re
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 
@@ -69,34 +71,34 @@ sns = boto3.client("sns")  # created once per execution environment and reused a
 
 
 def handler(event, context):
-    trace_id = _trace_id(event)
+    trace = _trace(event)
 
     event_type = EVENT_TYPE_BY_ROUTE.get(event.get("routeKey"))
     if event_type is None:
-        return _rejected(404, "UNKNOWN_ROUTE", "No event type is configured for this route.", trace_id)
+        return _rejected(404, "UNKNOWN_ROUTE", "No event type is configured for this route.", trace)
 
     device_id = _device_id(event)
     if device_id is None:
-        return _rejected(403, "FORBIDDEN", "The token is not a device token.", trace_id)
+        return _rejected(403, "FORBIDDEN", "The token is not a device token.", trace)
 
     if not _is_json_content_type(event):
-        return _rejected(415, "UNSUPPORTED_MEDIA_TYPE", "The Content-Type must be application/json.", trace_id)
+        return _rejected(415, "UNSUPPORTED_MEDIA_TYPE", "The Content-Type must be application/json.", trace)
 
     body = _raw_body(event)
     if body is None:
-        return _rejected(400, "INVALID_BODY", "The body is not valid base64.", trace_id)
+        return _rejected(400, "INVALID_BODY", "The body is not valid base64.", trace)
     if len(body) > MAX_BODY_BYTES:
-        return _rejected(413, "PAYLOAD_TOO_LARGE", f"The body must not exceed {MAX_BODY_BYTES} bytes.", trace_id)
+        return _rejected(413, "PAYLOAD_TOO_LARGE", f"The body must not exceed {MAX_BODY_BYTES} bytes.", trace)
 
     parsed = _json_object(body)
     if parsed is None:
-        return _rejected(400, "INVALID_JSON", "The body must be a UTF-8 JSON object.", trace_id)
+        return _rejected(400, "INVALID_JSON", "The body must be a UTF-8 JSON object.", trace)
     message, document = parsed
 
     errors, accepted = VALIDATOR_BY_EVENT_TYPE[event_type](document, _now(), device_id)
     if errors:
         count = f"{len(errors)} validation error{'' if len(errors) == 1 else 's'}"
-        return _rejected(400, "VALIDATION_FAILED", f"{count}, nothing was accepted", trace_id, fields=errors)
+        return _rejected(400, "VALIDATION_FAILED", f"{count}, nothing was accepted", trace, fields=errors)
 
     try:
         published = sns.publish(
@@ -104,19 +106,19 @@ def handler(event, context):
             Message=message,
             MessageAttributes={
                 "eventType": {"DataType": "String", "StringValue": event_type},
-                "traceId": {"DataType": "String", "StringValue": trace_id},
+                "traceId": {"DataType": "String", "StringValue": trace.id},
                 "deviceId": {"DataType": "String", "StringValue": device_id},
             },
         )
     except (BotoCoreError, ClientError):
-        logger.exception("Event could not be published", extra={"eventType": event_type, "traceId": trace_id})
-        return _problem(503, "PUBLISH_FAILED", "The event could not be accepted; retry later.", trace_id)
+        logger.exception("Event could not be published", extra={"eventType": event_type, **trace.log_fields()})
+        return _problem(503, "PUBLISH_FAILED", "The event could not be accepted; retry later.", trace.id)
 
     logger.info(
         "Event published",
         extra={
             "eventType": event_type,
-            "traceId": trace_id,
+            **trace.log_fields(),
             "deviceId": device_id,
             "batchId": document["batchId"],
             "accepted": accepted,
@@ -124,7 +126,7 @@ def handler(event, context):
             "bodyBytes": len(body),
         },
     )
-    return _response(202, {"batchId": document["batchId"], "accepted": accepted, "traceId": trace_id}, trace_id)
+    return _response(202, {"batchId": document["batchId"], "accepted": accepted, "traceId": trace.id}, trace.id)
 
 
 def _now():
@@ -135,12 +137,28 @@ def _now():
 # ---------------------------------------------------------------- request parsing
 
 
-def _trace_id(event):
+@dataclass(frozen=True)
+class Trace:
+    """The trace id of the request and, when the client chose it, the API Gateway request id of the same request."""
+
+    id: str
+    gateway_request_id: str | None = None
+
+    def log_fields(self):
+        """traceId, plus gatewayRequestId when it differs: the access logs of API Gateway know only their own id."""
+        fields = {"traceId": self.id}
+        if self.gateway_request_id is not None:
+            fields["gatewayRequestId"] = self.gateway_request_id
+        return fields
+
+
+def _trace(event):
     """The client's X-Trace-Id when it is a plain token, otherwise the API Gateway request id."""
+    gateway_request_id = event["requestContext"]["requestId"]
     client_trace_id = (event.get("headers") or {}).get("x-trace-id", "")  # payload 2.0 lower-cases header names
     if TRACE_ID_PATTERN.fullmatch(client_trace_id):
-        return client_trace_id
-    return event["requestContext"]["requestId"]
+        return Trace(client_trace_id, gateway_request_id)
+    return Trace(gateway_request_id)
 
 
 def _device_id(event):
@@ -409,13 +427,13 @@ def _check_detection_location(errors, item, path, index):
 # ---------------------------------------------------------------- responses
 
 
-def _rejected(status, code, detail, trace_id, fields=None):
+def _rejected(status, code, detail, trace, fields=None):
     """A client error: logged at INFO (without values), since the request was wrong, not the platform."""
-    extra = {"status": status, "code": code, "traceId": trace_id}
+    extra = {"status": status, "code": code, **trace.log_fields()}
     if fields:
         extra["errorCount"] = len(fields)
     logger.info("Event rejected", extra=extra)
-    return _problem(status, code, detail, trace_id, fields)
+    return _problem(status, code, detail, trace.id, fields)
 
 
 def _problem(status, code, detail, trace_id, fields=None):

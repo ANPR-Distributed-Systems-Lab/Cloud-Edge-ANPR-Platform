@@ -359,6 +359,7 @@ components:
           description: Trace id of the request (also in the response header X-Trace-Id), to find it in the logs
         fields:
           type: array
+          description: Every problem found in the request, not only the first. Present and non-empty when code is VALIDATION_FAILED, absent otherwise.
           items: { $ref: '#/components/schemas/FieldError' }
 
     FieldError:

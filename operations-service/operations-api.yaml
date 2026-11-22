@@ -92,7 +92,7 @@ paths:
         View 2. Detections within radiusMeters of the given point in the time range,
         overlaid on the route of the edge device in the same time range.
         Not paginated - the map needs all points at once. Bounded instead (D10): a time range of at most 7 days,
-        otherwise 400 VALIDATION_FAILED; at most 5000 detections and at most 5000 points per route, each with its own
+        otherwise 400 VALIDATION_FAILED with fields[] naming "to" (code RANGE); at most 5000 detections and at most 5000 points per route, each with its own
         truncated flag. The density of the route is chosen by the client with trackIntervalSeconds: to get a whole
         range within the limit, use at least (range in seconds) / 5000, e.g. 121 for 7 days.
         A "to" that is not after "from" returns 400 INVALID_TIME_RANGE.

@@ -4,9 +4,11 @@ import com.anpr.operations.shared.error.BadRequestException;
 import com.anpr.operations.shared.error.ConflictException;
 import com.anpr.operations.shared.error.ErrorCodes;
 import com.anpr.operations.shared.error.FieldCodes;
+import com.anpr.operations.shared.error.FieldViolation;
 import com.anpr.operations.shared.error.ForbiddenException;
 import com.anpr.operations.shared.error.NotFoundException;
 import com.anpr.operations.shared.error.UnauthorizedException;
+import com.anpr.operations.shared.error.ValidationException;
 import com.anpr.operations.shared.tracing.TraceId;
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
@@ -26,6 +28,7 @@ import org.springframework.web.method.annotation.HandlerMethodValidationExceptio
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 
@@ -73,17 +76,21 @@ public class GlobalExceptionHandler {
                 "Resource was modified by someone else");
     }
 
+    @ExceptionHandler(ValidationException.class)
+    ProblemDetail handleValidation(ValidationException ex) {
+        ProblemDetail problem = problem(HttpStatus.BAD_REQUEST, ex.getCode(), ex.getMessage());
+        problem.setProperty("fields", ex.getViolations().stream().map(GlobalExceptionHandler::toField).toList());
+        return problem;
+    }
+
+    /** Bean Validation of a body: the same body as a rule broken in a service. */
     @ExceptionHandler(MethodArgumentNotValidException.class)
     ProblemDetail handleBodyValidation(MethodArgumentNotValidException ex) {
-        ProblemDetail problem = problem(HttpStatus.BAD_REQUEST, ErrorCodes.VALIDATION_FAILED,
-                "Request validation failed");
-        problem.setProperty("fields", ex.getBindingResult().getFieldErrors().stream()
-                .map(error -> Map.of(
-                        "field", error.getField(),
-                        "code", FIELD_CODES.getOrDefault(error.getCode(), String.valueOf(error.getCode()).toUpperCase()),
-                        "message", String.valueOf(error.getDefaultMessage())))
-                .toList());
-        return problem;
+        return handleValidation(new ValidationException(ex.getBindingResult().getFieldErrors().stream()
+                .map(error -> new FieldViolation(error.getField(),
+                        FIELD_CODES.getOrDefault(error.getCode(), String.valueOf(error.getCode()).toUpperCase()),
+                        String.valueOf(error.getDefaultMessage())))
+                .toList()));
     }
 
     @ExceptionHandler({
@@ -116,5 +123,14 @@ public class GlobalExceptionHandler {
         problem.setProperty("code", code.name());
         problem.setProperty("requestId", TraceId.current().orElseGet(() -> UUID.randomUUID().toString()));
         return problem;
+    }
+
+    /** The order of the contract: field, code, message. */
+    private static Map<String, Object> toField(FieldViolation violation) {
+        Map<String, Object> field = new LinkedHashMap<>();
+        field.put("field", violation.field());
+        field.put("code", violation.code());
+        field.put("message", violation.message());
+        return field;
     }
 }

@@ -3,7 +3,7 @@ logging:
     format:
       console: ""
   pattern:
-    console: "%d{HH:mm:ss.SSS} %clr(%5p) [%X{traceId:-}] %clr(%-40.40logger{39}){cyan} : %m%n%wEx"
+    console: "%d{HH:mm:ss.SSS} %clr(%5p) [%X{traceId:-}] %clr(%-40.40logger{39}){cyan} : %m %kvp%n%wEx"
 
 app:
   aws:

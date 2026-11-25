@@ -1,0 +1,41 @@
+/* The page fills the free height of <main>, and the panel fills the page. */
+:host {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+}
+
+.panel {
+  flex: 1 1 auto;
+  border: 1px solid var(--app-color-border);
+  background: var(--app-color-surface);
+}
+
+.panel-header {
+  margin: 0;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--app-color-border);
+  background: var(--app-color-panel-header);
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+
+.panel-body {
+  padding: 1.5rem;
+}
+
+dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 1rem 2rem;
+  font-size: 1.1rem;
+  margin: 0;
+}
+
+dt {
+  color: var(--app-color-muted);
+}
+
+dd {
+  margin: 0;
+}

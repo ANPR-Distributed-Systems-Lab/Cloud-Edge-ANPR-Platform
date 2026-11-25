@@ -1,0 +1,135 @@
+:host {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+}
+
+.top-bar {
+  display: flex;
+  align-items: stretch;
+  height: 64px;
+  background: var(--app-color-sidebar);
+  border-bottom: 1px solid var(--app-color-border);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  width: 260px;
+  padding-inline: 1.25rem;
+  box-sizing: border-box;
+  border-right: 1px solid var(--app-color-border);
+  color: var(--app-color-brand);
+  font-size: 1.15rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.layout {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.sidebar {
+  flex: 0 0 260px;
+  padding-block: 0.5rem;
+  border-right: 1px solid var(--app-color-border);
+  background: var(--app-color-sidebar);
+}
+
+.group {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 52px;
+  padding-inline: 1.25rem;
+  border: 0;
+  background: none;
+  color: var(--app-color-sidebar-muted);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.group:hover {
+  background: var(--app-color-sidebar-hover);
+}
+
+ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+ul a {
+  display: flex;
+  align-items: center;
+  min-height: 46px;
+  padding-inline: 2.5rem 1.25rem;
+  border-left: 3px solid transparent;
+  color: var(--app-color-sidebar-text);
+  text-decoration: none;
+}
+
+ul a:hover {
+  background: var(--app-color-sidebar-hover);
+}
+
+ul a.active {
+  border-left-color: var(--app-color-accent);
+  background: var(--app-color-sidebar-hover);
+  color: var(--app-color-accent);
+}
+
+main {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 2rem;
+}
+
+.notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-block-end: 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--app-color-border);
+  border-left: 4px solid var(--app-color-success);
+  background: var(--app-color-surface);
+}
+
+.notice.error {
+  border-left-color: var(--app-color-error);
+}
+
+.notice button {
+  min-width: 44px;
+  min-height: 44px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font-size: 1.25rem;
+  cursor: pointer;
+}
+
+@media (max-width: 700px) {
+  .layout {
+    flex-direction: column;
+  }
+
+  .brand {
+    width: auto;
+  }
+
+  .sidebar {
+    flex: none;
+  }
+}

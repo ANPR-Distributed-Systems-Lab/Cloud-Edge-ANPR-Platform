@@ -1,7 +1,10 @@
 # ANPR frontend
 
-Angular web application of the platform. Screens so far: View 4, the configuration of the device of the account
-(`device-management-service`).
+Angular web application of the platform. Screens so far, both backed by `device-management-service`:
+
+- View 4, the configuration of the device of the account: one page per section (Configuration in the menu), with
+  the limits of the contract checked before saving.
+- The start of View 5: the Overview page with the device, online or not, and its last report.
 
 ## Run locally
 
@@ -23,6 +26,7 @@ Gateway would inject: the account `11111111-1111-1111-1111-111111111111`, type `
    ```
 
    DynamoDB Local keeps the device across restarts; a second call returns 409 `ACCOUNT_HAS_DEVICE`.
+
 3. `npm ci`, then `npm start` and open http://localhost:4200.
 
 ## Build and test
@@ -30,6 +34,7 @@ Gateway would inject: the account `11111111-1111-1111-1111-111111111111`, type `
 ```bash
 npm run build
 npm test
+npx prettier --check "src/**/*.{ts,html,scss}"
 ```
 
 `start`, `build` and `test` first generate the API client from `../device-management-service/device-management-api.yaml`

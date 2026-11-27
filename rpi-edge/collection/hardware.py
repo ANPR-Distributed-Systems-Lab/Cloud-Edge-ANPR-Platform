@@ -10,7 +10,7 @@ import threading
 from collection.camera_service import CameraService
 from collection.indicators import collection_faults, home_lines, light_states
 from common.display import Pages, fault_lines
-from common.faults import FaultAlarm
+from common.faults import FaultMonitor
 from common.jsonlog import log
 from common.peripherals import Peripherals
 
@@ -24,7 +24,7 @@ class Hardware:
         self.camera = camera
         self.peripherals = peripherals
         self.pages = Pages(PAGES, peripherals.page_switch)
-        self.alarm = FaultAlarm(peripherals.beep_later)
+        self.monitor = FaultMonitor(peripherals.beep_later)
         self._stop = threading.Event()
         self._busy = threading.Lock()
         if peripherals.run_switch is not None:
@@ -60,7 +60,7 @@ class Hardware:
     def refresh(self) -> None:
         status = self.camera.status()
         faults = collection_faults(status)
-        self.alarm.check(faults)
+        self.monitor.check(faults)
         self.peripherals.lights.show(**light_states(status, faults))
         if self.pages.index == 0:
             self.peripherals.show(home_lines(status, self.camera.store.get()["recording"]["fps"]))

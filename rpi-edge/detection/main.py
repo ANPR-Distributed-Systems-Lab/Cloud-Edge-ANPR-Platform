@@ -65,19 +65,19 @@ def run(stop: threading.Event, peripherals: Peripherals) -> None:
         return
     http = Http()
     auth = CognitoAuth(env.cognito_region, env.cognito_client_id, env.credentials_file, http) if env.signs_in else None
-    api = Api(http, auth, env.api_base_url)
+    faults, hold = FaultBoard(), Hold()  # a new board per run of the mode: what a fault counts starts again
+    api = Api(http, auth, env.api_base_url, faults)
     configuration = ConfigurationStore(env.config_dir)
     models, alerts, frames = ModelSlot(), AlertWatch(), FrameCounter()
-    faults, hold = FaultBoard(), Hold()
     queues = Queues.open(env.state_dir / "outbox")
     gps, gps_workers = _gnss(env)
     feedback = Feedback(FeedbackSources(configuration, models, queues, gps, api.health, alerts, faults, hold,
-                                        env.state_dir), peripherals)
+                                        env.state_dir, _gps_kind(env)), peripherals)
     photos = FrameSaver(env.state_dir / "frames", queues.images, configuration)
     log("detection_starting", cloud=env.api_base_url, authenticated=auth is not None, gps=_gps_kind(env),
         pending=queues.detections.pending())
 
-    senders = {s.name: Sender(s, api, configuration) for s in streams(queues, env)}
+    senders = {s.name: Sender(s, api, configuration, faults) for s in streams(queues, env)}
     workers = _start_workers({
         "config-poll": ConfigPoller(api, env.config_url, configuration, faults).run,
         "model-updater": ModelUpdater(ModelStore(env.state_dir / "models", api, http, env.models_url),
@@ -87,7 +87,7 @@ def run(stop: threading.Event, peripherals: Peripherals) -> None:
         "locations": LocationRecorder(gps, queues.locations, configuration).run,
         "metrics": MetricsSampler(queues, gps, frames, configuration, env.state_dir).run,
         "photos": photos.run,
-        "uploader": ImageUploader(queues.images, api, http, env.image_urls_url, configuration,
+        "uploader": ImageUploader(queues.images, api, http, env.image_urls_url, configuration, faults,
                                   link_busy=lambda: any(s.is_active() for s in senders.values())).run,
         **{f"send-{name}": sender.run for name, sender in senders.items()},
         "feedback": feedback.run,

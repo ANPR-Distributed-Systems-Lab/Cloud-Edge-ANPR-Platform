@@ -1,7 +1,7 @@
 """The LCD pages of the detection mode, built from one Snapshot per refresh (panel.py).
 
   home         DETECTING    2.9 fps     what runs: DETECTING, DETECTION STOPPED, WAITING FOR CONFIG / MODELS
-               network           ok     ok, offline, connecting, no sign-in, denied (a 403)
+               network           ok     ok, offline, connecting, no sign-in, denied (the token is refused)
                GPS           3D fix     3D fix, 2D fix, no fix, no data (the module says nothing)
                unsent plates     12     detections waiting to be sent
   GPS          fix 3D        1s ago     the latest fix and its age
@@ -59,7 +59,7 @@ class Snapshot:
     fps: float
     online: bool | None  # None before the first request
     sign_in_failed: bool
-    forbidden: bool
+    denied: bool  # the platform refuses the token
     gps: GpsStatus
     fix_seconds_ago: float | None  # None: no fix since the start
     fix_fresh: bool  # young enough to go with a frame (gps.maxFixAgeSeconds)
@@ -86,7 +86,7 @@ def home_lines(s: Snapshot, pages: Pages) -> list[str]:
 def network_text(s: Snapshot) -> str:
     if s.sign_in_failed:
         return "no sign-in"
-    if s.forbidden:
+    if s.denied:
         return "denied"
     return {None: "connecting", True: "ok", False: "offline"}[s.online]
 

@@ -20,6 +20,9 @@ class LocationSource(Protocol):
 
     def status(self, now: datetime) -> GpsStatus: ...
 
+    def clock_skew_seconds(self) -> float | None:
+        """Device clock minus GPS time at the latest fix; None without a module."""
+
 
 def locate(source: LocationSource, captured_at: datetime, max_fix_age_seconds: float) -> Location | None:
     """The position for a frame captured at captured_at, or None when there is no fix within max_fix_age_seconds
@@ -44,6 +47,9 @@ class NoLocationSource:
     def status(self, now: datetime) -> GpsStatus:
         return GpsStatus(receiving=False, fix=FixType.NONE, satellites_used=0, satellites_in_view=0)
 
+    def clock_skew_seconds(self) -> float | None:
+        return None
+
 
 class FixedLocationSource:
     """A position that never changes (GPS_FIXED_LOCATION), for development and for replaying recorded frames."""
@@ -59,6 +65,9 @@ class FixedLocationSource:
 
     def status(self, now: datetime) -> GpsStatus:
         return GpsStatus(receiving=True, fix=FixType.FIX_3D, satellites_used=0, satellites_in_view=0)
+
+    def clock_skew_seconds(self) -> float | None:
+        return None
 
     def _fix(self, moment: datetime) -> Fix:
         return Fix(received_at=moment, recorded_at=moment, lat=self.lat, lon=self.lon, accuracy_m=FIXED_ACCURACY_M,

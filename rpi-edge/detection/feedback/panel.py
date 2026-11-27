@@ -2,7 +2,7 @@
 
 Refreshes the screen and the LEDs every REFRESH_SECONDS (at once after a press of the page switch). A short press
 of the run switch stops or starts the analysis (one beep: started, two: stopped). Buzzer: one short beep when the
-first frame is analysed, three long ones for an alert, one tone of 3 s when a fault appears (common/faults.py).
+first frame is analysed, three long ones for an alert, one tone of 3 s when a fault appears (INDICATORS.md).
 
 The last plates for the LCD are kept in memory only, like the alert list: never written to disk or logged.
 """
@@ -15,7 +15,7 @@ from pathlib import Path
 
 from common import system_info
 from common.display import Pages
-from common.faults import FaultAlarm, FaultBoard
+from common.faults import FaultBoard, FaultMonitor
 from common.jsonlog import log
 from common.peripherals import Peripherals
 from detection.cloud.api import CloudHealth
@@ -23,7 +23,7 @@ from detection.config.store import ConfigurationStore
 from detection.contract.alerts import Alert
 from detection.contract.ingest import DetectionEvent
 from detection.delivery.queues import Queues
-from detection.feedback.faults import detection_faults, quarantined
+from detection.feedback.faults import MeasuredFaults
 from detection.feedback.lights import light_states
 from detection.feedback.screens import PAGES, LastPlate, Snapshot, Stage, Waiting, alert_lines
 from detection.gps.source import LocationSource
@@ -71,6 +71,7 @@ class FeedbackSources:
     faults: FaultBoard
     hold: Hold
     state_dir: Path  # on the SD card: its free space
+    gps_kind: str  # module, fixed or none (detection/main.py)
 
 
 class Feedback:
@@ -80,13 +81,13 @@ class Feedback:
         self.clock = clock
         self.frame_rate = FrameRate(clock)
         self.pages = Pages(len(PAGES), peripherals.page_switch)
-        self.alarm = FaultAlarm(peripherals.beep_later, clock)
+        self.monitor = FaultMonitor(peripherals.beep_later, clock)
+        self.measured = MeasuredFaults(sources.queues, sources.gps, sources.gps_kind, clock)
         self._last_plates: deque[tuple[str, float, bool]] = deque(maxlen=LAST_PLATES)  # plate, read at, alert
         self._alert: Alert | None = None
         self._alert_until = 0.0
         self._alert_seen = False  # an alert since the analysis started: the alert LED stays on
         self._ready = False
-        self._quarantined_at_start = quarantined(sources.queues)  # the fault counts only new refusals
         if peripherals.run_switch is not None:
             peripherals.run_switch.on_press = self.toggle_hold
 
@@ -122,7 +123,7 @@ class Feedback:
 
     def refresh(self) -> None:
         snapshot = self.snapshot()
-        self.alarm.check(list(snapshot.faults))
+        self.monitor.check(list(snapshot.faults))
         alert_showing = self._alert is not None and self.clock() < self._alert_until
         self.peripherals.lights.show(**light_states(snapshot, alert_showing, self._alert_seen))
         page = PAGES[self.pages.index]
@@ -145,18 +146,14 @@ class Feedback:
             fresh = fix_age <= configuration.gps.max_fix_age_seconds
         sd_free_mb = _sd_free_mb(src.state_dir)
         temp_c = system_info.cpu_temp_c()
-        now_quarantined = quarantined(src.queues)
-        # The retention prunes old rows: the count from the start goes down with them, so new ones still count.
-        self._quarantined_at_start = min(self._quarantined_at_start, now_quarantined)
-        refused = now_quarantined - self._quarantined_at_start
-        faults = detection_faults(src.faults, src.health, refused, sd_free_mb, system_info.power_flags(), temp_c)
+        faults = src.faults.active() + self.measured.read(now, sd_free_mb, system_info.power_flags(), temp_c)
         clock = self.clock()
         return Snapshot(
             stage=stage,
             fps=self.frame_rate.per_second(),
             online=src.health.online,
             sign_in_failed=src.health.sign_in_failed,
-            forbidden=src.health.forbidden,
+            denied=src.health.denied,
             gps=gps,
             fix_seconds_ago=fix_age,
             fix_fresh=fresh,

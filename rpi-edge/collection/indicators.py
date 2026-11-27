@@ -8,14 +8,18 @@ LCD pages:
   FAULTS   what lights the fault LED (common/display.py)
 
 LEDs: run blinks while the camera runs; queue blinks when the USB stick is nearly full; alert is on while
-recording; fault is on with a fault (camera error, frames dropped while recording, power, throttling, CPU hot).
-net and gps stay off: this mode uses neither.
+recording; fault is on with a fault (INDICATORS.md, collection). net and gps stay off: this mode uses neither.
 """
-from common.display import count, row
-from common.faults import Fault, system_faults
+from common import fault_catalog as kinds
+from common.display import row
+from common.fault_catalog import system_faults
+from common.faults import Fault
 from common.peripherals import LightState
 from common.system_info import local_ip
 
+# Storage errors that are only about the stick being away; any other one (mount failed, read-only, unmount failed)
+# with a stick in the port is a fault.
+USB_ABSENT_ERRORS = ("No USB stick found", "USB stick was removed")
 USB_LOW_FREE_BYTES = 5_000_000_000  # a few minutes of recording at 3 fps; recording stops at recording.min_free_mb
 BYTES_PER_GIGABYTE = 1e9
 
@@ -23,10 +27,13 @@ BYTES_PER_GIGABYTE = 1e9
 def collection_faults(status: dict) -> list[Fault]:
     faults = []
     if status["camera"]["error"]:
-        faults.append(Fault("camera", "camera error"))
+        faults.append(kinds.CAMERA_ERROR.fault())
     rec = status["recording"]
     if rec is not None and rec["dropped"]:
-        faults.append(Fault("dropped", f"dropped frames {count(rec['dropped'])}"))
+        faults.append(kinds.DROPPED_FRAMES.fault(str(rec["dropped"])))
+    usb = status["storage"]
+    if usb["error"] and usb["device"] and usb["error"] not in USB_ABSENT_ERRORS:
+        faults.append(kinds.USB_ERROR.fault())
     system = status["system"]
     return faults + system_faults(system["power"], system["temp_c"])
 

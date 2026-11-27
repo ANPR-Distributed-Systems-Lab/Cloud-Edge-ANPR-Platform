@@ -11,6 +11,14 @@ TIMEOUT_SECONDS = 15
 UPLOAD_TIMEOUT_SECONDS = 120  # a photo of a full frame over a mobile connection
 
 
+class HttpError(Exception):
+    """A download answered with an error status (a presigned URL that expired, a file that is not there)."""
+
+    def __init__(self, message: str, status: int) -> None:
+        super().__init__(message)
+        self.status = status
+
+
 class NetworkError(Exception):
     """No answer: no connection, DNS failure, timeout. The caller retries later."""
 
@@ -38,12 +46,13 @@ class Http:
         return Response(r.status_code, r.content, {k.lower(): v for k, v in r.headers.items()})
 
     def download(self, url: str, target: Path) -> str:
-        """Streams url into target and returns its SHA-256. No headers: presigned URLs carry their own signature."""
+        """Streams url into target and returns its SHA-256. No headers: presigned URLs carry their own signature.
+        Raises NetworkError without an answer, HttpError for an error status."""
         digest = hashlib.sha256()
         try:
             with self.session.get(url, stream=True, timeout=TIMEOUT_SECONDS) as r:
                 if r.status_code != 200:
-                    raise NetworkError(f"GET {_without_query(url)}: HTTP {r.status_code}")
+                    raise HttpError(f"GET {_without_query(url)}: HTTP {r.status_code}", r.status_code)
                 with open(target, "wb") as f:
                     for chunk in r.iter_content(1 << 20):
                         f.write(chunk)

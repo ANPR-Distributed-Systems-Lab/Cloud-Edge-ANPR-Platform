@@ -4,14 +4,17 @@
 configuration outside the contract keeps the current one and is tried again at the next interval; until the
 device has its first configuration it asks every UNCONFIGURED_POLL_SECONDS.
 
-Faults (common/faults.py): a refused configuration, a device that is not paired (404) and a device that has no
-configuration at all after a poll; each clears with the next configuration taken.
+Faults (common/fault_catalog.py): no configuration (none after a poll), config refused (outside the contract) and
+config poll failed (error answers in a row; the device runs on its copy but no change arrives). Each clears with
+the next configuration taken; an error answer that a fault of the account explains (cloud/api.py) counts only
+there. No answer at all is not a fault: the network LED shows it.
 """
 import threading
 
+from common import fault_catalog as kinds
 from common.faults import FaultBoard
 from common.jsonlog import log
-from detection.cloud.api import Api
+from detection.cloud.api import Api, account_fault
 from detection.cloud.cognito import AuthError
 from detection.cloud.transport import NetworkError
 from detection.config.store import ConfigurationStore
@@ -37,7 +40,7 @@ class ConfigPoller:
                 log("config_poll_error", level="error", error=repr(e))
             current = self.store.current
             if current is None:
-                self.faults.report("no_config", "no configuration")
+                self.faults.report(kinds.NO_CONFIG)
             stop.wait(current.intervals.config_poll_seconds if current else UNCONFIGURED_POLL_SECONDS)
 
     def poll_once(self) -> None:
@@ -50,23 +53,22 @@ class ConfigPoller:
             log("config_poll_failed", level="warning", traceId=trace_id, error=str(e))
             return
         if response.status == 304:
-            self.faults.clear("config_refused", "not_paired")
+            self.faults.succeeded(kinds.CONFIG_POLL_FAILED)
             return
         if response.status != 200:
-            problem = Problem.of(response.status, response.body)
-            # 404: the device is not (or no longer) paired, which no retry fixes.
-            if response.status == 404:
-                self.faults.report("not_paired", "device not paired")
-            log("config_poll_failed", level="error" if response.status == 404 else "warning", traceId=trace_id,
-                status=response.status, code=problem.code)
+            if account_fault(response) is None:
+                self.faults.failed(kinds.CONFIG_POLL_FAILED)
+            log("config_poll_failed", level="warning", traceId=trace_id, status=response.status,
+                code=Problem.of(response.status, response.body).code)
             return
+        self.faults.succeeded(kinds.CONFIG_POLL_FAILED)
         try:
             changed = self.store.apply(response.json(), response.headers.get("etag"))
         except (ContractError, ValueError) as e:
-            self.faults.report("config_refused", "config refused")
+            self.faults.report(kinds.CONFIG_REFUSED)
             log("configuration_refused", level="error", traceId=trace_id,
                 problems=e.problems if isinstance(e, ContractError) else [str(e)])
             return
-        self.faults.clear("config_refused", "not_paired", "no_config")
+        self.faults.clear(kinds.CONFIG_REFUSED, kinds.NO_CONFIG)
         if changed:
             log("configuration_updated", traceId=trace_id, configVersion=self.store.current.version)

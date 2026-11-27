@@ -62,6 +62,7 @@ class GpsTracker:
         self._in_view: dict[str, int] = {}
         self._last_sentence_at: datetime | None = None
         self._last_skew_log_at: datetime | None = None
+        self._clock_skew: float | None = None  # device clock minus GPS time, at the latest fix
 
     def feed(self, line: str, now: datetime) -> None:
         """One line from the module, received at `now`; anything unusable is ignored."""
@@ -88,6 +89,11 @@ class GpsTracker:
     def latest_fix(self) -> Fix | None:
         with self._lock:
             return self._fixes[-1] if self._fixes else None
+
+    def clock_skew_seconds(self) -> float | None:
+        """How far the clock of the device is from GPS time at the latest fix (positive: ahead)."""
+        with self._lock:
+            return self._clock_skew
 
     def status(self, now: datetime) -> GpsStatus:
         with self._lock:
@@ -119,6 +125,7 @@ class GpsTracker:
         """Detections are stamped with the clock of the device, which the GPS time does not set: say so when it is
         wrong, since every detectedAt of the device is wrong with it."""
         skew = (now - gps_time).total_seconds()
+        self._clock_skew = skew
         if abs(skew) < CLOCK_SKEW_WARNING_SECONDS:
             return
         if self._last_skew_log_at and (now - self._last_skew_log_at).total_seconds() < CLOCK_SKEW_LOG_INTERVAL_SECONDS:

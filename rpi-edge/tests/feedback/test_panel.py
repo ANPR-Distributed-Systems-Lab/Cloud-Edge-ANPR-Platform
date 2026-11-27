@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 import numpy as np
 from samples import configuration, detection_event
 
+from common import fault_catalog as kinds
 from common.faults import FAULT_TONE_SECONDS, FaultBoard
 from common.peripherals import Light, Lights, LightState, Peripherals, TactSwitch
 from detection.cloud.api import CloudHealth
@@ -74,7 +75,7 @@ def panel(tmp_path, clock):
         "run", "net", "gps", "queue", "alert", "fault")}), TactSwitch(FakeButton()), TactSwitch(FakeButton()))
     sources = FeedbackSources(FakeConfiguration(), slot, Queues.open(tmp_path / "outbox"),
                               FixedLocationSource(52.2, 21.0), CloudHealth(last_answer_at=1.0), watch, faults, Hold(),
-                              tmp_path)
+                              tmp_path, "fixed")
     return Feedback(sources, peripherals, clock=lambda: clock[0]), peripherals
 
 
@@ -116,11 +117,11 @@ def test_the_page_switch_moves_through_the_pages(tmp_path):
 
 def test_a_fault_lights_its_led_and_sounds_once(tmp_path):
     fb, p = panel(tmp_path, [0.0])
-    fb.sources.faults.report("frame_loop", "frame loop error")
+    fb.sources.faults.report(kinds.MODEL_LOAD_FAILED)
     fb.refresh()
     fb.refresh()
     assert p.lights.fault.state is LightState.ON and p.beeper.beeps == [(1, FAULT_TONE_SECONDS)]
-    fb.sources.faults.clear("frame_loop")
+    fb.sources.faults.clear(kinds.MODEL_LOAD_FAILED)
     fb.refresh()
     assert p.lights.fault.state is LightState.OFF
 

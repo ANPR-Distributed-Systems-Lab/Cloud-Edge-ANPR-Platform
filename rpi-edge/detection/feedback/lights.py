@@ -5,7 +5,7 @@
   gps    on: a fix young enough for the frames (gps.maxFixAgeSeconds); blinks: no such fix; off: no data from a module
   queue  on: plates or track points wait to be sent; blinks: only photos wait (they go when the link is free)
   alert  blinks while an alert is on the screen, then stays on until the analysis is stopped or the mode switched
-  fault  on while there is a fault (feedback/faults.py)
+  fault  on while there is a fault (INDICATORS.md)
 """
 from common.peripherals import LightState
 from detection.feedback.screens import Snapshot, Stage

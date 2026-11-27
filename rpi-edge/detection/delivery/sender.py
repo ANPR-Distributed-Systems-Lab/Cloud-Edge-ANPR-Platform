@@ -10,14 +10,21 @@ device-management endpoints share:
   403                    not a device token, a configuration problem: wait long, keep the data
   429, 5xx, no answer    back off exponentially with jitter, resend the same items (same batch id)
 Anything else (404, wrong URL) keeps the data and backs off as well (delivery/answers.py).
+
+Faults (common/fault_catalog.py): the stream's own (plates / track / metrics not sent) after error answers in a row
+that no fault of the account explains (cloud/api.py), cleared by the next accepted batch; data dropped when the
+retention deletes items of a stream whose loss counts (plates, track). A refused batch counts in the quarantine
+(feedback/faults.py), no answer at all only on the network LED.
 """
 import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from common import fault_catalog as kinds
+from common.faults import FaultBoard, FaultKind
 from common.jsonlog import log
-from detection.cloud.api import Api
+from detection.cloud.api import Api, account_fault
 from detection.cloud.cognito import AuthError
 from detection.cloud.transport import NetworkError, Response
 from detection.config.store import ConfigurationStore
@@ -44,14 +51,17 @@ class Stream[T]:
     request: Callable[[tuple[T, ...]], Request]  # the body and the trace id of a batch
     batch_size: Callable[[DeviceConfiguration], int]
     max_delay_seconds: Callable[[DeviceConfiguration], float]
+    fault: FaultKind  # lit while the platform keeps answering this stream with errors
+    loss_is_fault: bool  # items dropped by the retention are a fault (data dropped)
 
 
 class Sender[T]:
-    def __init__(self, stream: Stream[T], api: Api, configuration: ConfigurationStore,
+    def __init__(self, stream: Stream[T], api: Api, configuration: ConfigurationStore, faults: FaultBoard,
                  clock: Callable[[], float] = time.monotonic) -> None:
         self.stream = stream
         self.api = api
         self.configuration = configuration
+        self.faults = faults
         self.clock = clock
         self.backoff = Backoff(BACKOFF_FIRST_SECONDS, BACKOFF_MAX_SECONDS)
         self._in_flight = False  # a request of this stream is on the link
@@ -80,6 +90,8 @@ class Sender[T]:
         dropped = queue.prune()
         if dropped:
             log("items_dropped", level="warning", stream=self.stream.name, count=len(dropped), reason="retention")
+            if self.stream.loss_is_fault:
+                self.faults.add(kinds.DATA_DROPPED, len(dropped))
         batch, wait = self._next_batch()
         if batch is None:
             return wait
@@ -116,6 +128,7 @@ class Sender[T]:
         status, count = response.status, len(batch.queued)
         outcome = outcome_of(status)
         if outcome is Outcome.ACCEPTED:
+            self.faults.succeeded(self.stream.fault)
             self.stream.queue.delete(batch.row_ids)
             self.backoff.reset()
             self._resting_until = 0.0
@@ -130,6 +143,8 @@ class Sender[T]:
             log("batch_forbidden", level="error", stream=self.stream.name, traceId=trace_id, count=count,
                 hint="the token is not a device token: check COGNITO_CLIENT_ID and the device account")
             return self._rest(FORBIDDEN_WAIT_SECONDS)
+        if account_fault(response) is None:
+            self.faults.failed(self.stream.fault)
         log("batch_failed", level="warning", stream=self.stream.name, traceId=trace_id, count=count, status=status)
         return self._rest(max(self.backoff.next_delay(), retry_after(response.headers) or 0.0))
 

@@ -9,6 +9,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 
+from common import fault_catalog as kinds
 from detection.config.environment import Environment
 from detection.contract.ingest import DetectionBatch, DetectionEvent
 from detection.contract.locations import LocationBatch, LocationPoint
@@ -61,10 +62,14 @@ def streams(queues: Queues, env: Environment) -> list[Stream]:
     """The streams sent as JSON batches (the photos have their own uploader, delivery/uploads.py)."""
     return [
         Stream("detections", env.ingest_url, queues.detections, DetectionBatch,
-               lambda c: c.batching.detections_batch_size, lambda c: c.batching.max_batch_delay_seconds),
+               lambda c: c.batching.detections_batch_size, lambda c: c.batching.max_batch_delay_seconds,
+               kinds.PLATES_NOT_SENT, loss_is_fault=True),
         Stream("locations", env.locations_url, queues.locations, LocationBatch,
-               lambda c: c.batching.locations_batch_size, lambda c: c.batching.max_batch_delay_seconds),
+               lambda c: c.batching.locations_batch_size, lambda c: c.batching.max_batch_delay_seconds,
+               kinds.TRACK_NOT_SENT, loss_is_fault=True),
         # One measurement is recorded per interval: it leaves at once, and after an outage the backlog goes in
         # batches of the largest size the contract allows.
-        Stream("metrics", env.metrics_url, queues.metrics, MetricsBatch, lambda c: MAX_METRICS_BATCH, lambda c: 0.0),
+        # Metrics older than 6 days are dropped by design (the platform refuses them after 7): no fault.
+        Stream("metrics", env.metrics_url, queues.metrics, MetricsBatch, lambda c: MAX_METRICS_BATCH, lambda c: 0.0,
+               kinds.METRICS_NOT_SENT, loss_is_fault=False),
     ]

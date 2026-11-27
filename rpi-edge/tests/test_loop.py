@@ -172,14 +172,32 @@ def test_summary_counts_and_resets():
     assert summary.frames == 0
 
 
-def test_a_failing_loop_is_a_fault_until_a_frame_goes_through(tmp_path, monkeypatch):
+class FailingCamera(FakeCamera):
+    """Fails `failures` captures in a row, then serves one frame."""
+
+    def __init__(self, stop, failures):
+        super().__init__(stop, frames=1)
+        self.failures = failures
+
+    def capture(self):
+        if self.failures:
+            self.failures -= 1
+            raise OSError("camera hiccup")
+        self.failed = True
+        return super().capture()
+
+
+def test_a_loop_failing_three_times_in_a_row_is_a_fault_until_a_frame_goes_through(tmp_path, monkeypatch):
     monkeypatch.setattr("detection.loop.CAMERA_RETRY_SECONDS", 0)
-    loop, stop, _, _, _ = loop_for(tmp_path, FixedLocationSource(52.2, 21.0), frames=1)
-    seen = []
-    loop.observers = (lambda frame, result: seen.append([f.code for f in loop.faults.active()]),)
-    loop.run(stop)
-    assert seen == [["frame_loop"]]  # reported after the failed capture, still there while the frame is observed
-    assert loop.faults.active() == []
+    for failures, expected in ((2, []), (3, ["frame_loop_failed"])):
+        loop, stop, _, _, _ = loop_for(tmp_path / str(failures), FixedLocationSource(52.2, 21.0), frames=1)
+        loop.camera = FailingCamera(stop, failures)
+        seen = []
+        loop.observers = (lambda frame, result, loop=loop, seen=seen: seen.append(
+            [f.code for f in loop.faults.active()]),)
+        loop.run(stop)
+        assert seen == [expected]  # while the frame that went through is observed
+        assert loop.faults.active() == []
 
 
 def test_a_held_loop_closes_the_camera_and_analyses_nothing(tmp_path, monkeypatch):

@@ -54,7 +54,7 @@ def test_the_cached_set_is_used_at_once_even_offline():
     assert slot.get().versions.detector == "v1"
     assert up.update_once() == RETRY_FIRST_SECONDS  # the configuration wants v2: keeps trying
     assert slot.get().versions.detector == "v1"  # and keeps detecting with what it has
-    assert [f.text for f in faults.active()] == ["models not updated"]
+    assert faults.active() == []  # no answer while a set runs: the network LED shows it
     store.offline = False
     assert up.update_once() == CHECK_SECONDS and faults.active() == []
 
@@ -87,3 +87,48 @@ def test_the_slot_hands_over_the_loaded_set():
     slot, stop = ModelSlot(), threading.Event()
     slot.put(load(model_set("v2")))
     assert slot.wait(stop).versions.detector == "v2"
+
+
+class AnsweringStore(FakeStore):
+    """fetch() fails with the given error answer."""
+
+    def __init__(self, error, **kwargs):
+        super().__init__(**kwargs)
+        self.error = error
+
+    def fetch(self):
+        self.fetches += 1
+        raise self.error
+
+
+def test_a_version_that_is_not_published_is_its_own_fault():
+    faults = FaultBoard()
+    up, _ = updater(AnsweringStore(ModelsUnavailable("HTTP 409", answered=True, code="MODEL_NOT_PUBLISHED"),
+                                   cached=model_set("v1")), faults=faults)
+    up.load_cached()
+    up.update_once()
+    assert [f.code for f in faults.active()] == ["model_not_published"]
+
+
+def test_error_answers_in_a_row_while_an_older_set_runs():
+    faults = FaultBoard()
+    up, _ = updater(AnsweringStore(ModelsUnavailable("HTTP 503", answered=True), cached=model_set("v1")),
+                    faults=faults)
+    up.load_cached()
+    states = []
+    for _ in range(3):
+        up.update_once()
+        states.append([f.code for f in faults.active()])
+    assert states == [[], [], ["models_not_updated"]]
+
+
+def test_a_cached_set_that_does_not_load_is_a_fault_and_the_updater_goes_on():
+    faults, stop = FaultBoard(), threading.Event()
+
+    def broken(model_set):
+        stop.set()
+        raise RuntimeError("onnx refuses it")
+
+    up = ModelUpdater(FakeStore(cached=model_set("v2")), FakeConfiguration(), ModelSlot(), faults, load=broken)
+    up.run(stop)
+    assert [f.code for f in faults.active()] == ["model_load_failed"]

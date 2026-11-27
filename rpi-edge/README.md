@@ -8,6 +8,7 @@ Code of the edge node, a Raspberry Pi 5 with the IMX477 camera, in one Docker im
 | `detection` | Reads plates (detector + OCR on the Pi), buffers them and sends them to the platform in batches | [DETECTION.md](DETECTION.md) |
 
 Setting up the Pi and the `rpi` Docker context: [RASPBERRY_PI_SETUP.md](RASPBERRY_PI_SETUP.md).
+What the LEDs, the buzzer and the LCD of both modes show, and every fault: [INDICATORS.md](INDICATORS.md).
 
 ## Choosing the mode
 

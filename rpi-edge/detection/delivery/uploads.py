@@ -13,6 +13,10 @@ uploader asks device-management for presigned PUT URLs (POST /api/v1/images/pres
 
 Files are deleted with their rows (uploaded, quarantined or past the retention).
 
+Fault (common/fault_catalog.py) photos not sent: error answers in a row for the URLs or the PUTs (an invalid answer
+counts too) that no fault of the account explains, cleared by the next uploaded batch. Photos dropped by the
+retention or photos.maxStored are a limit set on purpose: logged, no fault.
+
 Priority (batching.imageUploadsLowPriority, on by default): a photo is the largest thing the device sends and a
 PUT cannot be paused, so photos give way to everything else. While another stream (detections, locations, metrics)
 has something to send or a request in flight, the uploader neither asks for URLs nor starts a PUT, and looks again
@@ -25,8 +29,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from common import fault_catalog as kinds
+from common.faults import FaultBoard
 from common.jsonlog import log
-from detection.cloud.api import Api
+from detection.cloud.api import Api, account_fault
 from detection.cloud.cognito import AuthError
 from detection.cloud.transport import Http, NetworkError, Response
 from detection.config.store import ConfigurationStore
@@ -71,7 +77,7 @@ DEFERRED_LOG_SECONDS = 60.0  # how often a long wait is reported
 
 class ImageUploader:
     def __init__(self, queue: PersistentQueue[ImageJob], api: Api, http: Http, url: str,
-                 configuration: ConfigurationStore, link_busy: Callable[[], bool] = lambda: False,
+                 configuration: ConfigurationStore, faults: FaultBoard, link_busy: Callable[[], bool] = lambda: False,
                  clock: Callable[[], float] = time.monotonic) -> None:
         """`link_busy` tells whether any other stream is using the link (Sender.is_active of each of them)."""
         self.queue = queue
@@ -79,6 +85,7 @@ class ImageUploader:
         self.http = http
         self.url = url
         self.configuration = configuration
+        self.faults = faults
         self.link_busy = link_busy
         self.clock = clock
         self.backoff = Backoff(BACKOFF_FIRST_SECONDS, BACKOFF_MAX_SECONDS)
@@ -146,6 +153,8 @@ class ImageUploader:
         if outcome is Outcome.FORBIDDEN:
             log("image_urls_forbidden", level="error", traceId=trace_id, hint="check the device account")
             return FORBIDDEN_WAIT_SECONDS
+        if account_fault(response) is None:
+            self.faults.failed(kinds.PHOTOS_NOT_SENT)
         log("image_urls_failed", level="warning", traceId=trace_id, status=response.status)
         return max(self.backoff.next_delay(), retry_after(response.headers) or 0.0)
 
@@ -154,6 +163,7 @@ class ImageUploader:
         try:
             urls = ImageUploadUrls.from_document(response.json())
         except (ContractError, ValueError) as e:
+            self.faults.failed(kinds.PHOTOS_NOT_SENT)
             log("image_urls_invalid", level="error", traceId=trace_id,
                 problems=e.problems if isinstance(e, ContractError) else [str(e)])
             return self.backoff.next_delay()
@@ -172,11 +182,13 @@ class ImageUploader:
                 log("image_not_uploaded", level="warning", traceId=trace_id, frameId=job.frame_id, error=str(e))
                 return self.backoff.next_delay()
             if outcome_of(status) is not Outcome.ACCEPTED:
+                self.faults.failed(kinds.PHOTOS_NOT_SENT)
                 log("image_not_uploaded", level="warning", traceId=trace_id, frameId=job.frame_id, status=status)
                 return self.backoff.next_delay()
             self.queue.delete([queued.row_id])
             job.path.unlink(missing_ok=True)
         self.backoff.reset()
+        self.faults.succeeded(kinds.PHOTOS_NOT_SENT)
         log("images_uploaded", traceId=trace_id, count=len(batch.queued), pending=self.queue.pending())
         return 0.0 if self.queue.pending() else IDLE_SECONDS
 

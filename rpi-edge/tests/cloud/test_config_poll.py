@@ -1,6 +1,7 @@
 from fakes import FakeApi, response
 from samples import configuration_document
 
+from common import fault_catalog as kinds
 from common.faults import FaultBoard
 from detection.cloud.config_poll import ConfigPoller
 from detection.cloud.transport import NetworkError
@@ -33,13 +34,25 @@ def test_failed_polls_and_refused_configurations_keep_the_current_one(tmp_path):
     for _ in range(4):
         poller.poll_once()
     assert store.current is before and store.etag == '"1"'
-    assert {f.code for f in faults.active()} == {"not_paired", "config_refused"}
+    # one 500 is no fault yet, the 404 DEVICE_NOT_FOUND is the account's (cloud/api.py), no answer is none
+    assert {f.code for f in faults.active()} == {"config_refused"}
+
+
+def test_error_answers_in_a_row_are_a_fault_until_a_poll_succeeds(tmp_path):
+    store, faults = ConfigurationStore(tmp_path), FaultBoard()
+    store.apply(configuration_document(), '"1"')
+    poller = ConfigPoller(FakeApi(response(503), response(500), response(502), response(304)), URL, store, faults)
+    states = []
+    for _ in range(4):
+        poller.poll_once()
+        states.append([f.code for f in faults.active()])
+    assert states == [[], [], ["config_poll_failed"], []]
 
 
 def test_a_configuration_taken_clears_the_faults_of_the_poll(tmp_path):
     faults = FaultBoard()
-    faults.report("config_refused", "config refused")
-    faults.report("no_config", "no configuration")
+    faults.report(kinds.CONFIG_REFUSED)
+    faults.report(kinds.NO_CONFIG)
     ConfigPoller(FakeApi(response(200, configuration_document(), {"ETag": '"1"'})), URL, ConfigurationStore(tmp_path),
                  faults).poll_once()
     assert faults.active() == []

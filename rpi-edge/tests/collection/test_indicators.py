@@ -34,6 +34,11 @@ def test_the_faults_of_the_collection_mode():
     assert [f.text for f in collection_faults(broken)] == ["camera error", "dropped frames 3", "CPU hot 85C"]
 
 
+def test_a_usb_error_with_a_stick_in_the_port_is_a_fault_its_absence_is_not():
+    assert [f.code for f in collection_faults(status(storage__error="/dev/sda1 is mounted read-only"))] == ["usb_error"]
+    assert collection_faults(status(storage__error="No USB stick found", storage__device=None)) == []
+
+
 def test_the_leds_show_the_camera_the_recording_and_a_nearly_full_stick():
     assert light_states(STATUS, []) == {"run": LightState.BLINK, "queue": LightState.OFF, "alert": LightState.ON,
                                         "fault": LightState.OFF}

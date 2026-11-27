@@ -371,47 +371,18 @@ the first successful poll (the LAST PLATES page shows `alert list loading`).
 one alert, from a reading good enough to be sent. A match logs `alert_matched` with the `traceId` of the detection
 and the `alertId`, never the plate. The detection itself is sent as any other.
 
-**Feedback** (`detection/feedback/`, peripherals in `common/peripherals.py`, the same as the collection mode;
-pins in RASPBERRY_PI_SETUP.md). Every value on the LCD has its label; the page switch shows the next page, a long
-press the home page:
+**Feedback** (`detection/feedback/`, peripherals in `common/peripherals.py`, the same as the collection mode). What
+each LED, sound, switch and LCD page means, every fault with when it appears and when it goes away, and what the
+device does with each answer of the platform: [INDICATORS.md](INDICATORS.md). In short:
 
-```
-home          DETECTING    2.9 fps     DETECTION STOPPED, WAITING FOR CONFIG / MODELS; frames per second (10 s)
-              network           ok     ok, offline, connecting, no sign-in, denied (a 403)
-              GPS           3D fix     3D fix, 2D fix, no fix, no data (the module says nothing)
-              unsent plates     12     detections waiting to be sent
-GPS           fix, its age, satellites used of those in view, accuracy (from the HDOP), speed
-WAITING       plates, track points and photos waiting to be sent
-FAULTS        the faults, one per row (below)
-SYSTEM        the configuration version, IP, CPU temperature, the model versions, free space on the SD card
-LAST PLATES   the last two plates accepted for sending (ALERT when on the list) and how long ago (memory only);
-              the plates on the alert list
-```
-
-| LED (GPIO) | Colour | On | Blinking (1 Hz) | Off |
-|---|---|---|---|---|
-| run (5) | green | | frames are analysed | stopped, waiting, failing |
-| net (6) | green | the platform answers | no answer: the queues keep the data | no request yet, no sign-in |
-| gps (13) | green | a fix within `gps.maxFixAgeSeconds` | no such fix | no data from a module |
-| queue (19) | yellow | plates or track points wait | only photos wait | nothing waits |
-| alert (26) | red | an alert since the analysis started | an alert on the screen (15 s) | none |
-| fault (12) | red | a fault | | none |
-
-- Faults (`common/faults.py`, `feedback/faults.py`): no configuration, config refused, device not paired, no
-  models, model load failed, models not updated, alert list failing or invalid (an error answer: no alerts, or
-  only those of an old list), frame loop error, sign-in failed, access denied (403), refused
-  items (rows the platform refused since the mode started: older ones stay in the quarantine for diagnosis but do
-  not light the LED), SD card low (under 1 GB), power too low, CPU throttled, CPU hot (80 °C). A fault that
-  appears sounds the buzzer for 3 s, once (not again when it comes back within 10 min). The network and the GPS
-  are not faults: they have their own LEDs and recover by themselves.
-- An alert replaces the page for 15 s: `*** ALERT ***`, the plate, the alert text over two lines (the LCD has no
-  Polish letters: ą becomes a, ł becomes l), and the buzzer gives three beeps of 0.4 s. Its LED stays on until
+- An accepted plate on the alert list replaces the LCD page for 15 s (`*** ALERT ***`, the plate, the alert text
+  without Polish letters), the buzzer gives three beeps of 0.4 s and the red alert LED blinks, then stays on until
   the analysis is stopped or the mode switched; nothing needs to be acknowledged.
-- One short beep when the first frame is analysed: the mode is running.
-- A short press of the run switch stops the analysis (two beeps; the camera closes, the senders go on emptying the
-  queues) and starts it again (one beep). Holding it for 2 s switches to the collection mode: the frame loop, the
-  workers and the camera stop first, the queues stay on the SD card and go out after the switch back.
-- `network` follows the latest request to the platform (`cloud/api.py`, `CloudHealth`).
+- A short press of the run switch stops the analysis (the camera closes, the senders go on emptying the queues)
+  and starts it again; holding it for 2 s switches to the collection mode.
+- A fault lights the red fault LED, is listed on the FAULTS page, is logged (`fault_raised`, `fault_cleared`) and
+  sounds a 3 s tone when it appears. Requests and the frame loop light theirs after 3 failures in a row; no
+  network is not a fault (the net LED blinks).
 - Every part is optional: without an LCD, buzzer, LED or switch the mode works the same and only the log tells.
 
 ## 12. Logs

@@ -41,7 +41,7 @@ def test_the_home_page_says_what_runs():
 
 
 @pytest.mark.parametrize(("change", "text"), [
-    ({"online": False}, "offline"), ({"sign_in_failed": True}, "no sign-in"), ({"forbidden": True}, "denied")])
+    ({"online": False}, "offline"), ({"sign_in_failed": True}, "no sign-in"), ({"denied": True}, "denied")])
 def test_the_network_row(change, text):
     assert home_lines(snapshot(**change), on_page(1))[1] == f"{'network':<{LCD_COLS - len(text)}}{text}"
 

@@ -5,8 +5,8 @@ camera settings, and a new set of models (cloud/model_updater.py) is used from t
 frame is the fix of the GNSS module that was current when the frame was captured.
 
 The driver stops and starts the analysis with a short press of the run switch (Hold): while held, the camera is
-closed and no frame is captured; the senders go on emptying the queues. A loop that keeps failing is a fault
-(common/faults.py) until a frame goes through again.
+closed and no frame is captured; the senders go on emptying the queues. A loop that fails several times in a row
+is a fault (frame loop error, common/fault_catalog.py) until a frame goes through again.
 """
 import threading
 import time
@@ -14,6 +14,7 @@ from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
+from common import fault_catalog as kinds
 from common import system_info
 from common.faults import FaultBoard
 from common.jsonlog import log
@@ -30,7 +31,6 @@ from detection.vision.replay import ReplayCamera
 SUMMARY_SECONDS = 30.0
 CAMERA_RETRY_SECONDS = 5.0
 HOLD_CHECK_SECONDS = 0.5
-FAULT = "frame_loop"
 
 FrameObserver = Callable[[Frame, FrameResult], None]  # told about every analysed frame (feedback, photos, counters)
 
@@ -94,7 +94,7 @@ class FrameLoop:
                 self._buffer(result)
                 for observe in self.observers:
                     observe(frame, result)
-                self.faults.clear(FAULT)
+                self.faults.succeeded(kinds.FRAME_LOOP_FAILED)
                 summary.add(result, time.monotonic() - started)
                 if summary.due():
                     log("detection_summary", **summary.flush(), pending=self.detections.pending(),
@@ -103,7 +103,7 @@ class FrameLoop:
                 stop.wait(max(0.0, 1 / current.camera.fps - (time.monotonic() - started)))
             except Exception as e:  # the loop must outlive any camera or model error
                 log("detection_loop_error", level="error", error=repr(e))
-                self.faults.report(FAULT, "frame loop error")
+                self.faults.failed(kinds.FRAME_LOOP_FAILED)
                 self.camera.close()
                 stop.wait(CAMERA_RETRY_SECONDS)
         self.camera.close()

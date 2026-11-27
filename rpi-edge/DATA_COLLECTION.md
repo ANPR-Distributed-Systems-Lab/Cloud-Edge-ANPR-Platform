@@ -76,14 +76,12 @@ fps, JPEG quality and image flips cannot be changed while recording. Exposure an
 ## In the car (no laptop)
 
 - **Run switch (GPIO22)**: a short press starts/stops recording; holding it for 2 s switches to the detection
-  mode (two long beeps, "SWITCHING TO" on the LCD; recording stops and the USB stick is ejected first).
-  **Buzzer (GPIO27)**: one beep on start, two on stop, one long beep on error, a 3 s tone when a fault appears.
-- **Page switch (GPIO23)**: the next LCD page, a long press the home page. Home: `REC frames` and the count (or
-  `IDLE` and the frame rate set), free space on the stick, the exposure (shutter and ISO), the IP address and the
-  CPU temperature. FAULTS: camera error, dropped frames, power too low, CPU throttled, CPU hot.
-- **LEDs** (`collection/indicators.py`): run (green, GPIO5) blinks while the camera runs; queue (yellow, GPIO19)
-  blinks when less than 5 GB are free on the stick; alert (red, GPIO26) is on while recording; fault (red, GPIO12)
-  is on with a fault. net and gps stay off in this mode.
+  mode (recording stops and the USB stick is ejected first). **Page switch (GPIO23)**: the next LCD page.
+- **LCD**: `REC frames` and the count (or `IDLE` and the frame rate set), free space on the stick, the exposure
+  (shutter and ISO), the IP address and the CPU temperature; the FAULTS page.
+- **LEDs**: run blinks while the camera runs, queue blinks when the stick is nearly full, alert is on while
+  recording, fault is on with a fault. Every LED, sound and fault of this mode:
+  [INDICATORS.md, section 3](INDICATORS.md#3-collection-mode).
 - Optional **autostart**: recording starts by itself once the USB stick is available.
 
 ## What ends up on the stick

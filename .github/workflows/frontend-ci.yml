@@ -1,0 +1,89 @@
+name: Frontend CI
+
+# Runs the tests and the production build of the frontend on every push of a branch that changes
+# the frontend, this workflow or the API contract the client is generated from. Two jobs, cheapest first:
+#   1. tests  (Vitest, Prettier)    about a minute
+#   2. build  (ng build, budgets)   starts only if 1 passed
+# No AWS access: this workflow only checks the code. Deployment is a separate workflow.
+
+on:
+  push:
+    branches: ["**"] # branches only; tag pushes are ignored
+    paths:
+      - frontend/**
+      - .github/workflows/frontend-ci.yml
+      # The API clients are generated from these contracts: a change there can break the frontend.
+      - device-management-service/device-management-api.yaml
+      - operations-service/operations-api.yaml
+  workflow_dispatch: # manual re-run from the Actions tab
+
+# A newer push to the same branch cancels the run that is still going.
+concurrency:
+  group: frontend-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: frontend
+
+jobs:
+  tests:
+    # Job names are what branch protection lists as required checks, so they must be unique
+    # across workflows (the services have their own "Operations / ..." and "Device management / ..." names).
+    name: Frontend / tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      # The API client generator (openapi-generator-cli) is a Java program.
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # pretest generates the API clients first, then Vitest runs once (no watch mode on CI).
+      - name: Run tests
+        run: npm test -- --watch=false
+
+      - name: Check formatting
+        run: npx prettier --check "src/**/*.{ts,html,scss}"
+
+  build:
+    name: Frontend / build
+    needs: tests # no point in building when a test is already red
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # prebuild generates the API clients first; the production build fails when a bundle exceeds
+      # the budgets in angular.json.
+      - name: Build
+        run: npm run build

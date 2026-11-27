@@ -6,6 +6,7 @@ import pytest
 from fakes import FakeApi, response
 from samples import DEVICE_ID, configuration, configuration_document
 
+from common.faults import FaultBoard
 from detection.cloud.transport import NetworkError
 from detection.config.store import ConfigurationStore
 from detection.contract.configuration import PhotosConfiguration
@@ -37,7 +38,8 @@ def setup(tmp_path, *answers, frames=FRAMES, link_busy=lambda: False, low_priori
         jobs.append(ImageJob(frame_id, CAPTURED, path))
     queue.add(jobs)
     api = FakeApi(*answers)
-    uploader = ImageUploader(queue, api, api.http, URL, FixedConfiguration(low_priority), link_busy=link_busy,
+    uploader = ImageUploader(queue, api, api.http, URL, FixedConfiguration(low_priority), FaultBoard(),
+                             link_busy=link_busy,
                              clock=clock)
     return queue, api, uploader, jobs
 
@@ -131,7 +133,7 @@ def test_beyond_the_configured_number_of_stored_photos_the_oldest_are_dropped_wi
         files.append(path)
         queue.add([ImageJob(f"f{n}", CAPTURED, path)])
     api = FakeApi(response(503))
-    ImageUploader(queue, api, api.http, URL, store).send_once()
+    ImageUploader(queue, api, api.http, URL, store, FaultBoard()).send_once()
     assert queue.pending() == 10 and [p.exists() for p in files[:3]] == [False, False, True]
 
 

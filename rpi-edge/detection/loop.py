@@ -3,14 +3,20 @@
 Each frame runs with the configuration and the models current at that moment: a new configuration re-applies the
 camera settings, and a new set of models (cloud/model_updater.py) is used from the next frame on. The position of a
 frame is the fix of the GNSS module that was current when the frame was captured.
+
+The driver stops and starts the analysis with a short press of the run switch (Hold): while held, the camera is
+closed and no frame is captured; the senders go on emptying the queues. A loop that fails several times in a row
+is a fault (frame loop error, common/fault_catalog.py) until a frame goes through again.
 """
 import threading
 import time
 from collections import Counter
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
+from common import fault_catalog as kinds
 from common import system_info
+from common.faults import FaultBoard
 from common.jsonlog import log
 from detection.config.store import ConfigurationStore
 from detection.contract.ingest import DetectionEvent
@@ -24,8 +30,28 @@ from detection.vision.replay import ReplayCamera
 
 SUMMARY_SECONDS = 30.0
 CAMERA_RETRY_SECONDS = 5.0
+HOLD_CHECK_SECONDS = 0.5
 
 FrameObserver = Callable[[Frame, FrameResult], None]  # told about every analysed frame (feedback, photos, counters)
+
+
+class Hold:
+    """Whether the driver stopped the analysis; it runs from the start of the mode."""
+
+    def __init__(self) -> None:
+        self._held = threading.Event()
+
+    @property
+    def held(self) -> bool:
+        return self._held.is_set()
+
+    def toggle(self) -> bool:
+        """Stops a running analysis or starts a stopped one. Returns whether it is held now."""
+        if self._held.is_set():
+            self._held.clear()
+        else:
+            self._held.set()
+        return self._held.is_set()
 
 
 @dataclass
@@ -37,6 +63,8 @@ class FrameLoop:
     locations: LocationSource
     detections: PersistentQueue[DetectionEvent]
     observers: Sequence[FrameObserver] = ()
+    hold: Hold = field(default_factory=Hold)
+    faults: FaultBoard = field(default_factory=FaultBoard)
 
     def run(self, stop: threading.Event) -> None:
         """Analyses frames until stopped; expects a configuration and models to be there. Any failure closes the
@@ -44,6 +72,10 @@ class FrameLoop:
         applied = None  # the configuration the camera runs with
         summary = Summary()
         while not stop.is_set():
+            if self.hold.held:
+                self.camera.close()  # frees the camera; it opens with the configuration current on the start
+                stop.wait(HOLD_CHECK_SECONDS)
+                continue
             try:
                 # One read per frame: the camera, the pipeline and the pause all use the same configuration, even
                 # when a new one arrives meanwhile (it is applied on the next frame).
@@ -62,6 +94,7 @@ class FrameLoop:
                 self._buffer(result)
                 for observe in self.observers:
                     observe(frame, result)
+                self.faults.succeeded(kinds.FRAME_LOOP_FAILED)
                 summary.add(result, time.monotonic() - started)
                 if summary.due():
                     log("detection_summary", **summary.flush(), pending=self.detections.pending(),
@@ -70,6 +103,7 @@ class FrameLoop:
                 stop.wait(max(0.0, 1 / current.camera.fps - (time.monotonic() - started)))
             except Exception as e:  # the loop must outlive any camera or model error
                 log("detection_loop_error", level="error", error=repr(e))
+                self.faults.failed(kinds.FRAME_LOOP_FAILED)
                 self.camera.close()
                 stop.wait(CAMERA_RETRY_SECONDS)
         self.camera.close()

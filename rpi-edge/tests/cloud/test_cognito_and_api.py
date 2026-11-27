@@ -6,8 +6,9 @@ import time
 import pytest
 from fakes import FakeHttp, response
 
-from detection.cloud.api import Api
-from detection.cloud.cognito import AuthError, CognitoAuth
+from common.faults import FaultBoard
+from detection.cloud.api import Api, CloudHealth
+from detection.cloud.cognito import AuthError, CognitoAuth, CredentialsError
 from detection.cloud.transport import NetworkError
 
 BASE = "https://abc.execute-api.eu-central-1.amazonaws.com"
@@ -90,13 +91,15 @@ def test_wrong_password_and_missing_credentials_raise_auth_error(credentials, tm
     http = FakeHttp(response(400, {"__type": "NotAuthorizedException", "message": "Incorrect username or password."}))
     with pytest.raises(AuthError, match="NotAuthorizedException"):
         auth_with(http, credentials, [0.0]).token()
-    with pytest.raises(AuthError, match="credentials"):
+    with pytest.raises(CredentialsError, match="credentials"):
         auth_with(FakeHttp(), tmp_path / "missing.json", [0.0]).token()
 
 
-def test_no_network_is_an_auth_error(credentials):
-    with pytest.raises(AuthError):
-        auth_with(FakeHttp(NetworkError("timeout")), credentials, [0.0]).token()
+@pytest.mark.parametrize("answer", [NetworkError("timeout"), response(400, {"__type": "TooManyRequestsException"}),
+                                    response(500, {"__type": "InternalErrorException"}), response(503)])
+def test_cognito_out_of_reach_or_failing_is_no_answer_not_a_refusal(credentials, answer):
+    with pytest.raises(NetworkError):
+        auth_with(FakeHttp(answer), credentials, [0.0]).token()
 
 
 class StubAuth:
@@ -113,7 +116,7 @@ class StubAuth:
 
 def test_api_sends_the_token_and_trace_id_to_the_platform_only():
     http = FakeHttp(response(202), response(202))
-    api = Api(http, StubAuth(), BASE)
+    api = Api(http, StubAuth(), BASE, FaultBoard())
     api.request("POST", BASE + "/api/v1/ingest/detections", trace_id="t-1", body={})
     api.request("POST", "http://localhost:8200/api/v1/ingest/detections", trace_id="t-2", body={})
     assert http.requests[0]["headers"] == {"X-Trace-Id": "t-1", "Authorization": "Bearer token-1"}
@@ -123,12 +126,67 @@ def test_api_sends_the_token_and_trace_id_to_the_platform_only():
 def test_api_renews_the_token_once_after_a_401():
     auth = StubAuth()
     http = FakeHttp(response(401), response(202))
-    assert Api(http, auth, BASE).request("GET", BASE + "/api/v1/device/config", trace_id="t").status == 202
+    api = Api(http, auth, BASE, FaultBoard())
+    assert api.request("GET", BASE + "/api/v1/device/config", trace_id="t").status == 202
     assert auth.invalidated == 1
     assert [r["headers"]["Authorization"] for r in http.requests] == ["Bearer token-1", "Bearer token-2"]
 
 
 def test_api_without_auth_sends_no_token():
     http = FakeHttp(response(200))
-    Api(http, None, BASE).request("GET", BASE + "/api/v1/device/config", trace_id="t")
+    Api(http, None, BASE, FaultBoard()).request("GET", BASE + "/api/v1/device/config", trace_id="t")
     assert "Authorization" not in http.requests[0]["headers"]
+
+
+@pytest.mark.parametrize(("error", "code"), [(AuthError("NotAuthorizedException"), "sign_in_refused"),
+                                             (CredentialsError("no file"), "no_credentials")])
+def test_a_refused_sign_in_is_a_fault_until_a_token_works(error, code):
+    class Refusing(StubAuth):
+        def token(self):
+            raise error
+
+    url, faults = BASE + "/api/v1/device/config", FaultBoard()
+    api = Api(FakeHttp(response(200)), Refusing(), BASE, faults)
+    with pytest.raises(AuthError):
+        api.request("GET", url, trace_id="t")
+    assert api.health.sign_in_failed and api.health.online is False and [f.code for f in faults.active()] == [code]
+    api.auth = StubAuth()
+    api.request("GET", url, trace_id="t")
+    assert not api.health.sign_in_failed and faults.active() == []
+
+
+@pytest.mark.parametrize(("answer", "code", "denied"), [
+    (response(401), "token_refused", True),
+    (response(403, {"code": "FORBIDDEN"}), "not_device_token", True),
+    (response(403, {"code": "DEVICE_NOT_PAIRED"}), "no_owner", False),
+    (response(404, {"code": "DEVICE_NOT_FOUND"}), "device_not_found", False)])
+def test_an_answer_shows_the_fault_of_the_account_until_the_endpoint_answers_again(answer, code, denied):
+    url, faults = BASE + "/api/v1/device/config", FaultBoard()
+    retried = [response(401)] if answer.status == 401 else []  # a 401 is retried once with a renewed token
+    api = Api(FakeHttp(answer, *retried, response(200)), StubAuth(), BASE, faults)
+    api.request("GET", url, trace_id="t")
+    assert [f.code for f in faults.active()] == [code] and api.health.denied is denied and api.health.online
+    api.request("GET", url, trace_id="t")
+    assert faults.active() == [] and not api.health.denied
+
+
+def test_a_fault_another_endpoint_still_shows_stays():
+    faults = FaultBoard()
+    gone = response(404, {"code": "DEVICE_NOT_FOUND"})
+    api = Api(FakeHttp(gone, gone, response(200)), StubAuth(), BASE, faults)
+    api.request("GET", BASE + "/api/v1/device/config", trace_id="t")
+    api.request("GET", BASE + "/api/v1/device/models", trace_id="t")
+    api.request("GET", BASE + "/api/v1/device/config", trace_id="t")
+    assert [f.code for f in faults.active()] == ["device_not_found"]  # the models endpoint still says so
+
+
+def test_a_server_error_is_no_fault_of_the_account():
+    faults = FaultBoard()
+    Api(FakeHttp(response(503)), StubAuth(), BASE, faults).request("GET", BASE + "/api/v1/alerts", trace_id="t")
+    assert faults.active() == []
+
+
+def test_cloud_health_follows_the_latest_request():
+    assert CloudHealth().online is None
+    assert CloudHealth(last_answer_at=5.0, last_failure_at=3.0).online is True
+    assert CloudHealth(last_answer_at=5.0, last_failure_at=6.0).online is False

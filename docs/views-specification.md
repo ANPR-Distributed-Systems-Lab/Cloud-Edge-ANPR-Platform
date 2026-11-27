@@ -107,7 +107,7 @@ Content translated from the architecture diagram `Inżynierka (2).drawio` (as of
 - Related detection records (ANPR): account_id, device_id, plate, datetime, coordinates (GPS), s3_key, alert_id
 
 **Indexing requirements (PostgreSQL / PostGIS optimisation):**
-- For configuration data (alerts): search and sorting optimised by the indexes B-Tree (account_id), B-Tree (plate), B-Tree (created_at) and B-Tree (last_detected_at).
+- For configuration data (alerts): search and sorting optimised by the indexes B-Tree (account_id), B-Tree (plate) and B-Tree (created_at). last_detected_at is not stored: it is computed from the detections of the plate, using their index (account_id, plate, detected_at).
 - For related detections (detections): searching the history related to a specific alert optimised by the index B-Tree (alert_id).
 
 ---

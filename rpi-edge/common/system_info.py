@@ -56,10 +56,10 @@ def _vcgencmd(command: str) -> str:
 
 
 def power_flags() -> dict | None:
-    """Decode `vcgencmd get_throttled`. None when the firmware cannot be queried."""
+    """Decode `vcgencmd get_throttled`. None when the firmware cannot be queried (or off Linux)."""
     try:
         flags = int(_vcgencmd("get_throttled").split("=")[1], 16)
-    except (OSError, ValueError, IndexError):
+    except (ImportError, OSError, ValueError, IndexError):
         return None
     return {
         "undervoltage_now": bool(flags & 0x1),

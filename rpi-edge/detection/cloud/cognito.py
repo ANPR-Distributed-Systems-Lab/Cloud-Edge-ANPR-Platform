@@ -3,6 +3,10 @@
 The `device` app client is public (no secret) and allows USER_PASSWORD_AUTH and REFRESH_TOKEN_AUTH. The
 device signs in with its username and password once, then renews the access token with the refresh token,
 and falls back to the password when the refresh token is refused (expired, revoked). Tokens stay in memory.
+
+A refusal that no retry changes (wrong password, unknown user or app client, credentials file missing) raises
+AuthError; Cognito out of reach, throttling (TooManyRequestsException) or a Cognito failure raise NetworkError, as
+any request without an answer: the device is offline for the platform and tries again later.
 """
 import json
 import threading
@@ -13,10 +17,17 @@ from common.jsonlog import log
 from detection.cloud.transport import Http, NetworkError
 
 RENEW_BEFORE_SECONDS = 120  # renew a little before expiry, so a request never leaves with a dying token
+# Answers of InitiateAuth that a retry does not change; anything else (throttling, InternalErrorException) passes.
+REFUSALS = {"NotAuthorizedException", "UserNotFoundException", "UserNotConfirmedException",
+            "PasswordResetRequiredException", "ResourceNotFoundException", "InvalidParameterException"}
 
 
 class AuthError(Exception):
-    """No access token could be obtained (wrong credentials, missing file, Cognito unreachable)."""
+    """Cognito refused the sign-in: no retry gets a token until the account or the setup is fixed."""
+
+
+class CredentialsError(AuthError):
+    """The credentials file of the device is missing or unreadable (infrastructure/scripts/README.md)."""
 
 
 class CognitoAuth:
@@ -63,12 +74,20 @@ class CognitoAuth:
         try:
             response = self.http.request("POST", self.url, headers=headers, body=body)
         except NetworkError as e:
-            raise AuthError(str(e)) from None
-        payload = response.json() or {}
-        if response.status != 200 or "AuthenticationResult" not in payload:
-            # Cognito errors are {"__type": "NotAuthorizedException", "message": ...}; neither holds a secret.
-            raise AuthError(f"{flow}: HTTP {response.status} {payload.get('__type', '')}".strip())
-        return payload["AuthenticationResult"]
+            raise NetworkError(f"Cognito {flow}: {e}") from None
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = None
+        payload = payload if isinstance(payload, dict) else {}
+        if response.status == 200 and "AuthenticationResult" in payload:
+            return payload["AuthenticationResult"]
+        # Cognito errors are {"__type": "NotAuthorizedException", "message": ...}; neither holds a secret.
+        error = str(payload.get("__type", "")).rsplit("#", 1)[-1]
+        message = f"{flow}: HTTP {response.status} {error}".strip()
+        if error in REFUSALS:
+            raise AuthError(message)
+        raise NetworkError(f"Cognito {message}")
 
     def _store(self, result: dict) -> None:
         self._access = result["AccessToken"]
@@ -81,4 +100,5 @@ class CognitoAuth:
                 data = json.load(f)
             return data["username"], data["password"]
         except (OSError, ValueError, KeyError) as e:
-            raise AuthError(f"device credentials unusable ({self.credentials_file}): {type(e).__name__}") from None
+            unusable = f"device credentials unusable ({self.credentials_file}): {type(e).__name__}"
+            raise CredentialsError(unusable) from None

@@ -135,7 +135,7 @@ by themselves, and detections stay with the account they belonged to.
   as `requestId` of errors, and the device events carry it as the attribute `traceId`.
 - When the trace id is the client's, every line of the request also carries `gatewayRequestId`, the request id of
   API Gateway: its access logs know only that id, so this field joins them with the logs of the service. The ingest
-  Lambda logs the same field; operations-service does not yet.
+  Lambda and operations-service log the same field.
 - Passwords are never logged or returned. Ids (device, account, event) are logged as fields.
 
 ## 7. Code layout

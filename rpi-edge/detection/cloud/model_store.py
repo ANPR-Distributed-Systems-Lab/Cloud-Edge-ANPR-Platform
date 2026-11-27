@@ -16,9 +16,9 @@ from urllib.parse import urljoin
 
 from common.files import write_json_atomic
 from common.jsonlog import log
-from detection.cloud.api import Api
+from detection.cloud.api import Api, account_fault
 from detection.cloud.cognito import AuthError
-from detection.cloud.transport import Http, NetworkError
+from detection.cloud.transport import Http, HttpError, NetworkError
 from detection.contract.configuration import ModelVersions
 from detection.contract.models import DeviceModels, ModelFile
 from detection.contract.parsing import ContractError
@@ -32,7 +32,16 @@ CURRENT_FILE = "current.json"
 
 
 class ModelsUnavailable(Exception):
-    """The models could not be fetched or installed now; the caller keeps what it has and retries later."""
+    """The models could not be fetched or installed now; the caller keeps what it has and retries later.
+
+    `answered`: the platform or S3 answered (an error, a damaged file), as opposed to no answer at all; `code` is the
+    problem code of device-management (MODEL_NOT_PUBLISHED); `account`: a fault of the account explains it
+    (cloud/api.py), which shows it already."""
+
+    def __init__(self, message: str, *, answered: bool = False, code: str | None = None,
+                 account: bool = False) -> None:
+        super().__init__(message)
+        self.answered, self.code, self.account = answered, code, account
 
 
 @dataclass(frozen=True)
@@ -58,11 +67,12 @@ class ModelStore:
             raise ModelsUnavailable(str(e)) from None
         if response.status != 200:
             problem = Problem.of(response.status, response.body)
-            raise ModelsUnavailable(f"HTTP {response.status} {problem.code or ''}".strip())
+            raise ModelsUnavailable(f"HTTP {response.status} {problem.code or ''}".strip(), answered=True,
+                                    code=problem.code, account=account_fault(response) is not None)
         try:
             return DeviceModels.from_document(response.json(), REQUIRED_FILES)
         except (ContractError, ValueError) as e:
-            raise ModelsUnavailable(f"invalid answer: {e}") from None
+            raise ModelsUnavailable(f"invalid answer: {e}", answered=True) from None
 
     def install(self, models: DeviceModels) -> ModelSet:
         """Downloads what is missing, then records the set as current. Raises ModelsUnavailable."""
@@ -102,9 +112,12 @@ class ModelStore:
         except (NetworkError, OSError) as e:
             part.unlink(missing_ok=True)
             raise ModelsUnavailable(f"{name}/{file.name}: {e}") from None
+        except HttpError as e:
+            part.unlink(missing_ok=True)
+            raise ModelsUnavailable(f"{name}/{file.name}: {e}", answered=True) from None
         if digest != file.sha256:
             part.unlink(missing_ok=True)
-            raise ModelsUnavailable(f"{name}/{file.name}: SHA-256 mismatch")
+            raise ModelsUnavailable(f"{name}/{file.name}: SHA-256 mismatch", answered=True)
         os.replace(part, target)
         log("model_file_downloaded", model=name, version=version, file=file.name, bytes=target.stat().st_size)
 

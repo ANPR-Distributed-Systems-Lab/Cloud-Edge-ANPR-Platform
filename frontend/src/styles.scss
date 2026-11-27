@@ -1,0 +1,54 @@
+:root {
+  /* Native inputs, selects and scrollbars use dark colors. */
+  color-scheme: dark;
+
+  --app-color-text: #d4d8dd;
+  --app-color-muted: #8a9199;
+  --app-color-page: #16191d;
+  /* Slightly see-through, so the background grid shows under the panels. */
+  --app-color-surface: rgba(30, 34, 39, 0.8);
+  --app-color-input: #16191d;
+  --app-color-border: #30363d;
+  --app-color-panel-header: #23282e;
+  --app-color-brand: #d4d8dd;
+  --app-color-on-brand: #16191d;
+  --app-color-sidebar: #121417;
+  --app-color-sidebar-hover: #1e2227;
+  --app-color-sidebar-text: #d4d8dd;
+  --app-color-sidebar-muted: #8a9199;
+  --app-color-accent: #3dbb8c;
+  --app-color-accent-soft: rgba(61, 187, 140, 0.15);
+  --app-color-on-accent: #0e1512;
+  --app-color-error: #e5636f;
+  --app-color-error-soft: rgba(229, 99, 111, 0.25);
+  --app-color-success: #5fae7a;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    Arial,
+    sans-serif;
+  font-size: 16px;
+  color: var(--app-color-text);
+  background-color: var(--app-color-page);
+  /* Faint grid in the background. */
+  background-image:
+    linear-gradient(rgba(61, 187, 140, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(61, 187, 140, 0.04) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+/* Square corners everywhere, also on the buttons left to the browser's own style. */
+button {
+  border-radius: 0;
+}

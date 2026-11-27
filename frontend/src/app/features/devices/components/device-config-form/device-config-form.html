@@ -1,0 +1,464 @@
+<!-- novalidate: the form shows its own messages instead of the browser's bubbles. -->
+<form [formGroup]="form" (ngSubmit)="submit()" novalidate>
+  <div class="fields">
+    @switch (section()) {
+      @case ('models') {
+        <ng-container formGroupName="models">
+          <div class="field">
+            @let detectorError = errorOf('models.detector');
+            <label for="models-detector">Detector version</label>
+            <input
+              id="models-detector"
+              type="text"
+              formControlName="detector"
+              [attr.aria-invalid]="!!detectorError"
+              aria-describedby="models-detector-error"
+            />
+            <small id="models-detector-error" class="error">{{ detectorError }}</small>
+          </div>
+          <div class="field">
+            @let ocrError = errorOf('models.ocr');
+            <label for="models-ocr">OCR version</label>
+            <input
+              id="models-ocr"
+              type="text"
+              formControlName="ocr"
+              [attr.aria-invalid]="!!ocrError"
+              aria-describedby="models-ocr-error"
+            />
+            <small id="models-ocr-error" class="error">{{ ocrError }}</small>
+          </div>
+        </ng-container>
+      }
+
+      @case ('reading') {
+        <ng-container formGroupName="ml">
+          <div class="field">
+            @let detectorError = errorOf('ml.detectorMinConfidence');
+            <label for="ml-detector">Minimum detector confidence</label>
+            <input
+              id="ml-detector"
+              type="number"
+              step="0.01"
+              formControlName="detectorMinConfidence"
+              [attr.aria-invalid]="!!detectorError"
+              aria-describedby="ml-detector-error"
+            />
+            <small id="ml-detector-error" class="error">{{ detectorError }}</small>
+          </div>
+          <div class="field">
+            @let ocrError = errorOf('ml.ocrMinConfidence');
+            <label for="ml-ocr">Minimum OCR confidence</label>
+            <input
+              id="ml-ocr"
+              type="number"
+              step="0.01"
+              formControlName="ocrMinConfidence"
+              [attr.aria-invalid]="!!ocrError"
+              aria-describedby="ml-ocr-error"
+            />
+            <small id="ml-ocr-error" class="error">{{ ocrError }}</small>
+          </div>
+          <div class="field">
+            @let readableError = errorOf('ml.readableMinProbability');
+            <label for="ml-readable">Minimum readability</label>
+            <input
+              id="ml-readable"
+              type="number"
+              step="0.01"
+              formControlName="readableMinProbability"
+              [attr.aria-invalid]="!!readableError"
+              aria-describedby="ml-readable-error"
+            />
+            <small id="ml-readable-error" class="error">{{ readableError }}</small>
+          </div>
+          <div class="field">
+            @let widthError = errorOf('ml.minPlateWidthPx');
+            <label for="ml-width">Minimum plate width (px)</label>
+            <input
+              id="ml-width"
+              type="number"
+              formControlName="minPlateWidthPx"
+              [attr.aria-invalid]="!!widthError"
+              aria-describedby="ml-width-error"
+            />
+            <small id="ml-width-error" class="error">{{ widthError }}</small>
+          </div>
+          <div class="field">
+            @let marginError = errorOf('ml.minEdgeMarginPx');
+            <label for="ml-margin">Minimum margin from the frame edge (px)</label>
+            <input
+              id="ml-margin"
+              type="number"
+              formControlName="minEdgeMarginPx"
+              [attr.aria-invalid]="!!marginError"
+              aria-describedby="ml-margin-error"
+            />
+            <small id="ml-margin-error" class="error">{{ marginError }}</small>
+          </div>
+        </ng-container>
+        <div class="field">
+          @let cooldownError = errorOf('plateCooldownSeconds');
+          <label for="plate-cooldown">Do not resend the same plate for (s)</label>
+          <input
+            id="plate-cooldown"
+            type="number"
+            formControlName="plateCooldownSeconds"
+            [attr.aria-invalid]="!!cooldownError"
+            aria-describedby="plate-cooldown-error"
+          />
+          <small id="plate-cooldown-error" class="error">{{ cooldownError }}</small>
+        </div>
+      }
+
+      @case ('intervals') {
+        <ng-container formGroupName="intervals">
+          <div class="field">
+            @let metricsError = errorOf('intervals.metricsSeconds');
+            <label for="intervals-metrics">Report metrics every (s)</label>
+            <input
+              id="intervals-metrics"
+              type="number"
+              formControlName="metricsSeconds"
+              [attr.aria-invalid]="!!metricsError"
+              aria-describedby="intervals-metrics-error"
+            />
+            <small id="intervals-metrics-error" class="error">{{ metricsError }}</small>
+          </div>
+          <div class="field">
+            @let configError = errorOf('intervals.configPollSeconds');
+            <label for="intervals-config">Check configuration every (s)</label>
+            <input
+              id="intervals-config"
+              type="number"
+              formControlName="configPollSeconds"
+              [attr.aria-invalid]="!!configError"
+              aria-describedby="intervals-config-error"
+            />
+            <small id="intervals-config-error" class="error">{{ configError }}</small>
+          </div>
+          <div class="field">
+            @let alertsError = errorOf('intervals.alertsPollSeconds');
+            <label for="intervals-alerts">Check alerts every (s)</label>
+            <input
+              id="intervals-alerts"
+              type="number"
+              formControlName="alertsPollSeconds"
+              [attr.aria-invalid]="!!alertsError"
+              aria-describedby="intervals-alerts-error"
+            />
+            <small id="intervals-alerts-error" class="error">{{ alertsError }}</small>
+          </div>
+          <div class="field">
+            @let locationError = errorOf('intervals.locationSampleSeconds');
+            <label for="intervals-location">Record position every (s)</label>
+            <input
+              id="intervals-location"
+              type="number"
+              formControlName="locationSampleSeconds"
+              [attr.aria-invalid]="!!locationError"
+              aria-describedby="intervals-location-error"
+            />
+            <small id="intervals-location-error" class="error">{{ locationError }}</small>
+          </div>
+        </ng-container>
+        <div class="field" formGroupName="gps">
+          @let fixAgeError = errorOf('gps.maxFixAgeSeconds');
+          <label for="gps-fix-age">Oldest usable GPS fix (s)</label>
+          <input
+            id="gps-fix-age"
+            type="number"
+            formControlName="maxFixAgeSeconds"
+            [attr.aria-invalid]="!!fixAgeError"
+            aria-describedby="gps-fix-age-error"
+          />
+          <small id="gps-fix-age-error" class="error">{{ fixAgeError }}</small>
+        </div>
+      }
+
+      @case ('sending') {
+        <ng-container formGroupName="batching">
+          <div class="field">
+            @let detectionsError = errorOf('batching.detectionsBatchSize');
+            <label for="batching-detections">Detections per request</label>
+            <input
+              id="batching-detections"
+              type="number"
+              formControlName="detectionsBatchSize"
+              [attr.aria-invalid]="!!detectionsError"
+              aria-describedby="batching-detections-error"
+            />
+            <small id="batching-detections-error" class="error">{{ detectionsError }}</small>
+          </div>
+          <div class="field">
+            @let locationsError = errorOf('batching.locationsBatchSize');
+            <label for="batching-locations">GPS points per request</label>
+            <input
+              id="batching-locations"
+              type="number"
+              formControlName="locationsBatchSize"
+              [attr.aria-invalid]="!!locationsError"
+              aria-describedby="batching-locations-error"
+            />
+            <small id="batching-locations-error" class="error">{{ locationsError }}</small>
+          </div>
+          <div class="field">
+            @let imageUrlsError = errorOf('batching.imageUrlsBatchSize');
+            <label for="batching-image-urls">Photos per upload URL request</label>
+            <input
+              id="batching-image-urls"
+              type="number"
+              formControlName="imageUrlsBatchSize"
+              [attr.aria-invalid]="!!imageUrlsError"
+              aria-describedby="batching-image-urls-error"
+            />
+            <small id="batching-image-urls-error" class="error">{{ imageUrlsError }}</small>
+          </div>
+          <div class="field">
+            @let delayError = errorOf('batching.maxBatchDelaySeconds');
+            <label for="batching-delay">Send an incomplete batch after (s)</label>
+            <input
+              id="batching-delay"
+              type="number"
+              formControlName="maxBatchDelaySeconds"
+              [attr.aria-invalid]="!!delayError"
+              aria-describedby="batching-delay-error"
+            />
+            <small id="batching-delay-error" class="error">{{ delayError }}</small>
+          </div>
+          <label class="checkbox">
+            <input type="checkbox" formControlName="imageUploadsLowPriority" />
+            Upload photos only when nothing else waits
+          </label>
+        </ng-container>
+      }
+
+      @case ('photos') {
+        <ng-container formGroupName="photos">
+          <div class="field">
+            @let widthError = errorOf('photos.widthPx');
+            <label for="photos-width">Photo width (px)</label>
+            <input
+              id="photos-width"
+              type="number"
+              formControlName="widthPx"
+              [attr.aria-invalid]="!!widthError"
+              aria-describedby="photos-width-error"
+            />
+            <small id="photos-width-error" class="error">{{ widthError }}</small>
+          </div>
+          <div class="field">
+            @let qualityError = errorOf('photos.jpegQuality');
+            <label for="photos-quality">JPEG quality</label>
+            <input
+              id="photos-quality"
+              type="number"
+              formControlName="jpegQuality"
+              [attr.aria-invalid]="!!qualityError"
+              aria-describedby="photos-quality-error"
+            />
+            <small id="photos-quality-error" class="error">{{ qualityError }}</small>
+          </div>
+          <div class="field">
+            @let waitingError = errorOf('photos.maxWaitingFrames');
+            <label for="photos-waiting">Frames waiting for the encoder</label>
+            <input
+              id="photos-waiting"
+              type="number"
+              formControlName="maxWaitingFrames"
+              [attr.aria-invalid]="!!waitingError"
+              aria-describedby="photos-waiting-error"
+            />
+            <small id="photos-waiting-error" class="error">{{ waitingError }}</small>
+          </div>
+          <div class="field">
+            @let storedError = errorOf('photos.maxStored');
+            <label for="photos-stored">Photos kept while offline</label>
+            <input
+              id="photos-stored"
+              type="number"
+              formControlName="maxStored"
+              [attr.aria-invalid]="!!storedError"
+              aria-describedby="photos-stored-error"
+            />
+            <small id="photos-stored-error" class="error">{{ storedError }}</small>
+          </div>
+        </ng-container>
+      }
+
+      @case ('camera') {
+        <ng-container formGroupName="camera">
+          <div class="field">
+            @let fpsError = errorOf('camera.fps');
+            <label for="camera-fps">Frames per second</label>
+            <input
+              id="camera-fps"
+              type="number"
+              step="0.1"
+              formControlName="fps"
+              [attr.aria-invalid]="!!fpsError"
+              aria-describedby="camera-fps-error"
+            />
+            <small id="camera-fps-error" class="error">{{ fpsError }}</small>
+          </div>
+          <label class="checkbox">
+            <input type="checkbox" formControlName="hflip" />
+            Mirror horizontally
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" formControlName="vflip" />
+            Flip vertically
+          </label>
+
+          <ng-container formGroupName="exposure">
+            <div class="field">
+              <label for="exposure-mode">Exposure mode</label>
+              <select id="exposure-mode" formControlName="mode">
+                <option value="AUTO">AUTO</option>
+                <option value="AUTO_GAIN">AUTO_GAIN</option>
+                <option value="AUTO_EXPOSURE">AUTO_EXPOSURE</option>
+                <option value="MANUAL">MANUAL</option>
+              </select>
+            </div>
+            <div class="field">
+              @let timeError = errorOf('camera.exposure.exposureUs');
+              <label for="exposure-time">Exposure time (µs)</label>
+              <input
+                id="exposure-time"
+                type="number"
+                formControlName="exposureUs"
+                [attr.aria-invalid]="!!timeError"
+                aria-describedby="exposure-time-error"
+              />
+              <small id="exposure-time-error" class="error">{{ timeError }}</small>
+            </div>
+            <div class="field">
+              @let gainError = errorOf('camera.exposure.gain');
+              <label for="exposure-gain">Gain</label>
+              <input
+                id="exposure-gain"
+                type="number"
+                step="0.1"
+                formControlName="gain"
+                [attr.aria-invalid]="!!gainError"
+                aria-describedby="exposure-gain-error"
+              />
+              <small id="exposure-gain-error" class="error">{{ gainError }}</small>
+            </div>
+            <div class="field">
+              @let maxTimeError = errorOf('camera.exposure.maxExposureUs');
+              <label for="exposure-max-time">Longest exposure time (µs)</label>
+              <input
+                id="exposure-max-time"
+                type="number"
+                formControlName="maxExposureUs"
+                [attr.aria-invalid]="!!maxTimeError"
+                aria-describedby="exposure-max-time-error"
+              />
+              <small id="exposure-max-time-error" class="error">{{ maxTimeError }}</small>
+            </div>
+            <div class="field">
+              @let maxGainError = errorOf('camera.exposure.maxGain');
+              <label for="exposure-max-gain">Highest gain</label>
+              <input
+                id="exposure-max-gain"
+                type="number"
+                step="0.1"
+                formControlName="maxGain"
+                [attr.aria-invalid]="!!maxGainError"
+                aria-describedby="exposure-max-gain-error"
+              />
+              <small id="exposure-max-gain-error" class="error">{{ maxGainError }}</small>
+            </div>
+            <div class="field">
+              @let brightnessError = errorOf('camera.exposure.targetBrightness');
+              <label for="exposure-brightness">Target brightness</label>
+              <input
+                id="exposure-brightness"
+                type="number"
+                step="0.01"
+                formControlName="targetBrightness"
+                [attr.aria-invalid]="!!brightnessError"
+                aria-describedby="exposure-brightness-error"
+              />
+              <small id="exposure-brightness-error" class="error">{{ brightnessError }}</small>
+            </div>
+            <div class="field">
+              @let topError = errorOf('camera.exposure.meteringTop');
+              <label for="exposure-top">Metered band: top</label>
+              <input
+                id="exposure-top"
+                type="number"
+                step="0.01"
+                formControlName="meteringTop"
+                [attr.aria-invalid]="!!topError"
+                aria-describedby="exposure-top-error"
+              />
+              <small id="exposure-top-error" class="error">{{ topError }}</small>
+            </div>
+            <div class="field">
+              @let bottomError = errorOf('camera.exposure.meteringBottom');
+              <label for="exposure-bottom">Metered band: bottom</label>
+              <input
+                id="exposure-bottom"
+                type="number"
+                step="0.01"
+                formControlName="meteringBottom"
+                [attr.aria-invalid]="!!bottomError"
+                aria-describedby="exposure-bottom-error"
+              />
+              <small id="exposure-bottom-error" class="error">{{ bottomError }}</small>
+            </div>
+          </ng-container>
+
+          <ng-container formGroupName="whiteBalance">
+            <div class="field">
+              <label for="white-balance-mode">White balance</label>
+              <select id="white-balance-mode" formControlName="mode">
+                <option value="AUTO">AUTO</option>
+                <option value="DAYLIGHT">DAYLIGHT</option>
+                <option value="CLOUDY">CLOUDY</option>
+                <option value="TUNGSTEN">TUNGSTEN</option>
+                <option value="FLUORESCENT">FLUORESCENT</option>
+                <option value="INDOOR">INDOOR</option>
+                <option value="MANUAL">MANUAL</option>
+              </select>
+            </div>
+            <div class="field">
+              @let redError = errorOf('camera.whiteBalance.redGain');
+              <label for="white-balance-red">Red gain (manual)</label>
+              <input
+                id="white-balance-red"
+                type="number"
+                step="0.1"
+                formControlName="redGain"
+                [attr.aria-invalid]="!!redError"
+                aria-describedby="white-balance-red-error"
+              />
+              <small id="white-balance-red-error" class="error">{{ redError }}</small>
+            </div>
+            <div class="field">
+              @let blueError = errorOf('camera.whiteBalance.blueGain');
+              <label for="white-balance-blue">Blue gain (manual)</label>
+              <input
+                id="white-balance-blue"
+                type="number"
+                step="0.1"
+                formControlName="blueGain"
+                [attr.aria-invalid]="!!blueError"
+                aria-describedby="white-balance-blue-error"
+              />
+              <small id="white-balance-blue-error" class="error">{{ blueError }}</small>
+            </div>
+          </ng-container>
+        </ng-container>
+      }
+    }
+  </div>
+
+  <div class="actions">
+    <button type="submit" class="save" [disabled]="saving()">
+      {{ saving() ? 'Saving…' : 'Save Changes' }}
+    </button>
+  </div>
+</form>

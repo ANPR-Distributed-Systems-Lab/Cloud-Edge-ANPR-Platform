@@ -1,0 +1,85 @@
+<header class="top-bar">
+  <a class="brand" routerLink="/device">ANPR Platform</a>
+</header>
+
+<div class="layout">
+  <nav class="sidebar" aria-label="Main menu">
+    <button
+      type="button"
+      class="group"
+      [attr.aria-expanded]="deviceOpen()"
+      (click)="deviceOpen.set(!deviceOpen())"
+    >
+      Device
+      <span aria-hidden="true">{{ deviceOpen() ? '▾' : '‹' }}</span>
+    </button>
+    @if (deviceOpen()) {
+      <ul>
+        <li>
+          <a routerLink="/device" routerLinkActive="active" ariaCurrentWhenActive="page"
+            >Overview</a
+          >
+        </li>
+      </ul>
+    }
+
+    <button
+      type="button"
+      class="group"
+      [attr.aria-expanded]="configOpen()"
+      (click)="configOpen.set(!configOpen())"
+    >
+      Configuration
+      <span aria-hidden="true">{{ configOpen() ? '▾' : '‹' }}</span>
+    </button>
+    @if (configOpen()) {
+      <ul>
+        <li>
+          <a routerLink="/config/models" routerLinkActive="active" ariaCurrentWhenActive="page"
+            >Models</a
+          >
+        </li>
+        <li>
+          <a routerLink="/config/reading" routerLinkActive="active" ariaCurrentWhenActive="page"
+            >Reading plates</a
+          >
+        </li>
+        <li>
+          <a routerLink="/config/intervals" routerLinkActive="active" ariaCurrentWhenActive="page"
+            >Intervals</a
+          >
+        </li>
+        <li>
+          <a routerLink="/config/sending" routerLinkActive="active" ariaCurrentWhenActive="page"
+            >Sending</a
+          >
+        </li>
+        <li>
+          <a routerLink="/config/photos" routerLinkActive="active" ariaCurrentWhenActive="page"
+            >Photos</a
+          >
+        </li>
+        <li>
+          <a routerLink="/config/camera" routerLinkActive="active" ariaCurrentWhenActive="page"
+            >Camera</a
+          >
+        </li>
+      </ul>
+    }
+  </nav>
+
+  <main tabindex="-1">
+    @if (notifications.notice(); as notice) {
+      <div
+        class="notice"
+        [class.error]="notice.kind === 'error'"
+        [attr.role]="notice.kind === 'error' ? 'alert' : 'status'"
+      >
+        {{ notice.text }}
+        <button type="button" (click)="notifications.clear()" aria-label="Close">×</button>
+      </div>
+    }
+
+    <router-outlet />
+  </main>
+</div>

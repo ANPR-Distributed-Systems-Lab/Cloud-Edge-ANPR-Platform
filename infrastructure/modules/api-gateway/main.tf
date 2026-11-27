@@ -161,7 +161,7 @@ resource "aws_apigatewayv2_integration" "service" {
   # caller is the IAM principal (X-Account-Type "iam", X-Account-Id its ARN, handy for audit logs).
   # X-Request-Id is the id of the request in the access logs below; a service uses it as the trace id
   # when the client sent no X-Trace-Id, so its logs and the access logs share one id. Otherwise the
-  # services log it as gatewayRequestId (device-management and the ingest Lambda so far).
+  # services and the ingest Lambda log it as gatewayRequestId.
   request_parameters = each.value.authorizer == local.iam_authorizer ? {
     "overwrite:header.X-Account-Id"   = "$context.identity.userArn"
     "overwrite:header.X-Account-Type" = "iam"

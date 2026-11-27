@@ -6,7 +6,8 @@ background is in [identity-and-access.md](../identity-and-access.md), the publis
 [device-management.md](../device-management.md#5-creating-and-deleting-a-device).
 
 Status: design agreed. The topic and the queue of operations are deployed on `dev`. The publisher
-(device-management) is implemented and tested locally, not deployed; the consumer (operations) is not written yet.
+(device-management) is implemented and tested locally, not deployed; the consumer (operations) is implemented and
+tested locally (`messaging/devices`), not deployed.
 
 ## 1. Flow
 
@@ -37,7 +38,7 @@ device-management --publish (after the DynamoDB write)--> SNS topic "device-even
 | Attribute | Notes |
 |---|---|
 | `eventType` | `device.paired` or `device.unpaired`; subscriptions can filter on it |
-| `traceId` | Trace id of the pairing request, copied into the logs of every consumer |
+| `traceId` | Trace id of the pairing request, copied into the logs of every consumer. A consumer that receives a message without it logs a WARN and uses the SQS message id instead, so its logs still carry a trace id |
 
 ### Body
 

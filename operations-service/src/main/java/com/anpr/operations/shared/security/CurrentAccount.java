@@ -28,7 +28,7 @@ public class CurrentAccount {
         try {
             return UUID.fromString(value);
         } catch (IllegalArgumentException e) {
-            throw new UnauthorizedException((ErrorCodes.UNAUTHENTICATED), "Invalid account header");
+            throw new UnauthorizedException(ErrorCodes.UNAUTHENTICATED, "Invalid account header");
         }
     }
 }

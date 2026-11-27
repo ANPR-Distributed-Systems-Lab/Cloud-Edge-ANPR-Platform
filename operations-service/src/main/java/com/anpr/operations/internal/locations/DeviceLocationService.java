@@ -1,0 +1,59 @@
+package com.anpr.operations.internal.locations;
+
+import com.anpr.operations.internal.devices.DevicePairingService;
+import com.anpr.operations.internal.locations.model.DeviceLocation;
+import com.anpr.operations.internal.locations.repository.DeviceLocationRepository;
+import com.anpr.operations.internal.locations.repository.DevicePoint;
+import com.anpr.operations.internal.locations.repository.LocationPoint;
+import com.anpr.operations.shared.geo.Wgs84;
+import com.anpr.operations.shared.time.TimeRange;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.OffsetDateTime;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+
+@Service
+@RequiredArgsConstructor
+public class DeviceLocationService {
+    private final DeviceLocationRepository deviceLocationRepository;
+    private final DevicePairingService pairingService;
+
+    /** A GPS point as the device reported it, before the owner is known. */
+    public record NewDeviceLocation(UUID locationId, OffsetDateTime recordedAt, double lat, double lon) {
+    }
+
+    /** Stores a batch of one device in one transaction. Returns how many points were new, as DetectionService.store. */
+    @Transactional
+    public int store(UUID deviceId, List<NewDeviceLocation> locations) {
+        UUID ownerId = pairingService.requireOwner(deviceId);
+        int inserted = 0;
+        for (NewDeviceLocation l : locations) {
+            inserted += deviceLocationRepository.insertIfAbsent(DeviceLocation.create(
+                    l.locationId(), ownerId, deviceId, l.recordedAt(), Wgs84.point(l.lat(), l.lon())));
+        }
+        return inserted;
+    }
+
+    /** Route of a device since the given time, oldest point first. */
+    @Transactional(readOnly = true)
+    public List<LocationPoint> track(UUID accountId, UUID deviceId, OffsetDateTime since) {
+        return deviceLocationRepository.findTrack(accountId, deviceId, since);
+    }
+
+    /** The latest position of a device, also when it is older than any time window. */
+    @Transactional(readOnly = true)
+    public Optional<LocationPoint> latest(UUID accountId, UUID deviceId) {
+        return deviceLocationRepository.findLatest(accountId, deviceId);
+    }
+
+    /** View 2: thinned routes of every device of the account in the range, oldest point first per device. */
+    @Transactional(readOnly = true)
+    public List<DevicePoint> tracks(UUID accountId, TimeRange period, int intervalSeconds, int limitPerDevice) {
+        return deviceLocationRepository.findTracks(accountId, period.from(), period.to(), intervalSeconds,
+                limitPerDevice);
+    }
+}

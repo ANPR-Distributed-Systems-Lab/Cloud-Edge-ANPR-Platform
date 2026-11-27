@@ -115,7 +115,7 @@ Content translated from the architecture diagram `Inżynierka (2).drawio` (as of
 ## Deviations
 
 Proposed deviations of the implementation from the diagram. Status: `proposed` (waiting for team approval) / `agreed`.
-In the OpenAPI contracts they are referenced as `D1`–`D23` (without the `#` sign, which starts a comment in YAML).
+In the OpenAPI contracts they are referenced as `D1`–`D27` (without the `#` sign, which starts a comment in YAML).
 
 | No. | Diagram | Implementation | Justification | Status |
 |---|---|---|---|---|
@@ -142,14 +142,17 @@ In the OpenAPI contracts they are referenced as `D1`–`D23` (without the `#` si
 | D21 | View 5: `connection_status` stored with every status | `online` and `lastMetricsAt` computed in `GET /api/v1/device` from the latest measurement and the metrics interval of the device; measurements add free disk, uptime and the GPS state; kept for 7 days (TTL) | A device that stopped reporting cannot report that it is offline | agreed |
 | D22 | `device_statuses` with SK `datetime` | Table `device-metrics` with SK `recordedAt`, epoch milliseconds of the measurement, the same name as in the API | A number sorts chronologically; the table is named after what it holds | agreed |
 | D23 | No device registry | Table `devices` (PK `deviceId`, index by `accountId`) with the owner, the Cognito username and the ownership version; administrator endpoints create and delete devices (docs/device-management.md) | The source of truth of ownership and of the device events | agreed |
+| D24 | View 6: alert list without filters | Optional filters in `GET /alerts` for people: plate prefix and creation time range (`from` inclusive, `to` exclusive); `to` must be after `from` (400 `INVALID_TIME_RANGE`) | With pagination a client-side filter only searches the current page; finding one alert on a long blacklist needs a server-side filter | proposed |
+| D25 | Table `accounts` in operations: `id_konta` (PK), `id_urządzenia` (UNIQUE), first name, last name, e-mail, creation date | `accounts (account_id)` and a separate `devices (device_id, account_id, version)`, both filled from `device.paired` / `device.unpaired` (docs/identity-and-access.md, section 6); unpairing keeps the device row with no owner | Profile data stays in Cognito; operations never calls device-management, so it keeps its own copy of the owner of a device; events arrive out of order, and the kept `version` makes a late, older pairing ignored | proposed |
+| D26 | View 3: detections searched by B-Tree (`account_id`) and B-Tree (`datetime`) | The Live Feed follows the order in which detections were stored, not `datetime`: column `ingested_at` (time of the storing transaction), opaque cursor `(ingested_at, detection_id)`, index `(account_id, ingested_at, detection_id)`; only detections stored at least 2 s before the request are returned (Known limitations, 1) | Detections buffered offline on the device (store-and-forward) arrive late with an old `datetime`; a cursor over `datetime` would skip them | proposed |
+| D27 | View 3 without limits | At most 50 detections per response, `hasMore` tells to call again at once with `nextCursor`; route window `windowMinutes` 1-60 (default 20); the route keeps at most one point per 10 s (the last fix of each), so at most 360 points | The dashboard polls every few seconds: each response must stay small however many detections or GPS fixes arrived (the device sends up to one fix per second) | proposed |
 
 ---
 
 ## Open questions (to be agreed within the team)
 
-1. Who approves deviations D1–D10? Until approval the contract is a draft version (`0.x`).
+1. Who approves deviations D1–D27? Until approval the contract is a draft version (`0.x`).
 2. Expiry of the photo presigned URLs (D4): cached pages stop working once they expire.
-3. Limit not in the diagram: Live Feed window max 60 min. Do we accept it?
 
 ---
 

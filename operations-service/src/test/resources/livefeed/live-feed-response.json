@@ -1,0 +1,27 @@
+{
+  "nextCursor": "MTc5MzM1MTk0MDAwMDAwMDo1ZTFjMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMTM",
+  "hasMore": false,
+  "detections": [
+    {
+      "detectionId": "5e1c0000-0000-4000-8000-000000000013",
+      "deviceId": "5e1c0000-0000-4000-8000-000000000012",
+      "plate": "WA12345",
+      "detectedAt": "2026-10-30T09:14:22.381Z",
+      "position": { "lat": 52.229676, "lon": 21.012229 },
+      "ocrConfidence": 0.94,
+      "detectorConfidence": 0.88,
+      "imageUrl": "https://images.test/images/5e1c0000-0000-4000-8000-000000000012/2026/10/30/frame.jpg",
+      "alertId": null
+    }
+  ],
+  "devices": [
+    {
+      "deviceId": "5e1c0000-0000-4000-8000-000000000012",
+      "lastSeenAt": "2026-10-30T09:15:00Z",
+      "lastPosition": { "lat": 52.23, "lon": 21.01 },
+      "track": [
+        { "position": { "lat": 52.23, "lon": 21.01 }, "recordedAt": "2026-10-30T09:15:00Z" }
+      ]
+    }
+  ]
+}

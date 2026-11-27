@@ -1,0 +1,16 @@
+{
+  "batchId": "0192f3a4-7c1e-7b2a-9d41-5f3e8a1c2b10",
+  "detections": [
+    {
+      "detectionId": "0192f3a4-7c1f-7e11-8a02-6b7d4c9e1a01",
+      "frameId": "0192f3a4-7c1e-7000-b5c3-1d2e3f4a5b6c",
+      "detectedAt": "2026-10-30T09:14:22.381Z",
+      "plate": "WA12345",
+      "ocrConfidence": 0.94,
+      "detectorConfidence": 0.88,
+      "imageKey": "images/7d3f2c1e-0000-4000-8000-000000000000/2026/10/30/0192f3a4-7c1e-7000-b5c3-1d2e3f4a5b6c.jpg",
+      "corners": [[0.412, 0.531], [0.447, 0.529], [0.448, 0.548], [0.413, 0.551]],
+      "location": { "lat": 52.229676, "lon": 21.012229, "accuracyM": 4.5, "fixAgeMs": 300 }
+    }
+  ]
+}

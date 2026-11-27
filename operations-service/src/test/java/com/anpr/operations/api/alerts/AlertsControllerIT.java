@@ -1,6 +1,9 @@
 package com.anpr.operations.api.alerts;
 
 import com.anpr.operations.TestcontainersConfiguration;
+import com.anpr.operations.internal.detections.DetectionService;
+import com.anpr.operations.internal.detections.DetectionService.NewDetection;
+import com.anpr.operations.internal.devices.DevicePairingService;
 import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -8,21 +11,32 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.List;
 import java.util.UUID;
 
+import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsInAnyOrder;
+import static org.hamcrest.Matchers.matchesPattern;
+import static org.hamcrest.Matchers.not;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest
 @AutoConfigureMockMvc
+@ActiveProfiles("test")
 @Import(TestcontainersConfiguration.class)
 class AlertsControllerIT {
 
@@ -31,6 +45,12 @@ class AlertsControllerIT {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private DevicePairingService pairingService;
+
+    @Autowired
+    private DetectionService detectionService;
 
     @Test
     void createAlertReturns201() throws Exception {
@@ -130,11 +150,72 @@ class AlertsControllerIT {
     }
 
     @Test
-    void deviceCallerOfTheAlertListIsNotImplementedYet() throws Exception {
-        mockMvc.perform(get("/api/v1/alerts")
-                        .header(ACCOUNT_HEADER, UUID.randomUUID().toString())
-                        .header(ACCOUNT_TYPE_HEADER, "device"))
-                .andExpect(status().isNotImplemented());
+    void deviceGetsAllAlertsOfItsOwnerWithAnETag() throws Exception {
+        String owner = UUID.randomUUID().toString();
+        String device = pairedDevice(owner);
+        // More than the default page size of a person, so a device must get them all at once.
+        for (int i = 0; i < 25; i++) {
+            createAlert(owner, "DV%05d".formatted(i));
+        }
+        createAlert(UUID.randomUUID().toString(), "DV99999");
+
+        mockMvc.perform(alertsOfDevice(device))
+                .andExpect(status().isOk())
+                .andExpect(header().string("ETag", matchesPattern("W/\"[0-9a-f]{32}\"")))
+                .andExpect(jsonPath("$.items.length()").value(25))
+                .andExpect(jsonPath("$.page.totalElements").value(25));
+    }
+
+    @Test
+    void deviceGetsNotModifiedWhileTheListIsUnchanged() throws Exception {
+        String owner = UUID.randomUUID().toString();
+        String device = pairedDevice(owner);
+        createAlert(owner, "NM10001");
+        String eTag = mockMvc.perform(alertsOfDevice(device))
+                .andReturn().getResponse().getHeader("ETag");
+
+        mockMvc.perform(alertsOfDevice(device).header("If-None-Match", eTag))
+                .andExpect(status().isNotModified())
+                .andExpect(header().string("ETag", eTag))
+                .andExpect(content().string(""));
+    }
+
+    @Test
+    void updatedAlertGivesTheDeviceANewList() throws Exception {
+        String owner = UUID.randomUUID().toString();
+        String device = pairedDevice(owner);
+        String alertId = createAlert(owner, "UP10001");
+        String eTag = mockMvc.perform(alertsOfDevice(device))
+                .andReturn().getResponse().getHeader("ETag");
+
+        mockMvc.perform(put("/api/v1/alerts/{id}", alertId)
+                        .header(ACCOUNT_HEADER, owner)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "alertText": "Changed", "version": 0 }
+                                """))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(alertsOfDevice(device).header("If-None-Match", eTag))
+                .andExpect(status().isOk())
+                .andExpect(header().string("ETag", not(eTag)))
+                .andExpect(jsonPath("$.items[0].alertText").value("Changed"));
+    }
+
+    @Test
+    void deviceWithNoOwnerReturns403() throws Exception {
+        mockMvc.perform(alertsOfDevice(UUID.randomUUID().toString()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("DEVICE_NOT_PAIRED"))
+                .andExpect(jsonPath("$.requestId").exists());
+
+        String owner = UUID.randomUUID().toString();
+        String device = pairedDevice(owner);
+        pairingService.unpair(UUID.fromString(device), 2);
+
+        mockMvc.perform(alertsOfDevice(device))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("DEVICE_NOT_PAIRED"));
     }
 
     @Test
@@ -157,7 +238,60 @@ class AlertsControllerIT {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.items.length()").value(2))
                 .andExpect(jsonPath("$.items[*].plate", containsInAnyOrder("WA10001", "WA10002")))
-                .andExpect(jsonPath("$.page.totalElements").value(2));
+                .andExpect(jsonPath("$.page.totalElements").value(2))
+                .andExpect(header().doesNotExist("ETag"));
+    }
+
+    @Test
+    void listFiltersByPlatePrefix() throws Exception {
+        String account = UUID.randomUUID().toString();
+        createAlert(account, "WA10001");
+        createAlert(account, "WA20002");
+        createAlert(account, "KR10003");
+
+        mockMvc.perform(get("/api/v1/alerts")
+                        .param("plate", "WA1")
+                        .header(ACCOUNT_HEADER, account))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[*].plate", containsInAnyOrder("WA10001")))
+                .andExpect(jsonPath("$.page.totalElements").value(1));
+    }
+
+    @Test
+    void listFiltersByCreationTimeRange() throws Exception {
+        String account = UUID.randomUUID().toString();
+        createAlert(account, "GD50005");
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+
+        mockMvc.perform(get("/api/v1/alerts")
+                        .param("from", now.minusHours(1).toString())
+                        .param("to", now.plusHours(1).toString())
+                        .header(ACCOUNT_HEADER, account))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page.totalElements").value(1));
+
+        mockMvc.perform(get("/api/v1/alerts")
+                        .param("from", now.plusHours(1).toString())
+                        .header(ACCOUNT_HEADER, account))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page.totalElements").value(0));
+
+        mockMvc.perform(get("/api/v1/alerts")
+                        .param("to", now.minusHours(1).toString())
+                        .header(ACCOUNT_HEADER, account))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page.totalElements").value(0));
+    }
+
+    @Test
+    void listWithToBeforeFromReturns400() throws Exception {
+        mockMvc.perform(get("/api/v1/alerts")
+                        .param("from", "2026-10-02T00:00:00Z")
+                        .param("to", "2026-10-01T00:00:00Z")
+                        .header(ACCOUNT_HEADER, UUID.randomUUID().toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_TIME_RANGE"))
+                .andExpect(jsonPath("$.requestId").exists());
     }
 
     @Test
@@ -203,6 +337,59 @@ class AlertsControllerIT {
                 .andExpect(status().isNotFound());
     }
 
+    @Test
+    void pageSizeAboveTheLimitReturns400() throws Exception {
+        mockMvc.perform(get("/api/v1/alerts").param("size", "101")
+                        .header(ACCOUNT_HEADER, UUID.randomUUID().toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+    }
+
+    @Test
+    void lastDetectedAtIsTheLatestDetectionOfThePlateInTheAccount() throws Exception {
+        String account = UUID.randomUUID().toString();
+        OffsetDateTime t0 = OffsetDateTime.of(2026, 10, 30, 9, 0, 0, 0, ZoneOffset.UTC);
+        String alertId = createAlert(account, "WA60001");
+        detect(account, detection("WA60001", t0), detection("WA60001", t0.plusHours(2)));
+        detect(UUID.randomUUID().toString(), detection("WA60001", t0.plusHours(5)));
+
+        mockMvc.perform(get("/api/v1/alerts/{id}", alertId).header(ACCOUNT_HEADER, account))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.lastDetectedAt").value("2026-10-30T11:00:00Z"));
+    }
+
+    @Test
+    void createdAlertAlreadyCarriesTheLastDetectionOfThePlate() throws Exception {
+        String account = UUID.randomUUID().toString();
+        OffsetDateTime t0 = OffsetDateTime.of(2026, 10, 30, 9, 0, 0, 0, ZoneOffset.UTC);
+        detect(account, detection("WA60021", t0));
+
+        mockMvc.perform(post("/api/v1/alerts")
+                        .header(ACCOUNT_HEADER, account)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "plate": "WA60021" }
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.lastDetectedAt").value("2026-10-30T09:00:00Z"));
+    }
+
+    @Test
+    void sortingByLastDetectionPutsNeverDetectedPlatesLast() throws Exception {
+        String account = UUID.randomUUID().toString();
+        OffsetDateTime t0 = OffsetDateTime.of(2026, 10, 30, 9, 0, 0, 0, ZoneOffset.UTC);
+        createAlert(account, "WA60011");
+        createAlert(account, "WA60012");
+        createAlert(account, "WA60013");
+        detect(account, detection("WA60011", t0), detection("WA60013", t0.plusHours(1)));
+
+        mockMvc.perform(get("/api/v1/alerts").param("sort", "LAST_DETECTED_AT").param("direction", "DESC")
+                        .header(ACCOUNT_HEADER, account))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[*].plate", contains("WA60013", "WA60011", "WA60012")))
+                .andExpect(jsonPath("$.items[2].lastDetectedAt").value(nullValue()));
+    }
+
     private String createAlert(String account, String plate) throws Exception {
         String body = mockMvc.perform(post("/api/v1/alerts")
                         .header(ACCOUNT_HEADER, account)
@@ -211,5 +398,28 @@ class AlertsControllerIT {
                 .andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString();
         return JsonPath.read(body, "$.alertId");
+    }
+
+    private String pairedDevice(String owner) {
+        UUID device = UUID.randomUUID();
+        pairingService.pair(device, UUID.fromString(owner), 1);
+        return device.toString();
+    }
+
+    /** Accounts have one device each, so all detections of an account come from one paired device. */
+    private void detect(String account, NewDetection... detections) {
+        UUID device = UUID.randomUUID();
+        pairingService.pair(device, UUID.fromString(account), 1);
+        detectionService.store(device, List.of(detections));
+    }
+
+    private static NewDetection detection(String plate, OffsetDateTime detectedAt) {
+        return new NewDetection(UUID.randomUUID(), plate, detectedAt, 52.2, 21.0, 0.9, 0.8, "images/x.jpg");
+    }
+
+    private static MockHttpServletRequestBuilder alertsOfDevice(String device) {
+        return get("/api/v1/alerts")
+                .header(ACCOUNT_HEADER, device)
+                .header(ACCOUNT_TYPE_HEADER, "device");
     }
 }

@@ -163,7 +163,7 @@ The Lambda publishes the validated body **unchanged**, as the message, with thes
 | Attribute | Value |
 |---|---|
 | `eventType` | `detection`, derived from the route and never taken from the client |
-| `traceId` | The trace id of the request |
+| `traceId` | The trace id of the request. A consumer that receives a message without it logs a WARN and uses the SQS message id instead |
 | `deviceId` | The `sub` of the device token |
 
 There is no owner in the event. Consumers resolve it from their pairing table (see
@@ -172,7 +172,9 @@ the body and the attributes directly, and can filter on `eventType`.
 
 Each consumer reads the batch, deduplicates by `detectionId` and stores what it needs. The Trace ID of an
 individual detection is its `detectionId`; `traceId` identifies the request. All logs are JSON and contain
-these ids (project convention). Request bodies are never logged: they contain plates and GPS positions.
+these ids (project convention). When `traceId` is the client's `X-Trace-Id`, the log lines of the Lambda also carry
+`gatewayRequestId`, the API Gateway request id, which is the only id in the gateway's access logs. Request bodies
+are never logged: they contain plates and GPS positions.
 
 ## 6. Unpaired devices
 
@@ -195,6 +197,10 @@ detection whose key points to no object.
 The Lambda lives in `infrastructure/lambdas/event_ingest` and implements this document and
 [ingest-device-locations.md](ingest-device-locations.md): identity, content type, size, the atomic validation
 with `fields[]` and the `202` body. Unit tests next to it cover every rule.
+
+operations-service consumes both event types from its queue (`messaging/edge`) and stores them in `detections`
+and `device_locations` with the owner resolved from its `devices` table. A batch is stored in one transaction,
+deduplicated by `detectionId` / `locationId`. Tested locally, not deployed.
 
 ## 9. Open points
 

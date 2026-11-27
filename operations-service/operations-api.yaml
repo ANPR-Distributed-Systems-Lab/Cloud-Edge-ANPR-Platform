@@ -1,13 +1,13 @@
 openapi: 3.0.3
 info:
   title: ANPR Operations API (Alerts-And-Views-Service)
-  version: 0.3.0
+  version: 0.4.1
   description: |
     Microservice 2 (Alerts-And-Views-Service) - Views 1, 2, 3, 6, alert management and the alert list for edge devices.
     Functional source of truth: docs/views-specification.md. Deviations from the architecture diagram are listed there
-    in its deviations table and referenced below as D1..D18.
+    in its deviations table and referenced below as D1..D18 and D24..D27.
     The caller's account always comes from the token (API Gateway headers), never from request parameters (D3).
-    One account owns exactly one device (the device id is unique per account in the accounts table).
+    One account owns exactly one device (the account id is unique in the devices table, D25).
     Plate numbers are always uppercase letters and digits without spaces - the client normalizes user input before sending.
     A request may carry X-Trace-Id (1 to 64 characters from A-Z a-z 0-9 -); otherwise the request id of API Gateway is
     used. It is returned in the response header X-Trace-Id and as requestId of errors.
@@ -16,23 +16,17 @@ servers:
 security:
   - cognitoJwt: []
 tags:
-  - name: anprSearch
-    description: View 1 - ANPR search and analysis panel
-  - name: radialAnalysis
-    description: View 2 - radial analysis and route verification (PostGIS)
-  - name: liveFeed
-    description: View 3 - main dashboard and real-time monitoring (Live Feed)
   - name: detections
-    description: A single detection, opened from any view
+    description: Everything under /api/v1/detections - View 1 (search), View 2 (radial analysis), View 3 (live feed) and a single detection (D18)
   - name: alerts
     description: View 6 - alert management panel, and the alert list polled by the Raspberry Pi edge device
 
 paths:
   /api/v1/detections/search:
     get:
-      tags: [anprSearch]
+      tags: [detections]
       operationId: searchDetections
-      summary: Search detections by plate and time range
+      summary: View 1 - Search detections by plate and time range
       description: |
         View 1. Results are shown on a map with pins and as a list (D12).
         All filters are optional: the exact plate number and the time range (from-to).
@@ -63,12 +57,13 @@ paths:
 
   /api/v1/detections/plate-suggestions:
     get:
-      tags: [anprSearch]
+      tags: [detections]
       operationId: suggestPlates
-      summary: Plate number suggestions (autocomplete)
+      summary: View 1 - Plate number suggestions (autocomplete)
       description: |
         View 1 - autocomplete of the plate search field. The client calls it from the 2nd typed character.
         D5 (proposal): the diagram places autocomplete inside the ANPR search.
+        Returns distinct plates of the account starting with q, the most recently detected first.
       parameters:
         - name: q
           in: query
@@ -90,16 +85,17 @@ paths:
 
   /api/v1/detections/radial-analysis:
     get:
-      tags: [radialAnalysis]
+      tags: [detections]
       operationId: analyzeRadius
-      summary: Detections within a radius of a point, plus the device route
+      summary: View 2 - Detections within a radius of a point, plus the device route
       description: |
         View 2. Detections within radiusMeters of the given point in the time range,
         overlaid on the route of the edge device in the same time range.
         Not paginated - the map needs all points at once. Bounded instead (D10): a time range of at most 7 days,
-        otherwise 400 VALIDATION_FAILED; at most 5000 detections and at most 5000 points per route, each with its own
+        otherwise 400 VALIDATION_FAILED with fields[] naming "to" (code RANGE); at most 5000 detections and at most 5000 points per route, each with its own
         truncated flag. The density of the route is chosen by the client with trackIntervalSeconds: to get a whole
         range within the limit, use at least (range in seconds) / 5000, e.g. 121 for 7 days.
+        A "to" that is not after "from" returns 400 INVALID_TIME_RANGE.
       parameters:
         - name: lat
           in: query
@@ -120,9 +116,9 @@ paths:
         - name: trackIntervalSeconds
           in: query
           description: |
-            Minimal time between route points: the time range is split into windows of this length and the route has
-            at most one point per window, the first one recorded in it. 1 returns every point (the device records at
-            most one per second).
+            Minimal time between route points: the time range is split into windows of this length, starting at from,
+            and the route has at most one point per window, the first one recorded in it. 1 returns every point (the
+            device records at most one per second).
           schema: { type: integer, minimum: 1, maximum: 180, default: 1 }
       responses:
         '200':
@@ -136,11 +132,11 @@ paths:
 
   /api/v1/detections/live-feed:
     get:
-      tags: [liveFeed]
+      tags: [detections]
       operationId: getLiveFeed
-      summary: Latest detections, current device position and recent route
+      summary: View 3 - Latest detections, current device position and recent route
       description: |
-        View 3. Map with the current position of the vehicle (Raspberry Pi) and its route
+        View 3 (deviations D26, D27). Map with the current position of the vehicle (Raspberry Pi) and its route
         from the last windowMinutes minutes, plus a list of the newest detections refreshed by polling.
         Incremental polling with an opaque cursor: it follows the order in which detections were stored by the server
         (ingestion time, then detectionId), not detectedAt, so detections buffered offline on the device
@@ -153,7 +149,9 @@ paths:
       parameters:
         - name: cursor
           in: query
-          description: nextCursor from the previous response, as received. Omit on the first call to get the 50 most recently ingested detections.
+          description: >-
+            nextCursor from the previous response, as received. Omit on the first call to get the 50 most recently
+            ingested detections. A cursor that was not received from this endpoint returns 400 INVALID_REQUEST.
           schema: { type: string, maxLength: 200 }
         - name: windowMinutes
           in: query
@@ -178,14 +176,14 @@ paths:
     get:
       tags: [detections]
       operationId: getDetection
-      summary: Get a single detection
+      summary: D18 - Get a single detection
       description: Details of a detection opened from a list or a map (D18 - not on the diagram).
       responses:
         '200':
           description: OK
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Detection' }
+              schema: { $ref: '#/components/schemas/DetectionResponse' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -199,11 +197,12 @@ paths:
       description: |
         View 6 and the edge device, one endpoint for both for now (D15).
         A person gets one page of the alerts of the account, sortable by creation date and by the date the alert
-        was last triggered.
-        A device gets all alerts of its owner in one response, whatever page, size and sort say, so every device of
-        an account has the same list. It polls with conditional requests: send the last ETag in If-None-Match to get
-        304 when nothing changed. Only devices get an ETag: the list of a person also shows lastDetectedAt, which
-        moves with every detection.
+        was last triggered, optionally filtered by plate prefix and creation time range (D24, proposal).
+        A device gets all alerts of its owner in one response, whatever page, size, sort and the filters say, so every
+        device of an account has the same list. It polls with conditional requests: send the last ETag in If-None-Match
+        to get 304 when nothing changed. Only devices get an ETag: the list of a person also shows lastDetectedAt, which
+        moves with every detection. A device with no owner (its pairing event has not arrived yet, or it was unpaired)
+        gets 403 DEVICE_NOT_PAIRED.
       parameters:
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/Size'
@@ -211,6 +210,15 @@ paths:
           in: query
           schema: { $ref: '#/components/schemas/AlertSortField' }
         - $ref: '#/components/parameters/Direction'
+        - name: plate
+          in: query
+          description: People only - plate prefix filter, only alerts whose plate starts with this value (D24, proposal)
+          schema:
+            type: string
+            description: Beginning of a plate number - uppercase letters and digits, no spaces
+            pattern: '^[A-Z0-9]{1,10}$'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
         - name: If-None-Match
           in: header
           description: Devices only - ETag from the previous response
@@ -233,6 +241,7 @@ paths:
               schema: { type: string }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '500': { $ref: '#/components/responses/InternalError' }
     post:
       tags: [alerts]
@@ -376,6 +385,11 @@ components:
           schema: { $ref: '#/components/schemas/Problem' }
     Unauthorized:
       description: Missing or invalid token - returned by API Gateway before the request reaches the service, so the body is not a Problem object
+    Forbidden:
+      description: The caller is authenticated but may not use the endpoint (DEVICE_NOT_PAIRED - a device with no owner)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
     NotFound:
       description: Resource does not exist or belongs to another account
       content:
@@ -404,12 +418,16 @@ components:
         detail: { type: string }
         code:
           type: string
-          description: Stable machine-readable code, e.g. ALERT_NOT_FOUND, ALERT_ALREADY_EXISTS, CONCURRENT_MODIFICATION, VALIDATION_FAILED
+          description: >-
+            Stable machine-readable code, one of VALIDATION_FAILED, INVALID_REQUEST, INVALID_TIME_RANGE, UNAUTHENTICATED,
+            DEVICE_NOT_PAIRED, ALERT_NOT_FOUND, DETECTION_NOT_FOUND, ALERT_ALREADY_EXISTS, CONCURRENT_MODIFICATION,
+            INTERNAL_ERROR
         requestId:
           type: string
           description: Trace id of the request (also in the response header X-Trace-Id), to find it in the logs
         fields:
           type: array
+          description: Every problem found in the request, not only the first. Present and non-empty when code is VALIDATION_FAILED, absent otherwise.
           items: { $ref: '#/components/schemas/FieldError' }
 
     FieldError:
@@ -440,7 +458,7 @@ components:
         lat: { type: number, format: double }
         lon: { type: number, format: double }
 
-    Detection:
+    DetectionResponse:
       type: object
       description: |
         One ANPR detection. Diagram payload: device id, plate number, detection time, GPS coordinates, S3 key, alert id.
@@ -471,8 +489,7 @@ components:
         imageUrl:
           type: string
           format: uri
-          nullable: true
-          description: Short-lived presigned S3 GET URL of the photo, null when no photo is stored (D4 - the diagram returns the S3 key)
+          description: Short-lived presigned S3 GET URL of the photo; every detection has one (D4 - the diagram returns the S3 key)
         alertId:
           type: string
           format: uuid
@@ -483,6 +500,7 @@ components:
       type: string
       enum: [DETECTED_AT, PLATE]
       default: DETECTED_AT
+      description: Ties are broken by detectionId, so a detection never moves between pages.
 
     PageMeta:
       type: object
@@ -499,7 +517,7 @@ components:
       properties:
         items:
           type: array
-          items: { $ref: '#/components/schemas/Detection' }
+          items: { $ref: '#/components/schemas/DetectionResponse' }
         page: { $ref: '#/components/schemas/PageMeta' }
 
     PlateSuggestion:
@@ -552,10 +570,10 @@ components:
           type: array
           maxItems: 5000
           description: Detections within the radius and time range, ordered by detectedAt ascending. When more than 5000 matched, the 5000 most recent.
-          items: { $ref: '#/components/schemas/Detection' }
+          items: { $ref: '#/components/schemas/DetectionResponse' }
         tracks:
           type: array
-          description: Device route for the whole time range, not clipped to the radius. One element per device (currently one device per account).
+          description: Device routes for the whole time range, not clipped to the radius. One element per device that recorded positions in the account within the time range (more than one after a device was replaced).
           items: { $ref: '#/components/schemas/DeviceTrack' }
         truncated:
           type: boolean
@@ -574,7 +592,9 @@ components:
         lastPosition: { $ref: '#/components/schemas/GeoPoint' }
         track:
           type: array
-          description: Route from the last windowMinutes minutes, ordered by recordedAt ascending
+          description: >-
+            Route from the last windowMinutes minutes, ordered by recordedAt ascending. At most one point per
+            10 seconds (the last fix of each 10 s), so at most 360 points for the longest window.
           items: { $ref: '#/components/schemas/TrackPoint' }
 
     LiveFeedResponse:
@@ -596,7 +616,7 @@ components:
           description: |
             Detections stored after the cursor and at least 2 seconds before the request (on a first call, the 50 most
             recently stored of those), in the order they were stored, at most 50.
-          items: { $ref: '#/components/schemas/Detection' }
+          items: { $ref: '#/components/schemas/DetectionResponse' }
         devices:
           type: array
           description: Current position and recent route of each device (currently one device per account). Empty when no position is known yet.
@@ -647,6 +667,9 @@ components:
       type: string
       enum: [CREATED_AT, LAST_DETECTED_AT]
       default: CREATED_AT
+      description: >-
+        LAST_DETECTED_AT puts plates never detected last in both directions. Ties are broken by alertId, so an alert
+        never moves between pages.
 
     AlertPage:
       type: object

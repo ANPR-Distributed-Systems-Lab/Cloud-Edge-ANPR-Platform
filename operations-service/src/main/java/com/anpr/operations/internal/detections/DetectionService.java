@@ -14,7 +14,6 @@ import com.anpr.operations.shared.geo.Wgs84;
 import com.anpr.operations.shared.security.CurrentAccount;
 import com.anpr.operations.shared.time.TimeRange;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Limit;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -30,7 +29,6 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 /** Detections: stored from the edge events queue, read by Views 1, 2 and 3 and D18 (one detection). */
-@Slf4j
 @Service
 @RequiredArgsConstructor
 public class DetectionService {
@@ -44,9 +42,12 @@ public class DetectionService {
                                double ocrConfidence, double detectorConfidence, String imageKey) {
     }
 
-    /** Stores a batch of one device in one transaction: either all new detections are stored, or none. */
+    /**
+     * Stores a batch of one device in one transaction: either all new detections are stored, or none. Returns how many
+     * were new: detections already stored (a redelivered or resent batch) are skipped.
+     */
     @Transactional
-    public void store(UUID deviceId, List<NewDetection> detections) {
+    public int store(UUID deviceId, List<NewDetection> detections) {
         UUID ownerId = pairingService.requireOwner(deviceId);
         int inserted = 0;
         for (NewDetection d : detections) {
@@ -54,7 +55,7 @@ public class DetectionService {
                     d.detectionId(), ownerId, deviceId, d.plate(), d.detectedAt(), Wgs84.point(d.lat(), d.lon()),
                     d.ocrConfidence(), d.detectorConfidence(), d.imageKey()));
         }
-        log.debug("Stored {} new of {} detections of device {}", inserted, detections.size(), deviceId);
+        return inserted;
     }
 
     /**

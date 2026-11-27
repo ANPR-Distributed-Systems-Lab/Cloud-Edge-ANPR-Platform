@@ -225,6 +225,9 @@ class RadialAnalysisIT {
         mockMvc.perform(radialAnalysis(UUID.randomUUID(), "to", FROM.plusDays(7).plusSeconds(1).toString()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.fields.length()").value(1))
+                .andExpect(jsonPath("$.fields[0].field").value("to"))
+                .andExpect(jsonPath("$.fields[0].code").value("RANGE"))
                 .andExpect(jsonPath("$.requestId").exists())
                 .andExpect(content().string(not(containsString("com.anpr"))));
     }

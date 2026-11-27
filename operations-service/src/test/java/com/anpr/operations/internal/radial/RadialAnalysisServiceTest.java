@@ -8,8 +8,9 @@ import com.anpr.operations.internal.locations.repository.DevicePoint;
 import com.anpr.operations.internal.radial.model.DeviceRoute;
 import com.anpr.operations.internal.radial.model.RadialAnalysis;
 import com.anpr.operations.internal.radial.model.RadialQuery;
-import com.anpr.operations.shared.error.BadRequestException;
 import com.anpr.operations.shared.error.ErrorCodes;
+import com.anpr.operations.shared.error.FieldViolation;
+import com.anpr.operations.shared.error.ValidationException;
 import com.anpr.operations.shared.geo.Wgs84;
 import com.anpr.operations.shared.security.CurrentAccount;
 import com.anpr.operations.shared.time.TimeRange;
@@ -29,6 +30,7 @@ import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -53,8 +55,11 @@ class RadialAnalysisServiceTest {
     @Test
     void aRangeLongerThanSevenDaysIsRejectedBeforeAnyQuery() {
         assertThatThrownBy(() -> service.analyze(query(FROM.plusDays(7).plusSeconds(1))))
-                .isInstanceOfSatisfying(BadRequestException.class,
-                        e -> assertThat(e.getCode()).isEqualTo(ErrorCodes.VALIDATION_FAILED));
+                .isInstanceOfSatisfying(ValidationException.class, e -> {
+                    assertThat(e.getCode()).isEqualTo(ErrorCodes.VALIDATION_FAILED);
+                    assertThat(e.getViolations()).extracting(FieldViolation::field, FieldViolation::code)
+                            .containsExactly(tuple("to", "RANGE"));
+                });
         verifyNoInteractions(detectionService, locationService);
     }
 

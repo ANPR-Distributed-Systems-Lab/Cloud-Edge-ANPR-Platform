@@ -135,7 +135,8 @@ public class AlertService {
     private UUID ownerOfDevice() {
         UUID deviceId = currentAccount.id();
         return pairingService.findOwner(deviceId).orElseThrow(() -> {
-            log.warn("Device {} asked for alerts but has no owner", deviceId);
+            // Expected: a device polls for alerts before it is paired, or after it was unpaired. It gets 403 DEVICE_NOT_PAIRED.
+            log.info("Device {} asked for alerts but has no owner", deviceId);
             return new ForbiddenException(ErrorCodes.DEVICE_NOT_PAIRED, "The device is not paired with an account");
         });
     }

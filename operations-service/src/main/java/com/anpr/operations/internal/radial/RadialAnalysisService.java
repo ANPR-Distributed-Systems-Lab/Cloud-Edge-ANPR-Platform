@@ -7,8 +7,9 @@ import com.anpr.operations.internal.locations.repository.DevicePoint;
 import com.anpr.operations.internal.radial.model.DeviceRoute;
 import com.anpr.operations.internal.radial.model.RadialAnalysis;
 import com.anpr.operations.internal.radial.model.RadialQuery;
-import com.anpr.operations.shared.error.BadRequestException;
-import com.anpr.operations.shared.error.ErrorCodes;
+import com.anpr.operations.shared.error.FieldCodes;
+import com.anpr.operations.shared.error.FieldViolation;
+import com.anpr.operations.shared.error.ValidationException;
 import com.anpr.operations.shared.security.CurrentAccount;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -37,7 +38,8 @@ public class RadialAnalysisService {
 
     public RadialAnalysis analyze(RadialQuery query) {
         if (query.period().isLongerThan(MAX_RANGE)) {
-            throw new BadRequestException(ErrorCodes.VALIDATION_FAILED, "The time range may span at most 7 days");
+            throw ValidationException.of(
+                    new FieldViolation("to", FieldCodes.RANGE.name(), "The time range may span at most 7 days"));
         }
         UUID accountId = currentAccount.id();
 

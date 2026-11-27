@@ -5,6 +5,7 @@ import com.anpr.operations.internal.detections.DetectionService;
 import com.anpr.operations.internal.locations.DeviceLocationService.NewDeviceLocation;
 import com.anpr.operations.internal.locations.DeviceLocationService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import software.amazon.awssdk.services.sqs.model.Message;
 import tools.jackson.databind.json.JsonMapper;
@@ -18,6 +19,7 @@ import static com.anpr.operations.messaging.SqsMessages.requiredAttribute;
  * Turns one message of the edge events queue (a batch of detections or of GPS points of one device) into stored rows.
  * Any exception leaves the message on the queue: it is retried and goes to the DLQ after 5 receives.
  */
+@Slf4j
 @Component
 @RequiredArgsConstructor
 public class EdgeEventHandler {
@@ -46,7 +48,8 @@ public class EdgeEventHandler {
                         d.location().lat(), d.location().lon(),
                         d.ocrConfidence(), d.detectorConfidence(), d.imageKey()))
                 .toList();
-        detectionService.store(deviceId, detections);
+        int stored = detectionService.store(deviceId, detections);
+        logStored(DETECTION, batch.batchId(), deviceId, stored, detections.size());
     }
 
     private void storeLocations(UUID deviceId, String body) {
@@ -54,6 +57,18 @@ public class EdgeEventHandler {
         List<NewDeviceLocation> locations = batch.locations().stream()
                 .map(l -> new NewDeviceLocation(l.locationId(), l.recordedAt(), l.lat(), l.lon()))
                 .toList();
-        deviceLocationService.store(deviceId, locations);
+        int stored = deviceLocationService.store(deviceId, locations);
+        logStored(DEVICE_LOCATION, batch.batchId(), deviceId, stored, locations.size());
+    }
+
+    /** Fewer stored than received means a redelivery or a resend of the batch: duplicates are skipped. */
+    private static void logStored(String eventType, UUID batchId, UUID deviceId, int stored, int received) {
+        log.atInfo()
+                .addKeyValue("eventType", eventType)
+                .addKeyValue("batchId", batchId)
+                .addKeyValue("deviceId", deviceId)
+                .addKeyValue("stored", stored)
+                .addKeyValue("received", received)
+                .log("Stored edge batch");
     }
 }

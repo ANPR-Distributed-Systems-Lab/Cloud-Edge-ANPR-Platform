@@ -52,8 +52,8 @@ class EdgeDataStorageIT {
         UUID device = pairedDevice(UUID.randomUUID());
         List<NewDetection> batch = List.of(detection(UUID.randomUUID()), detection(UUID.randomUUID()));
 
-        detectionService.store(device, batch);
-        detectionService.store(device, batch);
+        assertThat(detectionService.store(device, batch)).isEqualTo(2);
+        assertThat(detectionService.store(device, batch)).isZero();
 
         assertThat(countOf("detections", device)).isEqualTo(2);
     }
@@ -84,8 +84,8 @@ class EdgeDataStorageIT {
                 new NewDeviceLocation(UUID.randomUUID(), AT, 52.229676, 21.012229),
                 new NewDeviceLocation(UUID.randomUUID(), AT.plusSeconds(1), 52.229681, 21.012431));
 
-        deviceLocationService.store(device, batch);
-        deviceLocationService.store(device, batch);
+        assertThat(deviceLocationService.store(device, batch)).isEqualTo(2);
+        assertThat(deviceLocationService.store(device, batch)).isZero();
 
         assertThat(countOf("device_locations", device)).isEqualTo(2);
     }
